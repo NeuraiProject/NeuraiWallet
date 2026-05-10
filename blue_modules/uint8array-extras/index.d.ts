@@ -1,4 +1,15 @@
-export type TypedArray = Int8Array | Uint8Array | Uint8ClampedArray | Int16Array | Uint16Array | Int32Array | Uint32Array | Float32Array | Float64Array | BigInt64Array | BigUint64Array;
+export type TypedArray =
+  | Int8Array
+  | Uint8Array
+  | Uint8ClampedArray
+  | Int16Array
+  | Uint16Array
+  | Int32Array
+  | Uint32Array
+  | Float32Array
+  | Float64Array
+  | BigInt64Array
+  | BigUint64Array;
 
 /**
 Check if the given value is an instance of `Uint8Array`.
@@ -263,7 +274,7 @@ console.log(getUintBE(new DataView(byteArray.buffer)));
 //=> 20015998341291
 ```
 */
-export function getUintBE(view: DataView): number; // eslint-disable-line @typescript-eslint/naming-convention
+export function getUintBE(view: DataView): number;
 
 /**
 Find the index of the first occurrence of the given sequence of bytes (`value`) within the given `Uint8Array` (`array`).

@@ -1,9 +1,7 @@
-import { AztecoVoucher } from '../class/azteco';
-import { LightningTransaction, Transaction, TWallet } from '../class/wallets/types';
-import { BitcoinUnit, Chain } from '../models/bitcoinUnits';
+import { Transaction, TWallet } from '../class/wallets/types';
+import { XnaUnit, Chain } from '../models/xnaUnits';
 import { PromptPasswordConfirmationParams } from '../screen/PromptPasswordConfirmationSheet.types';
 import { ElectrumServerItem } from '../screen/settings/ElectrumSettings';
-import { SendDetailsParams, TNavigationWrapper } from './SendDetailsStackParamList';
 
 export type ScanQRCodeParamList = {
   cameraStatusGranted?: boolean;
@@ -19,17 +17,12 @@ export type ScanQRCodeParamList = {
   animatedQRCodeData?: Record<string, any>;
 };
 
-type VaultKeyData = {
-  keyIndex: number;
-  seed: string;
-  passphrase?: string;
-  xpub: string;
-  fp: string;
-  path: string;
-  cosignerXpubURv2: string;
-  exportFilename: string;
-  exportString?: string;
-};
+/**
+ * Wallet selection callback used by `SelectWallet`. Mirrors the legacy
+ * navigation wrapper but lives here since `SendDetailsStackParamList` was
+ * removed alongside the Bitcoin Send flow.
+ */
+export type TNavigationWrapper = { navigation: { pop: () => void; navigate: (...args: unknown[]) => void } };
 
 export type DetailViewStackParamList = {
   DrawerRoot: undefined;
@@ -39,104 +32,41 @@ export type DetailViewStackParamList = {
   WalletDetails: { walletID: string };
   TransactionDetails: { tx: Transaction; hash: string; walletID: string };
   TransactionStatus: { hash: string; walletID?: string };
-  CPFP: {
-    wallet: TWallet | null;
-    txid: string;
-  };
-  RBFBumpFee: { txid: string; wallet: TWallet | null };
-  RBFCancel: { txid: string; wallet: TWallet | null };
   SelectWallet: {
     chainType?: Chain;
     onWalletSelect?: (wallet: TWallet, navigationWrapper: TNavigationWrapper) => void;
     availableWallets?: TWallet[];
     noWalletExplanationText?: string;
     onChainRequireSend?: boolean;
-    selectedWalletID?: string; // Add this parameter to scroll to a specific wallet
+    /** Scrolls the picker to the wallet with this ID. */
+    selectedWalletID?: string;
   };
-  LNDViewInvoice: { invoice: LightningTransaction; walletID: string };
-  LNDViewAdditionalInvoiceInformation: { invoiceId: string };
-  LNDViewAdditionalInvoicePreImage: { invoiceId: string };
-  Broadcast: object;
   IsItMyAddress: object;
-  GenerateWord: undefined;
-  LnurlPay: undefined;
-  LnurlPaySuccess: {
-    paymentHash: string;
-    justPaid: boolean;
-    fromWalletID: string;
-  };
-  LnurlAuth: undefined;
-  Success: undefined;
   WalletAddresses: { walletID: string };
   AddWalletRoot: undefined;
-  SendDetailsRoot: SendDetailsParams;
-  LNDCreateInvoiceRoot: undefined;
-  ScanLNDInvoiceRoot: {
-    screen: string;
-    params: {
-      paymentHash: string;
-      fromWalletID: string;
-      justPaid: boolean;
-    };
+  SendNeurai: {
+    walletID: string;
+    address?: string;
+    amount?: number;
   };
-  AztecoRedeemRoot: {
-    screen: string;
-    params: {
-      aztecoVoucher: AztecoVoucher;
-    };
-  };
-  AztecoRedeem: { aztecoVoucher: AztecoVoucher };
+  ImportNeurai: undefined;
   WalletExport: undefined;
-  ExportMultisigCoordinationSetupRoot: undefined;
   Settings: undefined;
   Currency: undefined;
   GeneralSettings: undefined;
   Licensing: undefined;
   NetworkSettings: undefined;
   About: undefined;
-  // DefaultView: undefined; // Commented out - not accessible from UI
   ElectrumSettings: { server?: ElectrumServerItem; onBarScanned?: string };
   SettingsBlockExplorer: undefined;
   PlausibleDeniability: undefined;
   EncryptStorage: undefined;
   Language: undefined;
-  LightningSettings: {
-    url?: string;
-    onBarScanned?: string;
-  };
   NotificationSettings: undefined;
   SelfTest: undefined;
   ReleaseNotes: undefined;
   SettingsTools: undefined;
-  ViewEditMultisigCosigners: {
-    walletID: string;
-    cosigners: string[];
-    sheetAction?: string;
-    sheetImportText?: string;
-    sheetAskPassphrase?: boolean;
-    sheetCurrentlyEditingCosignerNum?: number;
-  };
-  ViewEditMultisigCosignerViewSheet: { walletID: string; vaultKeyData: VaultKeyData };
-  ViewEditMultisigProvideMnemonicsSheet: {
-    walletID: string;
-    currentlyEditingCosignerNum: number;
-    importText: string;
-    askPassphrase: boolean;
-  };
-  ViewEditMultisigShareCosignerSheet: {
-    walletID: string;
-    cosignerXpub: string;
-    cosignerXpubURv2: string;
-    exportFilename: string;
-  };
   WalletXpub: { walletID: string; xpub: string };
-  SignVerifyRoot: {
-    screen: 'SignVerify';
-    params: {
-      walletID: string;
-      address: string;
-    };
-  };
   ReceiveDetails: {
     walletID?: string;
     address: string;
@@ -145,14 +75,10 @@ export type DetailViewStackParamList = {
     address: string;
     currentLabel?: string;
     currentAmount?: string;
-    currentUnit?: BitcoinUnit;
-    preferredUnit?: BitcoinUnit;
+    currentUnit?: XnaUnit;
+    preferredUnit?: XnaUnit;
   };
   ScanQRCode: ScanQRCodeParamList;
-  PaymentCodeList: {
-    paymentCode: string;
-    walletID: string;
-  };
   PromptPasswordConfirmationSheet: PromptPasswordConfirmationParams | undefined;
   ManageWallets: undefined;
 };

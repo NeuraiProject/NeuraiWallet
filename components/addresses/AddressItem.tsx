@@ -6,7 +6,7 @@ import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/h
 import confirm from '../../helpers/confirm';
 import { unlockWithBiometrics, useBiometrics } from '../../hooks/useBiometrics';
 import loc, { formatBalance } from '../../loc';
-import { BitcoinUnit } from '../../models/bitcoinUnits';
+import { XnaUnit } from '../../models/xnaUnits';
 import presentAlert from '../Alert';
 import { useTheme } from '../themes';
 import { AddressTypeBadge } from './AddressTypeBadge';
@@ -21,7 +21,7 @@ import { useSharedValue, withSpring, withTiming } from 'react-native-reanimated'
 
 interface AddressItemProps {
   item: any;
-  balanceUnit: BitcoinUnit;
+  balanceUnit: XnaUnit;
   walletID: string;
   allowSignVerifyMessage: boolean;
   onPress?: () => void; // example: ManageWallets uses this
@@ -80,24 +80,10 @@ const AddressItem = ({
     }
   }, [navigate, walletID, item.address, onPress]);
 
-  const navigateToSignVerify = useCallback(() => {
-    navigate('SignVerifyRoot', {
-      screen: 'SignVerify',
-      params: {
-        walletID,
-        address: item.address,
-      },
-    });
-  }, [navigate, walletID, item.address]);
-
   const menuActions = useMemo(
     () => [
       CommonToolTipActions.CopyTXID,
       CommonToolTipActions.Share,
-      {
-        ...CommonToolTipActions.SignVerify,
-        hidden: !allowSignVerifyMessage,
-      },
       {
         ...CommonToolTipActions.ExportPrivateKey,
         hidden: !allowSignVerifyMessage,
@@ -153,8 +139,6 @@ const AddressItem = ({
         handleCopyPress();
       } else if (id === CommonToolTipActions.Share.id) {
         handleSharePress();
-      } else if (id === CommonToolTipActions.SignVerify.id) {
-        navigateToSignVerify();
       } else if (id === CommonToolTipActions.ExportPrivateKey.id) {
         if (await confirm(loc.addresses.sensitive_private_key)) {
           if (await isBiometricUseCapableAndEnabled()) {
@@ -166,7 +150,7 @@ const AddressItem = ({
         }
       }
     },
-    [handleCopyPress, handleSharePress, navigateToSignVerify, handleCopyPrivkeyPress, isBiometricUseCapableAndEnabled],
+    [handleCopyPress, handleSharePress, handleCopyPrivkeyPress, isBiometricUseCapableAndEnabled],
   );
 
   // Render address with highlighting if a search query is provided

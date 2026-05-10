@@ -73,8 +73,8 @@ const TransactionDetails = () => {
   const [tx, setTX] = useState<Transaction>();
   const [memo, setMemo] = useState<string>('');
   const [counterpartyLabel, setCounterpartyLabel] = useState<string>('');
-  const [paymentCode, setPaymentCode] = useState<string>('');
-  const [isCounterpartyLabelVisible, setIsCounterpartyLabelVisible] = useState<boolean>(false);
+  const [paymentCode] = useState<string>('');
+  const [isCounterpartyLabelVisible] = useState<boolean>(false);
   const { colors } = useTheme();
   const stylesHooks = StyleSheet.create({
     memoTextInput: {
@@ -129,14 +129,8 @@ const TransactionDetails = () => {
         const wallet = wallets.find(w => w.getID() === walletID);
         assert(wallet, 'Internal error: could not find wallet');
 
-        if (wallet.allowBIP47() && wallet.isBIP47Enabled() && 'getBip47CounterpartyByTxid' in wallet) {
-          const foundPaymentCode = wallet.getBip47CounterpartyByTxid(hash);
-          if (foundPaymentCode) {
-            setCounterpartyLabel(counterpartyMetadata ? (counterpartyMetadata[foundPaymentCode]?.label ?? '') : '');
-            setIsCounterpartyLabelVisible(true);
-            setPaymentCode(foundPaymentCode);
-          }
-        }
+        // BIP47 was Bitcoin-only. Neurai wallets do not expose payment-code
+        // counterparties, so skip the counterparty resolution block.
 
         if (cancelled) return;
         setMemo(txMetadata[foundTx.hash]?.memo ?? '');

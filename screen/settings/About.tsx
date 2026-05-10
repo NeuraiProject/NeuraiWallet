@@ -6,7 +6,7 @@ import Icon from '@react-native-vector-icons/fontawesome6';
 
 import A from '../../blue_modules/analytics';
 import { BlueTextCentered } from '../../BlueComponents';
-import { HDSegwitBech32Wallet } from '../../class/wallets/hd-segwit-bech32-wallet';
+import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import presentAlert from '../../components/Alert';
 import { BlueSpacing20 } from '../../components/BlueSpacing';
 import Button from '../../components/Button';
@@ -57,20 +57,18 @@ const About: React.FC = () => {
   }, []);
 
   const handleOnTelegramPress = useCallback(() => {
-    Linking.openURL('https://t.me/bluewallethat');
+    Linking.openURL('https://t.me/neurai');
   }, []);
 
   const handleOnGithubPress = useCallback(() => {
-    Linking.openURL('https://github.com/BlueWallet/BlueWallet');
+    Linking.openURL('https://github.com/neuraiproject/NeuraiWallet');
   }, []);
 
   const handleOnRatePress = useCallback(async () => {
     try {
-      if (Platform.OS === 'ios') {
-        await Linking.openURL('https://itunes.apple.com/app/bluewallet-bitcoin-wallet/id1376878040');
-      } else {
-        await Linking.openURL('https://play.google.com/store/apps/details?id=io.bluewallet.bluewallet');
-      }
+      // App-store URLs intentionally point to Neurai's eventual listings; the
+      // BlueWallet store IDs from the upstream are gone.
+      await Linking.openURL('https://neurai.org');
     } catch (error: any) {
       console.error('Rate app failed:', error.message);
     }
@@ -78,18 +76,15 @@ const About: React.FC = () => {
 
   const handlePerformanceTest = useCallback(async () => {
     const secret = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-    const w = new HDSegwitBech32Wallet();
-    w.setSecret(secret);
-
+    const w = NeuraiHDWallet.forNetwork('testnet', secret);
+    // Force engine init + first derivation, then time additional receive lookups
+    await w.getReceiveAddressAsync();
     const start = Date.now();
-    let num;
-    for (num = 0; num < 10000; num++) {
-      w._getExternalAddressByIndex(num);
-      if (Date.now() - start > 10 * 1000) {
-        break;
-      }
+    let num = 0;
+    while (Date.now() - start < 10 * 1000) {
+      await w.getReceiveAddressAsync();
+      num++;
     }
-
     Alert.alert(loc.formatString(loc.settings.performance_score, { num }));
   }, []);
 
@@ -120,7 +115,7 @@ const About: React.FC = () => {
       },
       {
         id: 'x',
-        title: '@bluewalletio',
+        title: '@neuraiproject',
         leftIcon: <Text style={[styles.xIcon, { color: colors.foregroundColor }]}>𝕏</Text>,
         onPress: handleOnXPress,
         section: 2,
@@ -148,8 +143,9 @@ const About: React.FC = () => {
               <BlueTextCentered>{loc.settings.about_awesome} 👍</BlueTextCentered>
               <BlueSpacing20 />
               <BlueTextCentered>React Native</BlueTextCentered>
-              <BlueTextCentered>bitcoinjs-lib</BlueTextCentered>
-              <BlueTextCentered>Electrum server</BlueTextCentered>
+              <BlueTextCentered>@neuraiproject/neurai-jswallet</BlueTextCentered>
+              <BlueTextCentered>@neuraiproject/neurai-key</BlueTextCentered>
+              <BlueTextCentered>@neuraiproject/neurai-rpc</BlueTextCentered>
             </SettingsCard>
           </SettingsSection>
         ),

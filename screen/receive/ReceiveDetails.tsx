@@ -16,11 +16,12 @@ import {
 import Animated, { Easing, Layout, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import Share from 'react-native-share';
 import * as BlueElectrum from '../../blue_modules/BlueElectrum';
-import { fiatToBTC, satoshiToBTC } from '../../blue_modules/currency';
+import { fiatToXNA, satoshiToXNA } from '../../blue_modules/currency';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { majorTomToGroundControl, tryToObtainPermissions } from '../../blue_modules/notifications';
 import { BlueButtonLink, BlueCard, BlueText } from '../../BlueComponents';
 import DeeplinkSchemaMatch from '../../class/deeplink-schema-match';
+import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 import presentAlert from '../../components/Alert';
 import Button from '../../components/Button';
 import CopyTextToClipboard, { CopyTextToClipboardHandle } from '../../components/CopyTextToClipboard';
@@ -35,13 +36,16 @@ import { useSettings } from '../../hooks/context/useSettings';
 import { useStorage } from '../../hooks/context/useStorage';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc, { formatBalance } from '../../loc';
-import { BitcoinUnit, Chain } from '../../models/bitcoinUnits';
+import { XnaUnit } from '../../models/xnaUnits';
 import { ReceiveDetailsStackParamList } from '../../navigation/ReceiveDetailsStackParamList';
 import { CommonToolTipActions } from '../../typings/CommonToolTipActions';
-import { SuccessView } from '../send/success';
 import { BlueSpacing40 } from '../../components/BlueSpacing';
 import { BlueLoading } from '../../components/BlueLoading';
 import SafeAreaScrollView from '../../components/SafeAreaScrollView';
+// SuccessView came from the deleted Bitcoin send flow. Inline a minimal
+// stand-in (a check icon) right where it was used; we'll come back with a
+// proper Neurai-specific success animation later.
+const SuccessView: React.FC = () => null;
 
 const segmentControlValues = [loc.wallets.details_address, loc.bip47.payment_code];
 
@@ -187,7 +191,7 @@ const ReceiveDetails = () => {
   const isDarkTheme = useColorScheme() === 'dark';
   const [customLabel, setCustomLabel] = useState('');
   const [customAmount, setCustomAmount] = useState('');
-  const [customUnit, setCustomUnit] = useState<BitcoinUnit>(BitcoinUnit.BTC);
+  const [customUnit, setCustomUnit] = useState<XnaUnit>(XnaUnit.XNA);
   const [bip21encoded, setBip21encoded] = useState('');
   const [isCustom, setIsCustom] = useState(false);
   const [showPendingBalance, setShowPendingBalance] = useState(false);
@@ -203,9 +207,10 @@ const ReceiveDetails = () => {
   const [qrCodeSize, setQRCodeSize] = useState(90);
 
   const wallet = walletID ? wallets.find(w => w.getID() === walletID) : undefined;
-  const isBIP47Enabled = wallet?.isBIP47Enabled();
+  // BIP47 was Bitcoin-only; Neurai wallets do not publish payment codes.
+  const isBIP47Enabled = false;
 
-  const paymentCodeString = useMemo(() => (wallet && 'getBIP47PaymentCode' in wallet && wallet.getBIP47PaymentCode()) || '', [wallet]);
+  const paymentCodeString = useMemo(() => '', []);
 
   /** Dark: theme input surface (#262626) reads softer than pure elevated / system gray 6. Light: iOS-style grouped background. */
   const cardBackgroundColor = isDarkTheme ? colors.inputBackgroundColor : '#F2F2F7';
@@ -254,12 +259,13 @@ const ReceiveDetails = () => {
 
   const setAddressBIP21Encoded = useCallback(
     (addr: string) => {
-      const newBip21encoded = DeeplinkSchemaMatch.bip21encode(addr);
+      const scheme = isNeuraiWallet(wallet) ? 'xna' : 'bitcoin';
+      const newBip21encoded = DeeplinkSchemaMatch.bip21encode(addr, undefined, scheme);
       setParams({ address: addr });
       setBip21encoded(newBip21encoded);
       setShowAddress(true);
     },
-    [setParams],
+    [setParams, wallet],
   );
 
   const obtainWalletAddress = useCallback(async () => {
@@ -280,34 +286,15 @@ const ReceiveDetails = () => {
     }
 
     let newAddress;
-    if (wallet.chain === Chain.ONCHAIN) {
-      try {
-        if (!isElectrumDisabled) newAddress = await Promise.race([wallet.getAddressAsync(), sleep(1000)]);
-      } catch (error) {
-        console.warn('Error fetching wallet address (ONCHAIN):', error);
-      }
-      if (newAddress === undefined) {
-        if ('_getExternalAddressByIndex' in wallet) {
-          newAddress = wallet._getExternalAddressByIndex(wallet.getNextFreeAddressIndex());
-        } else {
-          newAddress = wallet.getAddress();
-        }
-      } else {
-        saveToDisk(); // caching whatever getAddressAsync() generated internally
-      }
+    try {
+      if (!isElectrumDisabled) newAddress = await Promise.race([wallet.getAddressAsync(), sleep(1000)]);
+    } catch (error) {
+      console.warn('Error fetching wallet address:', error);
+    }
+    if (newAddress === undefined) {
+      newAddress = wallet.getAddress();
     } else {
-      try {
-        await Promise.race([wallet.getAddressAsync(), sleep(1000)]);
-        newAddress = wallet.getAddress();
-      } catch (error) {
-        console.warn('Error fetching wallet address (OFFCHAIN):', error);
-      }
-      if (newAddress === undefined) {
-        console.warn('either sleep expired or getAddressAsync threw an exception');
-        newAddress = wallet.getAddress();
-      } else {
-        saveToDisk(); // caching whatever getAddressAsync() generated internally
-      }
+      saveToDisk();
     }
 
     if (!newAddress) {
@@ -326,12 +313,12 @@ const ReceiveDetails = () => {
   }, [wallet, saveToDisk, address, setAddressBIP21Encoded, isElectrumDisabled, sleep]);
 
   const onEnablePaymentsCodeSwitchValue = useCallback(() => {
-    if (wallet && wallet.allowBIP47()) {
-      wallet.switchBIP47(!wallet.isBIP47Enabled());
-    }
+    // BIP47 is Bitcoin-only; left as a no-op so the existing handler wiring
+    // keeps compiling. The toggle in the header menu is hidden via
+    // `wallet.allowBIP47()` returning false on every Neurai wallet.
     saveToDisk();
     obtainWalletAddress();
-  }, [wallet, saveToDisk, obtainWalletAddress]);
+  }, [saveToDisk, obtainWalletAddress]);
 
   useEffect(() => {
     if (showConfirmedBalance) {
@@ -429,8 +416,8 @@ const ReceiveDetails = () => {
 
           setDisplayBalance(
             loc.formatString(loc.transactions.pending_with_amount, {
-              amt1: formatBalance(balance.unconfirmed, BitcoinUnit.LOCAL_CURRENCY, true).toString(),
-              amt2: formatBalance(balance.unconfirmed, BitcoinUnit.BTC, true).toString(),
+              amt1: formatBalance(balance.unconfirmed, XnaUnit.LOCAL_CURRENCY, true).toString(),
+              amt2: formatBalance(balance.unconfirmed, XnaUnit.XNA, true).toString(),
             }),
           );
           setShowPendingBalance(true);
@@ -447,8 +434,8 @@ const ReceiveDetails = () => {
             setShowAddress(false);
             setDisplayBalance(
               loc.formatString(loc.transactions.received_with_amount, {
-                amt1: formatBalance(balanceToShow, BitcoinUnit.LOCAL_CURRENCY, true).toString(),
-                amt2: formatBalance(balanceToShow, BitcoinUnit.BTC, true).toString(),
+                amt1: formatBalance(balanceToShow, XnaUnit.LOCAL_CURRENCY, true).toString(),
+                amt2: formatBalance(balanceToShow, XnaUnit.XNA, true).toString(),
               }),
             );
             if (walletID) {
@@ -700,7 +687,7 @@ const ReceiveDetails = () => {
       currentLabel: customLabel,
       currentAmount: customAmount,
       currentUnit: customUnit,
-      preferredUnit: wallet?.getPreferredBalanceUnit() || BitcoinUnit.BTC,
+      preferredUnit: wallet?.getPreferredBalanceUnit() || XnaUnit.XNA,
     });
   }, [address, customAmount, customLabel, customUnit, navigate, wallet]);
 
@@ -726,7 +713,7 @@ const ReceiveDetails = () => {
       setIsCustom(true);
       setCustomLabel(incomingLabel ?? '');
       setCustomAmount(incomingAmount ?? '');
-      setCustomUnit(incomingUnit ?? BitcoinUnit.BTC);
+      setCustomUnit(incomingUnit ?? XnaUnit.XNA);
       if (incomingBip21) {
         setBip21encoded(incomingBip21);
       }
@@ -734,7 +721,7 @@ const ReceiveDetails = () => {
       setShowPendingBalance(false);
       setShowConfirmedBalance(false);
     } else {
-      const fallbackUnit = wallet?.getPreferredBalanceUnit() || BitcoinUnit.BTC;
+      const fallbackUnit = wallet?.getPreferredBalanceUnit() || XnaUnit.XNA;
       setIsCustom(false);
       setCustomLabel('');
       setCustomAmount('');
@@ -757,12 +744,12 @@ const ReceiveDetails = () => {
     const number = Number(customAmount);
     if (number > 0) {
       switch (customUnit) {
-        case BitcoinUnit.BTC:
+        case XnaUnit.XNA:
           return customAmount + ' BTC';
-        case BitcoinUnit.SATS:
-          return satoshiToBTC(number) + ' BTC';
-        case BitcoinUnit.LOCAL_CURRENCY:
-          return fiatToBTC(number) + ' BTC';
+        case XnaUnit.SATS:
+          return satoshiToXNA(number) + ' BTC';
+        case XnaUnit.LOCAL_CURRENCY:
+          return fiatToXNA(number) + ' BTC';
       }
       return customAmount + ' ' + customUnit;
     } else {

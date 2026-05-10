@@ -4,11 +4,6 @@ import DefaultPreference from 'react-native-default-preference';
 import RNFS from 'react-native-fs';
 import Realm from 'realm';
 import { sha256 as _sha256 } from '@noble/hashes/sha256';
-
-import type { LegacyWallet as LegacyWalletT } from '../class/wallets/legacy-wallet';
-import type { SegwitBech32Wallet as SegwitBech32WalletT } from '../class/wallets/segwit-bech32-wallet';
-import type { SegwitP2SHWallet as SegwitP2SHWalletT } from '../class/wallets/segwit-p2sh-wallet';
-import type { TaprootWallet as TaprootWalletT } from '../class/wallets/taproot-wallet';
 import presentAlert from '../components/Alert';
 import loc from '../loc';
 import { GROUP_IO_BLUEWALLET } from './currency';
@@ -16,6 +11,10 @@ import { ElectrumServerItem } from '../screen/settings/ElectrumSettings';
 import { triggerWarningHapticFeedback } from './hapticFeedback';
 import { AlertButton } from 'react-native';
 import { uint8ArrayToHex, stringToUint8Array, hexToUint8Array } from './uint8array-extras/index';
+
+// Bitcoin wallet types are gone. Most of `BlueElectrum` is unused in the
+// Neurai wallet (we go through `RpcBackend`), but the module is still
+// imported by ElectrumSettings and a few hooks while we phase it out.
 
 const ElectrumClient = require('electrum-client');
 const net = require('net');
@@ -617,49 +616,20 @@ export function txhexToElectrumTransaction(txhex: string): ElectrumTransactionWi
   let n = 0;
   for (const out of tx.outs) {
     const value = new BigNumber(out.value).dividedBy(100000000).toNumber();
-    let address: false | string = false;
-    let type: false | string = false;
-
-    // Lazy require to avoid the module-scope cycle described above. These
-    // modules are fully loaded by the time this function is actually invoked.
-    const { SegwitBech32Wallet } = require('../class/wallets/segwit-bech32-wallet') as {
-      SegwitBech32Wallet: typeof SegwitBech32WalletT;
-    };
-    const { SegwitP2SHWallet } = require('../class/wallets/segwit-p2sh-wallet') as {
-      SegwitP2SHWallet: typeof SegwitP2SHWalletT;
-    };
-    const { LegacyWallet } = require('../class/wallets/legacy-wallet') as {
-      LegacyWallet: typeof LegacyWalletT;
-    };
-    const { TaprootWallet } = require('../class/wallets/taproot-wallet') as {
-      TaprootWallet: typeof TaprootWalletT;
-    };
-
-    if (SegwitBech32Wallet.scriptPubKeyToAddress(uint8ArrayToHex(out.script))) {
-      address = SegwitBech32Wallet.scriptPubKeyToAddress(uint8ArrayToHex(out.script));
-      type = 'witness_v0_keyhash';
-    } else if (SegwitP2SHWallet.scriptPubKeyToAddress(uint8ArrayToHex(out.script))) {
-      address = SegwitP2SHWallet.scriptPubKeyToAddress(uint8ArrayToHex(out.script));
-      type = '???'; // TODO
-    } else if (LegacyWallet.scriptPubKeyToAddress(uint8ArrayToHex(out.script))) {
-      address = LegacyWallet.scriptPubKeyToAddress(uint8ArrayToHex(out.script));
-      type = '???'; // TODO
-    } else {
-      address = TaprootWallet.scriptPubKeyToAddress(uint8ArrayToHex(out.script));
-      type = 'witness_v1_taproot';
-    }
-
-    if (!address) {
-      throw new Error('Internal error: unable to decode address from output script');
-    }
-
+    // Bitcoin-style script→address decoding lived here originally. Neurai
+    // routes its address resolution through `@neuraiproject/neurai-jswallet`
+    // and does not need the Bitcoin script decoders, so this whole helper is
+    // a stub. `BlueElectrum` is only kept while a few stale settings screens
+    // still import it; once those are migrated we can delete the file.
+    const address = '';
+    const type = 'unknown';
     ret.vout.push({
       value,
       n,
       scriptPubKey: {
         asm: '',
         hex: uint8ArrayToHex(out.script),
-        reqSigs: 1, // todo
+        reqSigs: 1,
         type,
         addresses: [address],
       },

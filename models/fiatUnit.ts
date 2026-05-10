@@ -40,7 +40,7 @@ interface CoinDeskResponse {
 }
 
 interface CoinGeckoResponse {
-  bitcoin: {
+  neurai: {
     [ticker: string]: number;
   };
 }
@@ -109,9 +109,9 @@ const RateExtractors = {
   CoinGecko: async (ticker: string): Promise<number> => {
     try {
       const json = (await fetchRate(
-        `https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${ticker.toLowerCase()}`,
+        `https://api.coingecko.com/api/v3/simple/price?ids=neurai&vs_currencies=${ticker.toLowerCase()}`,
       )) as CoinGeckoResponse;
-      const rate = Number(json?.bitcoin?.[ticker.toLowerCase()]);
+      const rate = Number(json?.neurai?.[ticker.toLowerCase()]);
       if (!(rate >= 0)) throw new Error('Invalid data received');
       return rate;
     } catch (error: any) {
@@ -234,6 +234,24 @@ export type FiatUnitType = {
   source: keyof typeof FiatUnitSource;
 };
 
+/**
+ * Returns the Neurai (XNA) → fiat exchange rate.
+ *
+ * The original BlueWallet routed each fiat ticker through its preferred Bitcoin
+ * data source (Coinbase BTC-USD, Bitstamp btcusd, Kraken XXBT..., Yadio,
+ * Exir IRT, coinpaprika btc-bitcoin, etc). Neurai has no equivalents on those
+ * venues, so we force every lookup through CoinGecko, which exposes XNA via
+ * `ids=neurai`. The `source` field on each `FiatUnit` entry is preserved for
+ * future use but currently ignored at runtime.
+ *
+ * BNR is a special case (RON via the Romanian National Bank): it derives RON
+ * from a USD intermediate. CoinGecko provides USD directly, so the BNR
+ * extractor still works but its variable naming refers to BTC for historical
+ * reasons.
+ */
 export async function getFiatRate(ticker: string): Promise<number> {
-  return await RateExtractors[FiatUnit[ticker].source](ticker);
+  if ((FiatUnit[ticker]?.source as string) === 'BNR') {
+    return RateExtractors.BNR();
+  }
+  return RateExtractors.CoinGecko(ticker);
 }

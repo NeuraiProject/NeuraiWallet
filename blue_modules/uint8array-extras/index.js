@@ -126,7 +126,7 @@ export function compareUint8Arrays(a, b) {
 //   cachedDecoders[encoding] ??= new globalThis.TextDecoder(encoding);
 //   return cachedDecoders[encoding].decode(array);
 // }
-  
+
 function assertString(value) {
   if (typeof value !== 'string') {
     throw new TypeError(`Expected \`string\`, got \`${typeof value}\``);

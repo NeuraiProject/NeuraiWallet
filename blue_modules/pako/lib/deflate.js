@@ -1,27 +1,29 @@
 'use strict';
 
-
 const zlib_deflate = require('./zlib/deflate');
-const utils        = require('./utils/common');
-const strings      = require('./utils/strings');
-const msg          = require('./zlib/messages');
-const ZStream      = require('./zlib/zstream');
+const utils = require('./utils/common');
+const strings = require('./utils/strings');
+const msg = require('./zlib/messages');
+const ZStream = require('./zlib/zstream');
 
 const toString = Object.prototype.toString;
 
-/* Public constants ==========================================================*/
-/* ===========================================================================*/
+/* Public constants ========================================================== */
+/* =========================================================================== */
 
 const {
-  Z_NO_FLUSH, Z_SYNC_FLUSH, Z_FULL_FLUSH, Z_FINISH,
-  Z_OK, Z_STREAM_END,
+  Z_NO_FLUSH,
+  Z_SYNC_FLUSH,
+  Z_FULL_FLUSH,
+  Z_FINISH,
+  Z_OK,
+  Z_STREAM_END,
   Z_DEFAULT_COMPRESSION,
   Z_DEFAULT_STRATEGY,
-  Z_DEFLATED
+  Z_DEFLATED,
 } = require('./zlib/constants');
 
-/* ===========================================================================*/
-
+/* =========================================================================== */
 
 /**
  * class Deflate
@@ -59,7 +61,6 @@ const {
  *
  * Error message, if [[Deflate.err]] != 0
  **/
-
 
 /**
  * new Deflate(options)
@@ -109,41 +110,35 @@ const {
  * ```
  **/
 function Deflate(options) {
-  this.options = utils.assign({
-    level: Z_DEFAULT_COMPRESSION,
-    method: Z_DEFLATED,
-    chunkSize: 16384,
-    windowBits: 15,
-    memLevel: 8,
-    strategy: Z_DEFAULT_STRATEGY
-  }, options || {});
+  this.options = utils.assign(
+    {
+      level: Z_DEFAULT_COMPRESSION,
+      method: Z_DEFLATED,
+      chunkSize: 16384,
+      windowBits: 15,
+      memLevel: 8,
+      strategy: Z_DEFAULT_STRATEGY,
+    },
+    options || {},
+  );
 
-  let opt = this.options;
+  const opt = this.options;
 
-  if (opt.raw && (opt.windowBits > 0)) {
+  if (opt.raw && opt.windowBits > 0) {
     opt.windowBits = -opt.windowBits;
-  }
-
-  else if (opt.gzip && (opt.windowBits > 0) && (opt.windowBits < 16)) {
+  } else if (opt.gzip && opt.windowBits > 0 && opt.windowBits < 16) {
     opt.windowBits += 16;
   }
 
-  this.err    = 0;      // error code, if happens (0 = Z_OK)
-  this.msg    = '';     // error message
-  this.ended  = false;  // used to avoid multiple onEnd() calls
-  this.chunks = [];     // chunks of compressed data
+  this.err = 0; // error code, if happens (0 = Z_OK)
+  this.msg = ''; // error message
+  this.ended = false; // used to avoid multiple onEnd() calls
+  this.chunks = []; // chunks of compressed data
 
   this.strm = new ZStream();
   this.strm.avail_out = 0;
 
-  let status = zlib_deflate.deflateInit2(
-    this.strm,
-    opt.level,
-    opt.method,
-    opt.windowBits,
-    opt.memLevel,
-    opt.strategy
-  );
+  let status = zlib_deflate.deflateInit2(this.strm, opt.level, opt.method, opt.windowBits, opt.memLevel, opt.strategy);
 
   if (status !== Z_OK) {
     throw new Error(msg[status]);
@@ -202,7 +197,9 @@ Deflate.prototype.push = function (data, flush_mode) {
   const chunkSize = this.options.chunkSize;
   let status, _flush_mode;
 
-  if (this.ended) { return false; }
+  if (this.ended) {
+    return false;
+  }
 
   if (flush_mode === ~~flush_mode) _flush_mode = flush_mode;
   else _flush_mode = flush_mode === true ? Z_FINISH : Z_NO_FLUSH;
@@ -266,7 +263,6 @@ Deflate.prototype.push = function (data, flush_mode) {
   return true;
 };
 
-
 /**
  * Deflate#onData(chunk) -> Void
  * - chunk (Uint8Array): output data.
@@ -277,7 +273,6 @@ Deflate.prototype.push = function (data, flush_mode) {
 Deflate.prototype.onData = function (chunk) {
   this.chunks.push(chunk);
 };
-
 
 /**
  * Deflate#onEnd(status) -> Void
@@ -297,7 +292,6 @@ Deflate.prototype.onEnd = function (status) {
   this.err = status;
   this.msg = this.strm.msg;
 };
-
 
 /**
  * deflate(data[, options]) -> Uint8Array
@@ -337,11 +331,12 @@ function deflate(input, options) {
   deflator.push(input, true);
 
   // That will never happens, if you don't cheat with options :)
-  if (deflator.err) { throw deflator.msg || msg[deflator.err]; }
+  if (deflator.err) {
+    throw deflator.msg || msg[deflator.err];
+  }
 
   return deflator.result;
 }
-
 
 /**
  * deflateRaw(data[, options]) -> Uint8Array
@@ -357,7 +352,6 @@ function deflateRaw(input, options) {
   return deflate(input, options);
 }
 
-
 /**
  * gzip(data[, options]) -> Uint8Array
  * - data (Uint8Array|ArrayBuffer|String): input data to compress.
@@ -371,7 +365,6 @@ function gzip(input, options) {
   options.gzip = true;
   return deflate(input, options);
 }
-
 
 module.exports.Deflate = Deflate;
 module.exports.deflate = deflate;

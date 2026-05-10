@@ -7,19 +7,14 @@ import { useScreenProtect } from '../../hooks/useScreenProtect';
 import { validateMnemonic } from '../../blue_modules/bip39';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { BlueText } from '../../BlueComponents';
-import { LightningCustodianWallet } from '../../class/wallets/lightning-custodian-wallet';
-import { WatchOnlyWallet } from '../../class/wallets/watch-only-wallet';
-import HandOffComponent from '../../components/HandOffComponent';
 import QRCode from '../../components/QRCode';
 import SeedWords from '../../components/SeedWords';
 import { useTheme } from '../../components/themes';
-import { HandOffActivityType } from '../../components/types';
 import { useSettings } from '../../hooks/context/useSettings';
 import { useStorage } from '../../hooks/context/useStorage';
 import useAppState from '../../hooks/useAppState';
 import loc from '../../loc';
 import { WalletExportStackParamList } from '../../navigation/WalletExportStack';
-import { WalletDescriptor } from '../../class/wallet-descriptor.ts';
 
 type RouteProps = RouteProp<WalletExportStackParamList, 'WalletExport'>;
 
@@ -72,19 +67,7 @@ const WalletExport: React.FC = () => {
 
   const secrets: string[] = useMemo(() => {
     try {
-      let secret = wallet.getSecret();
-      if (wallet instanceof WatchOnlyWallet) {
-        try {
-          const path = wallet.getDerivationPath();
-          if (path?.startsWith('m/86')) {
-            // for taproot watch-only HD we dont just show xpub, we show wallet descriptor
-            const fp = wallet.getMasterFingerprintHex();
-            secret = WalletDescriptor.getDescriptor(fp, path, secret);
-          }
-        } catch (e: any) {
-          console.log(e.message);
-        }
-      }
+      const secret = wallet.getSecret();
       return typeof secret === 'string' ? [secret] : Array.isArray(secret) ? secret : [];
     } catch (error) {
       console.error('Failed to get wallet secret:', error);
@@ -190,7 +173,7 @@ const WalletExport: React.FC = () => {
       onLayout={onLayout}
       testID="WalletExportScroll"
     >
-      {wallet.type !== WatchOnlyWallet.type && <DoNotDisclose />}
+      <DoNotDisclose />
 
       <BlueText style={styles.scanText}>{loc.wallets.scan_import}</BlueText>
 
@@ -209,15 +192,9 @@ const WalletExport: React.FC = () => {
         </>
       ) : (
         <>
-          <BlueText style={styles.writeText}>
-            {wallet.type === LightningCustodianWallet.type ? loc.wallets.copy_ln_url : loc.wallets.copy_ln_public}
-          </BlueText>
+          <BlueText style={styles.writeText}>{loc.wallets.copy_ln_public}</BlueText>
           <CopyBox text={secret} onPress={handleCopy} />
         </>
-      )}
-
-      {wallet.type === WatchOnlyWallet.type && (
-        <HandOffComponent title={loc.wallets.xpub_title} type={HandOffActivityType.Xpub} userInfo={{ xpub: secret }} />
       )}
 
       <BlueText style={styles.typeText}>{loc.formatString(loc.wallets.wallet_type_this, { type: wallet.typeReadable })}</BlueText>

@@ -13,8 +13,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Psbt } from 'bitcoinjs-lib';
 import b58 from 'bs58check';
 
-import { MultisigCosigner } from '../../class/multisig-cosigner';
-import { MultisigHDWallet } from '../../class/wallets/multisig-hd-wallet';
 import { joinQRs } from '../bbqr/join';
 import {
   concatUint8Arrays,
@@ -131,50 +129,10 @@ function isHexString(s) {
  * @return {string[]} txt fragments ready to be displayed in dynamic QR
  */
 function encodeURv2(str, len) {
-  // now, lets do some intelligent guessing what we've got here, psbt hex, or json with a multisig cosigner..?
+  // multisig cosigner branch removed alongside the Bitcoin multisig flow.
+  // We fall straight through to PSBT and bytes encoding.
 
-  try {
-    const cosigner = new MultisigCosigner(str);
-
-    if (cosigner.isValid()) {
-      let scriptExpressions = false;
-
-      if (cosigner.isNativeSegwit()) {
-        scriptExpressions = [ScriptExpressions.WITNESS_SCRIPT_HASH];
-      } else if (cosigner.isWrappedSegwit()) {
-        scriptExpressions = [ScriptExpressions.SCRIPT_HASH, ScriptExpressions.WITNESS_SCRIPT_HASH];
-      } else if (cosigner.isLegacy()) {
-        scriptExpressions = [ScriptExpressions.SCRIPT_HASH];
-      } else {
-        return ['unsupported multisig type'];
-      }
-
-      const cryptoKeyPathComponents = [];
-      for (const component of cosigner.getPath().split('/')) {
-        if (component === 'm') continue;
-        const index = parseInt(component);
-        const hardened = component.endsWith('h') || component.endsWith("'");
-        cryptoKeyPathComponents.push(new PathComponent({ index, hardened }));
-      }
-
-      const cryptoAccount = new CryptoAccount(Buffer.from(cosigner.getFp(), 'hex'), [
-        new CryptoOutput(
-          scriptExpressions,
-          new CryptoHDKey({
-            isMaster: false,
-            key: Buffer.from(cosigner.getKeyHex(), 'hex'),
-            chainCode: Buffer.from(cosigner.getChainCodeHex(), 'hex'),
-            origin: new CryptoKeypath(cryptoKeyPathComponents, Buffer.from(cosigner.getFp(), 'hex'), cosigner.getDepthNumber()),
-            parentFingerprint: Buffer.from(cosigner.getParentFingerprintHex(), 'hex'),
-          }),
-        ),
-      ]);
-      const ur = cryptoAccount.toUREncoder(2000).nextPart();
-      return [ur];
-    }
-  } catch (_) {}
-
-  // not account. lets try psbt
+  // try psbt
 
   try {
     Psbt.fromHex(str); // will throw if not PSBT hex
@@ -245,13 +203,10 @@ function decodeUR(arg) {
   const hdKey = cryptoAccount.outputDescriptors[0].getCryptoKey();
   const derivationPath = 'm/' + hdKey.getOrigin().getPath();
   const script = cryptoAccount.outputDescriptors[0].getScriptExpressions()[0].getExpression();
-  const isMultisig =
-    script === ScriptExpressions.WITNESS_SCRIPT_HASH.getExpression() ||
-    // fallback to paths (unreliable).
-    // dont know how to add ms p2sh (legacy) or p2sh-p2wsh (wrapped segwit) atm
-    derivationPath === MultisigHDWallet.PATH_LEGACY ||
-    derivationPath === MultisigHDWallet.PATH_WRAPPED_SEGWIT ||
-    derivationPath === MultisigHDWallet.PATH_NATIVE_SEGWIT;
+  // Multisig path detection used dedicated `MultisigHDWallet` constants that
+  // were removed. The script-only check below is enough for the Bitcoin
+  // hardware-wallet QR flows that still touch this module on the way out.
+  const isMultisig = script === ScriptExpressions.WITNESS_SCRIPT_HASH.getExpression();
   const version = hexToUint8Array(isMultisig ? '02aa7ed3' : '04b24746');
   const parentFingerprint = hdKey.getParentFingerprint();
   const depth = hdKey.getOrigin().getDepth();

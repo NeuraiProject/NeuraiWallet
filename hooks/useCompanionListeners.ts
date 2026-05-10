@@ -12,10 +12,9 @@ import {
   removeAllDeliveredNotifications,
   setApplicationIconBadgeNumber,
 } from '../blue_modules/notifications';
-import { LightningCustodianWallet } from '../class/wallets/lightning-custodian-wallet';
 import DeeplinkSchemaMatch from '../class/deeplink-schema-match';
 import loc from '../loc';
-import { Chain } from '../models/bitcoinUnits';
+import { Chain } from '../models/xnaUnits';
 import { navigationRef } from '../NavigationService';
 import ActionSheet from '../screen/ActionSheet';
 import { useStorage } from './context/useStorage';
@@ -102,7 +101,7 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
           const walletID = wallet.getID();
           fetchAndSaveWalletTransactions(walletID);
           if (wasTapped) {
-            if (payload.type !== 3 || wallet.chain === Chain.OFFCHAIN) {
+            if (payload.type !== 3) {
               navigation.navigate('WalletTransactions', {
                 walletID,
                 walletType: wallet.type,
@@ -142,7 +141,7 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
             const walletID = wallet.getID();
             fetchAndSaveWalletTransactions(walletID);
             if (wasTapped) {
-              if (payload.type !== 3 || wallet.chain === Chain.OFFCHAIN) {
+              if (payload.type !== 3) {
                 navigationRef.dispatch(
                   CommonActions.navigate({
                     name: 'WalletTransactions',
@@ -281,30 +280,11 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
         const clipboard = await getClipboardContent();
         if (!clipboard) return;
         const isAddressFromStoredWallet = wallets.some(wallet => {
-          if (wallet.chain === Chain.ONCHAIN) {
-            return wallet.isAddressValid && wallet.isAddressValid(clipboard) && wallet.weOwnAddress(clipboard);
-          } else {
-            return (wallet as LightningCustodianWallet).isInvoiceGeneratedByWallet(clipboard) || wallet.weOwnAddress(clipboard);
-          }
+          return wallet.isAddressValid && wallet.isAddressValid(clipboard) && wallet.weOwnAddress(clipboard);
         });
         const isBitcoinAddress = DeeplinkSchemaMatch.isBitcoinAddress(clipboard);
-        const isLightningInvoice = DeeplinkSchemaMatch.isLightningInvoice(clipboard);
-        const isLNURL = DeeplinkSchemaMatch.isLnUrl(clipboard);
-        const isBothBitcoinAndLightning = DeeplinkSchemaMatch.isBothBitcoinAndLightning(clipboard);
-        if (
-          !isAddressFromStoredWallet &&
-          clipboardContent.current !== clipboard &&
-          (isBitcoinAddress || isLightningInvoice || isLNURL || isBothBitcoinAndLightning)
-        ) {
-          let contentType;
-          if (isBitcoinAddress) {
-            contentType = ClipboardContentType.BITCOIN;
-          } else if (isLightningInvoice || isLNURL) {
-            contentType = ClipboardContentType.LIGHTNING;
-          } else if (isBothBitcoinAndLightning) {
-            contentType = ClipboardContentType.BITCOIN;
-          }
-          showClipboardAlert({ contentType });
+        if (!isAddressFromStoredWallet && clipboardContent.current !== clipboard && isBitcoinAddress) {
+          showClipboardAlert({ contentType: ClipboardContentType.BITCOIN });
         }
         clipboardContent.current = clipboard;
       }

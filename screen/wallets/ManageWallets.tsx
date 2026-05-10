@@ -8,7 +8,7 @@ import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc from '../../loc';
 import { useStorage } from '../../hooks/context/useStorage';
 import { TTXMetadata } from '../../class/blue-app';
-import { ExtendedTransaction, LightningTransaction, Transaction, TWallet } from '../../class/wallets/types';
+import { ExtendedTransaction, Transaction, TWallet } from '../../class/wallets/types';
 import useBounceAnimation from '../../hooks/useBounceAnimation';
 import HeaderRightButton from '../../components/HeaderRightButton';
 import DraggableFlatList, { RenderItemParams, DragEndParams } from 'react-native-draggable-flatlist';
@@ -26,7 +26,7 @@ interface WalletItem {
 
 interface TransactionItem {
   type: ItemType.TransactionSection;
-  data: ExtendedTransaction & LightningTransaction;
+  data: ExtendedTransaction;
 }
 
 interface AddressItem {
@@ -226,7 +226,7 @@ const ManageWallets: React.FC = () => {
                     if (!txExists) {
                       group.transactions.push({
                         type: ItemType.TransactionSection,
-                        data: tx as ExtendedTransaction & LightningTransaction,
+                        data: tx as ExtendedTransaction,
                       });
                     }
                   }
@@ -281,7 +281,7 @@ const ManageWallets: React.FC = () => {
                     if (!group.transactions.some(item => item.data.hash === txid || item.data.txid === txid)) {
                       group.transactions.push({
                         type: ItemType.TransactionSection,
-                        data: tx as ExtendedTransaction & LightningTransaction,
+                        data: tx as ExtendedTransaction,
                       });
                     }
 

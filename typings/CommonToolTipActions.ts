@@ -40,7 +40,6 @@ const keys = {
   CopyToClipboard: 'copyToClipboard',
   Share: 'share',
   SaveFile: 'saveFile',
-  SignVerify: 'signVerify',
   ExportPrivateKey: 'exportPrivateKey',
   PasteFromClipboard: 'pasteFromClipboard',
   Hide: 'hide',
@@ -306,12 +305,6 @@ export const CommonToolTipActions: Record<string, ToolTipAction> = {
     id: keys.Share,
     text: loc.receive.details_share,
     icon: icons.Share,
-  },
-  SignVerify: {
-    id: keys.SignVerify,
-    text: loc.addresses.sign_title,
-    icon: icons.Signature,
-    hidden: false,
   },
   ExportPrivateKey: {
     id: keys.ExportPrivateKey,

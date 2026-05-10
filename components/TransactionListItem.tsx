@@ -1,18 +1,12 @@
 import React, { useCallback, useMemo, memo, useRef } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { Animated, Easing, Linking, Pressable, Text, TextStyle, ViewStyle, StyleSheet, View } from 'react-native';
-import Lnurl from '../class/lnurl';
-import { LightningTransaction, Transaction } from '../class/wallets/types';
-import TransactionExpiredIcon from '../components/icons/TransactionExpiredIcon';
+import { Transaction } from '../class/wallets/types';
 import TransactionIncomingIcon from '../components/icons/TransactionIncomingIcon';
-import TransactionOffchainIcon from '../components/icons/TransactionOffchainIcon';
-import TransactionOffchainIncomingIcon from '../components/icons/TransactionOffchainIncomingIcon';
-import TransactionOnchainIcon from '../components/icons/TransactionOnchainIcon';
 import TransactionOutgoingIcon from '../components/icons/TransactionOutgoingIcon';
 import TransactionPendingIcon from '../components/icons/TransactionPendingIcon';
 import loc, { formatBalanceWithoutSuffix, formatTransactionListDate, transactionTimeToReadable } from '../loc';
-import { BitcoinUnit } from '../models/bitcoinUnits';
+import { XnaUnit } from '../models/xnaUnits';
 import { useSettings } from '../hooks/context/useSettings';
 import { useTheme } from './themes';
 import { Action } from './types';
@@ -24,7 +18,6 @@ import ToolTipMenu from './TooltipMenu';
 import { CommonToolTipActions } from '../typings/CommonToolTipActions';
 import { pop } from '../NavigationService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { uint8ArrayToHex } from '../blue_modules/uint8array-extras';
 import ListItem from './ListItem';
 
 const styles = StyleSheet.create({
@@ -105,9 +98,9 @@ const AnimatedPressableRow: React.FC<AnimatedPressableRowProps> = ({ onPress, ch
 };
 
 interface TransactionListItemProps {
-  itemPriceUnit?: BitcoinUnit;
+  itemPriceUnit?: XnaUnit;
   walletID: string;
-  item: Transaction & LightningTransaction; // using type intersection to have less issues with ts
+  item: Transaction;
   searchQuery?: string;
   style?: ViewStyle;
   renderHighlightedText?: (text: string, query: string) => React.ReactElement;
@@ -120,7 +113,7 @@ type NavigationProps = NativeStackNavigationProp<DetailViewStackParamList>;
 export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
   ({
     item,
-    itemPriceUnit = BitcoinUnit.BTC,
+    itemPriceUnit = XnaUnit.XNA,
     walletID,
     searchQuery,
     style,
@@ -130,7 +123,7 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
   }: TransactionListItemProps) => {
     const { colors } = useTheme();
     const { navigate } = useExtendedNavigation<NavigationProps>();
-    const { txMetadata, counterpartyMetadata, wallets } = useStorage();
+    const { txMetadata } = useStorage();
     const { language, selectedBlockExplorer } = useSettings();
     const insets = useSafeAreaInsets();
     const containerStyle = useMemo(
@@ -143,29 +136,13 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
 
     const combinedStyle = useMemo(() => [containerStyle, style], [containerStyle, style]);
 
-    const shortenContactName = (name: string): string => {
-      if (name.length < 16) return name;
-      return name.substr(0, 7) + '...' + name.substr(name.length - 7, 7);
-    };
-
-    let counterparty;
-    if (item.counterparty) {
-      counterparty = counterpartyMetadata?.[item.counterparty]?.label ?? item.counterparty;
-    }
-    const txMemo = (counterparty ? `[${shortenContactName(counterparty)}] ` : '') + (txMetadata[item.hash]?.memo ?? '');
-    const noteForCopy = (txMemo || item.memo || '').trim() || undefined;
+    const txMemo = txMetadata[item.hash]?.memo ?? '';
+    const noteForCopy = txMemo.trim() || undefined;
 
     const listTitleKey = useMemo((): 'pending' | 'sent' | 'received' => {
-      if (item.category === 'receive' && item.confirmations! < 3) return 'pending';
-      if (item.type === 'bitcoind_tx') return item.value! < 0 ? 'sent' : 'received';
-      if (item.type === 'paid_invoice') return 'sent';
-      if (item.type === 'user_invoice' || item.type === 'payment_request') {
-        if (!item.ispaid) return 'pending';
-        return 'received';
-      }
       if (!item.confirmations) return 'pending';
       return item.value! < 0 ? 'sent' : 'received';
-    }, [item.category, item.confirmations, item.type, item.value, item.ispaid]);
+    }, [item.confirmations, item.value]);
 
     const listTitle = useMemo(() => {
       if (listTitleKey === 'pending') return loc.transactions.pending;
@@ -186,41 +163,13 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
       return formatBalanceWithoutSuffix(item.value && item.value, itemPriceUnit, true).toString();
     }, [item.value, itemPriceUnit]);
 
-    const rowTitle = useMemo(() => {
-      if (item.type === 'user_invoice' || item.type === 'payment_request') {
-        const currentDate = new Date();
-        const now = Math.floor(currentDate.getTime() / 1000);
-        const invoiceExpiration = item.timestamp! + item.expire_time!;
-        if (invoiceExpiration > now || item.ispaid) {
-          return formattedAmount;
-        } else {
-          return loc.lnd.expired;
-        }
-      }
-      return formattedAmount;
-    }, [item, formattedAmount]);
+    const rowTitle = formattedAmount;
 
     const rowTitleStyle = useMemo<TextStyle>(() => {
       let color = colors.successColor;
-
-      if (item.type === 'user_invoice' || item.type === 'payment_request') {
-        const currentDate = new Date();
-        const now = (currentDate.getTime() / 1000) | 0; // eslint-disable-line no-bitwise
-        const invoiceExpiration = item.timestamp! + item.expire_time!;
-
-        if (invoiceExpiration > now) {
-          color = colors.successColor;
-        } else if (invoiceExpiration < now) {
-          if (item.ispaid) {
-            color = colors.successColor;
-          } else {
-            color = '#9AA0AA';
-          }
-        }
-      } else if (item.value! / 100000000 < 0) {
+      if (item.value! / 100000000 < 0) {
         color = colors.foregroundColor;
       }
-
       return {
         color,
         fontSize: 14,
@@ -229,62 +178,9 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
         paddingRight: insets.right,
         paddingLeft: insets.left,
       } as TextStyle;
-    }, [
-      colors.successColor,
-      colors.foregroundColor,
-      item.type,
-      item.value,
-      item.timestamp,
-      item.expire_time,
-      item.ispaid,
-      insets.right,
-      insets.left,
-    ]);
+    }, [colors.successColor, colors.foregroundColor, item.value, insets.right, insets.left]);
 
     const determineTransactionTypeAndAvatar = () => {
-      if (item.category === 'receive' && item.confirmations! < 3) {
-        return {
-          label: loc.transactions.pending_transaction,
-          icon: <TransactionPendingIcon />,
-        };
-      }
-
-      if (item.type && item.type === 'bitcoind_tx') {
-        return {
-          label: loc.transactions.onchain,
-          icon: <TransactionOnchainIcon />,
-        };
-      }
-
-      if (item.type === 'paid_invoice') {
-        return {
-          label: loc.transactions.offchain,
-          icon: <TransactionOffchainIcon />,
-        };
-      }
-
-      if (item.type === 'user_invoice' || item.type === 'payment_request') {
-        const currentDate = new Date();
-        const now = (currentDate.getTime() / 1000) | 0; // eslint-disable-line no-bitwise
-        const invoiceExpiration = item.timestamp! + item.expire_time!;
-        if (!item.ispaid && invoiceExpiration < now) {
-          return {
-            label: loc.transactions.expired_transaction,
-            icon: <TransactionExpiredIcon />,
-          };
-        } else if (!item.ispaid) {
-          return {
-            label: loc.transactions.expired_transaction,
-            icon: <TransactionPendingIcon />,
-          };
-        } else {
-          return {
-            label: loc.transactions.incoming_transaction,
-            icon: <TransactionOffchainIncomingIcon />,
-          };
-        }
-      }
-
       if (!item.confirmations) {
         return {
           label: loc.transactions.pending_transaction,
@@ -306,7 +202,7 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
     const { label: transactionTypeLabel, icon: avatar } = determineTransactionTypeAndAvatar();
 
     const amountWithUnit = useMemo(() => {
-      const unitSuffix = itemPriceUnit === BitcoinUnit.BTC || itemPriceUnit === BitcoinUnit.SATS ? ` ${itemPriceUnit}` : ' ';
+      const unitSuffix = itemPriceUnit === XnaUnit.XNA || itemPriceUnit === XnaUnit.SATS ? ` ${itemPriceUnit}` : ' ';
       return `${formattedAmount}${unitSuffix}`;
     }, [formattedAmount, itemPriceUnit]);
 
@@ -322,55 +218,16 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
           pop();
         }
         navigate('TransactionStatus', { hash: item.hash, walletID });
-      } else if (item.type === 'user_invoice' || item.type === 'payment_request' || item.type === 'paid_invoice') {
-        const lightningWallet = wallets.filter(wallet => wallet?.getID() === item.walletID);
-        if (lightningWallet.length === 1) {
-          try {
-            // is it a successful lnurl-pay?
-            const LN = new Lnurl(false, AsyncStorage);
-            const rawPaymentHash = item.payment_hash;
-            if (!rawPaymentHash) throw new Error('Missing payment hash');
-            const normalizedPaymentHash =
-              typeof rawPaymentHash === 'string' ? rawPaymentHash : uint8ArrayToHex(new Uint8Array((rawPaymentHash as any).data));
-            const loaded = await LN.loadSuccessfulPayment(normalizedPaymentHash);
-            if (loaded) {
-              navigate('ScanLNDInvoiceRoot', {
-                screen: 'LnurlPaySuccess',
-                params: {
-                  paymentHash: normalizedPaymentHash,
-                  justPaid: false,
-                  fromWalletID: lightningWallet[0].getID(),
-                },
-              });
-              return;
-            }
-          } catch (e) {
-            console.debug(e);
-          }
-
-          navigate('LNDViewInvoice', {
-            invoice: item,
-            walletID: lightningWallet[0].getID(),
-          });
-        }
       } else {
         console.log('cant handle press');
       }
-    }, [item, renderHighlightedText, navigate, walletID, wallets, customOnPress, disableNavigation]);
+    }, [item, renderHighlightedText, navigate, walletID, customOnPress, disableNavigation]);
 
     const handleOnDetailsPress = useCallback(() => {
       if (walletID && item && item.hash) {
         navigate('TransactionDetails', { tx: item, hash: item.hash, walletID });
-      } else {
-        const lightningWallet = wallets.find(wallet => wallet?.getID() === item.walletID);
-        if (lightningWallet) {
-          navigate('LNDViewInvoice', {
-            invoice: item,
-            walletID: lightningWallet.getID(),
-          });
-        }
       }
-    }, [item, navigate, walletID, wallets]);
+    }, [item, navigate, walletID]);
 
     const handleOnCopyAmountTap = useCallback(() => Clipboard.setString(rowTitle.replace(/[\s\\-]/g, '')), [rowTitle]);
     const handleOnCopyTransactionID = useCallback(() => Clipboard.setString(item.hash), [item.hash]);
@@ -416,7 +273,6 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
       const actions: (Action | Action[])[] = [
         {
           ...CommonToolTipActions.CopyAmount,
-          hidden: rowTitle === loc.lnd.expired,
         },
         {
           ...CommonToolTipActions.CopyNote,
@@ -434,7 +290,7 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
       ];
 
       return actions as Action[];
-    }, [rowTitle, noteForCopy, item.hash]);
+    }, [noteForCopy, item.hash]);
 
     const title = listTitle;
     const subtitle = dateLine;

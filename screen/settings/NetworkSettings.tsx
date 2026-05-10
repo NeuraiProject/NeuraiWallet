@@ -7,13 +7,6 @@ import { SettingsScrollView, SettingsSection, SettingsListItem } from '../../com
 const NetworkSettings: React.FC = () => {
   const navigation = useExtendedNavigation();
   const isNotificationsCapable = Platform.OS !== 'web';
-  const navigateToElectrumSettings = () => {
-    navigation.navigate('ElectrumSettings');
-  };
-
-  const navigateToLightningSettings = () => {
-    navigation.navigate('LightningSettings');
-  };
 
   const navigateToBlockExplorerSettings = () => {
     navigation.navigate('SettingsBlockExplorer');
@@ -36,20 +29,10 @@ const NetworkSettings: React.FC = () => {
         />
 
         <SettingsListItem
-          title={loc.settings.network_electrum}
+          title={loc.settings.network_backend}
+          subtitle={loc.settings.network_backend_description}
           iconName="electrum"
-          onPress={navigateToElectrumSettings}
-          testID="ElectrumSettings"
-          chevron
-          position="middle"
-        />
-
-        <SettingsListItem
-          title={loc.settings.lightning_settings}
-          iconName="lightning"
-          onPress={navigateToLightningSettings}
-          testID="LightningSettings"
-          chevron
+          testID="NeuraiBackendInfo"
           position={isNotificationsCapable ? 'middle' : 'last'}
         />
 

@@ -8,9 +8,9 @@ export interface BlockExplorer {
 }
 
 export const BLOCK_EXPLORERS: { [key: string]: BlockExplorer } = {
-  default: { key: 'default', name: 'Mempool.space', url: 'https://mempool.space' },
-  blockchair: { key: 'blockchair', name: 'Blockchair', url: 'https://blockchair.com/bitcoin' },
-  blockstream: { key: 'blockstream', name: 'Blockstream.info', url: 'https://blockstream.info' },
+  default: { key: 'default', name: 'Neurai Explorer', url: 'https://explorer.neurai.org' },
+  rebel: { key: 'rebel', name: 'Rebel XNA Explorer', url: 'https://rebel-xna-explorer.neurai.org' },
+  testnet: { key: 'testnet', name: 'Neurai Testnet Explorer', url: 'https://testnet-explorer.neurai.org' },
   custom: { key: 'custom', name: 'Custom', url: '' }, // Custom URL will be handled separately
 };
 

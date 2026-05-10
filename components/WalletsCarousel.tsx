@@ -23,9 +23,6 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import LinearGradient from 'react-native-linear-gradient';
-import { LightningArkWallet } from '../class/wallets/lightning-ark-wallet';
-import { LightningCustodianWallet } from '../class/wallets/lightning-custodian-wallet';
-import { MultisigHDWallet } from '../class/wallets/multisig-hd-wallet';
 import WalletGradient from '../class/wallet-gradient';
 import { useSizeClass, SizeClass } from '../blue_modules/sizeClass';
 import loc, { formatBalance, transactionTimeToReadable } from '../loc';
@@ -366,27 +363,20 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
       transform: [{ translateY: balanceTranslateY.value }],
     }));
 
-    let image;
-    switch (item.type) {
-      case LightningCustodianWallet.type:
-      case LightningArkWallet.type:
-        image = direction === 'rtl' ? require('../img/lnd-shape-rtl.png') : require('../img/lnd-shape.png');
-        break;
-      case MultisigHDWallet.type:
-        image = direction === 'rtl' ? require('../img/vault-shape-rtl.png') : require('../img/vault-shape.png');
-        break;
-      default:
-        image = direction === 'rtl' ? require('../img/btc-shape-rtl.png') : require('../img/btc-shape.png');
-    }
+    const image = direction === 'rtl' ? require('../img/btc-shape-rtl.png') : require('../img/btc-shape.png');
 
     let latestTransactionText;
+    const txs = item.getTransactions();
+    const latestTimestamp = txs.reduce((max, tx) => Math.max(max, tx.timestamp ?? 0), 0);
 
-    if (item.getBalance() !== 0 && item.getLatestTransactionTime() === 0) {
+    if (item.getBalance() !== 0 && latestTimestamp === 0) {
       latestTransactionText = loc.wallets.pull_to_refresh;
-    } else if (item.getTransactions().find((tx: Transaction) => tx.confirmations === 0)) {
+    } else if (txs.find((tx: Transaction) => tx.confirmations === 0)) {
       latestTransactionText = loc.transactions.pending;
+    } else if (latestTimestamp > 0) {
+      latestTransactionText = transactionTimeToReadable(latestTimestamp);
     } else {
-      latestTransactionText = transactionTimeToReadable(item.getLatestTransactionTime());
+      latestTransactionText = loc.wallets.pull_to_refresh;
     }
 
     return (

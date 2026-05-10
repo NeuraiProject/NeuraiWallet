@@ -1,15 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import LinearGradient from 'react-native-linear-gradient';
-import { LightningArkWallet } from '../class/wallets/lightning-ark-wallet';
-import { LightningCustodianWallet } from '../class/wallets/lightning-custodian-wallet';
-import { MultisigHDWallet } from '../class/wallets/multisig-hd-wallet';
 import WalletGradient from '../class/wallet-gradient';
 import { TWallet } from '../class/wallets/types';
 import loc, { formatBalance, formatBalanceWithoutSuffix } from '../loc';
-import { BitcoinUnit } from '../models/bitcoinUnits';
+import { XnaUnit } from '../models/xnaUnits';
 import { FiatUnit } from '../models/fiatUnit';
 import { BlurredBalanceView } from './BlurredBalanceView';
 import { useSettings } from '../hooks/context/useSettings';
@@ -19,8 +16,8 @@ import { useLocale } from '@react-navigation/native';
 
 interface TransactionsNavigationHeaderProps {
   wallet: TWallet;
-  unit: BitcoinUnit;
-  onWalletUnitChange: (unit: BitcoinUnit) => void;
+  unit: XnaUnit;
+  onWalletUnitChange: (unit: XnaUnit) => void;
   onManageFundsPressed?: (id?: string) => void;
   onWalletBalanceVisibilityChange?: (isShouldBeVisible: boolean) => void;
   unitSwitching?: boolean;
@@ -31,32 +28,15 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
   onWalletUnitChange,
   onManageFundsPressed,
   onWalletBalanceVisibilityChange,
-  unit = BitcoinUnit.BTC,
+  unit = XnaUnit.XNA,
   unitSwitching = false,
 }) => {
   const { hideBalance } = wallet;
-  const [allowOnchainAddress, setAllowOnchainAddress] = useState(false);
   const { preferredFiatCurrency } = useSettings();
   const { direction } = useLocale();
   const balanceOpacity = useSharedValue(1);
   const balanceTranslateY = useSharedValue(0);
   const previousBalance = useRef<string | undefined>(undefined);
-
-  const verifyIfWalletAllowsOnchainAddress = useCallback(() => {
-    if (wallet.type === LightningCustodianWallet.type || wallet.type === LightningArkWallet.type) {
-      wallet
-        .allowOnchainAddress()
-        .then((value: boolean) => setAllowOnchainAddress(value))
-        .catch(() => {
-          console.error('This LNDhub wallet does not have an onchain address API.');
-          setAllowOnchainAddress(false);
-        });
-    }
-  }, [wallet]);
-
-  useEffect(() => {
-    verifyIfWalletAllowsOnchainAddress();
-  }, [wallet, verifyIfWalletAllowsOnchainAddress]);
 
   const handleCopyPress = useCallback(() => {
     const value = formatBalance(wallet.getBalance(), unit);
@@ -74,26 +54,23 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
 
     console.debug('[UnitSwitch/UI] tap unit change', { walletID: wallet.getID?.(), current: newWalletPreferredUnit });
 
-    if (newWalletPreferredUnit === BitcoinUnit.BTC) {
-      newWalletPreferredUnit = BitcoinUnit.SATS;
-    } else if (newWalletPreferredUnit === BitcoinUnit.SATS) {
-      newWalletPreferredUnit = BitcoinUnit.LOCAL_CURRENCY;
+    if (newWalletPreferredUnit === XnaUnit.XNA) {
+      newWalletPreferredUnit = XnaUnit.SATS;
+    } else if (newWalletPreferredUnit === XnaUnit.SATS) {
+      newWalletPreferredUnit = XnaUnit.LOCAL_CURRENCY;
     } else {
-      newWalletPreferredUnit = BitcoinUnit.BTC;
+      newWalletPreferredUnit = XnaUnit.XNA;
     }
 
     console.debug('[UnitSwitch/UI] next unit resolved', { walletID: wallet.getID?.(), next: newWalletPreferredUnit });
     onWalletUnitChange(newWalletPreferredUnit);
   };
 
-  const handleManageFundsPressed = useCallback(
-    (actionKeyID?: string) => {
-      if (onManageFundsPressed) {
-        onManageFundsPressed(actionKeyID);
-      }
-    },
-    [onManageFundsPressed],
-  );
+  // Manage-funds buttons (multisig "manage keys", LN refill) are gone with
+  // their corresponding wallet types. The prop is preserved in the public API
+  // for backwards compatibility with parent screens that still pass it.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _unusedManageFunds = onManageFundsPressed;
 
   const onPressMenuItem = useCallback(
     (id: string) => {
@@ -106,24 +83,9 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
     [handleBalanceVisibility, handleCopyPress],
   );
 
-  const toolTipActions = useMemo(() => {
-    return [
-      {
-        id: actionKeys.Refill,
-        text: loc.lnd.refill,
-        icon: actionIcons.Refill,
-      },
-      {
-        id: actionKeys.RefillWithExternalWallet,
-        text: loc.lnd.refill_external,
-        icon: actionIcons.RefillWithExternalWallet,
-      },
-    ];
-  }, []);
-
   const currentBalance = wallet ? wallet.getBalance() : 0;
   const formattedBalance = useMemo(() => {
-    return unit === BitcoinUnit.LOCAL_CURRENCY
+    return unit === XnaUnit.LOCAL_CURRENCY
       ? formatBalance(currentBalance, unit, true)
       : formatBalanceWithoutSuffix(currentBalance, unit, true);
   }, [unit, currentBalance]);
@@ -235,26 +197,10 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
           </ToolTipMenu>
           <TouchableOpacity style={styles.walletPreferredUnitView} onPress={changeWalletBalanceUnit} disabled={unitSwitching}>
             <Text style={styles.walletPreferredUnitText}>
-              {unit === BitcoinUnit.LOCAL_CURRENCY ? (preferredFiatCurrency?.endPointKey ?? FiatUnit.USD) : unit}
+              {unit === XnaUnit.LOCAL_CURRENCY ? (preferredFiatCurrency?.endPointKey ?? FiatUnit.USD) : unit}
             </Text>
           </TouchableOpacity>
         </Animated.View>
-        {(wallet.type === LightningCustodianWallet.type || wallet.type === LightningArkWallet.type) && allowOnchainAddress && (
-          <ToolTipMenu
-            shouldOpenOnLongPress
-            isButton
-            onPressMenuItem={handleManageFundsPressed}
-            actions={toolTipActions}
-            buttonStyle={styles.manageFundsButton}
-          >
-            <Text style={styles.manageFundsButtonText}>{loc.lnd.title}</Text>
-          </ToolTipMenu>
-        )}
-        {wallet.type === MultisigHDWallet.type && (
-          <TouchableOpacity style={styles.manageFundsButton} accessibilityRole="button" onPress={() => handleManageFundsPressed()}>
-            <Text style={styles.manageFundsButtonText}>{loc.multisig.manage_keys}</Text>
-          </TouchableOpacity>
-        )}
       </View>
     </LinearGradient>
   );
@@ -277,22 +223,6 @@ const styles = StyleSheet.create({
   walletBalance: {
     flexShrink: 1,
     marginRight: 6,
-  },
-  manageFundsButton: {
-    marginTop: 14,
-    marginBottom: 10,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 9,
-    minHeight: 39,
-    alignSelf: 'flex-start',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  manageFundsButtonText: {
-    fontWeight: '500',
-    fontSize: 14,
-    color: '#FFFFFF',
-    padding: 12,
   },
   walletBalanceAndUnitContainer: {
     flexDirection: 'row',

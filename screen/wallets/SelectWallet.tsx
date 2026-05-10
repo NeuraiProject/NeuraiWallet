@@ -6,19 +6,19 @@ import { BlueText } from '../../BlueComponents';
 import SafeArea from '../../components/SafeArea';
 import { useTheme } from '../../components/themes';
 import loc from '../../loc';
-import { Chain } from '../../models/bitcoinUnits';
+import { Chain } from '../../models/xnaUnits';
 import { useStorage } from '../../hooks/context/useStorage';
 import WalletsCarousel from '../../components/WalletsCarousel';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import { TWallet } from '../../class/wallets/types';
 import { pop } from '../../NavigationService';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { SendDetailsStackParamList } from '../../navigation/SendDetailsStackParamList';
+import { DetailViewStackParamList } from '../../navigation/DetailViewStackParamList';
 import { BlueSpacing20 } from '../../components/BlueSpacing';
 
-type NavigationProps = NativeStackNavigationProp<SendDetailsStackParamList, 'SelectWallet'>;
+type NavigationProps = NativeStackNavigationProp<DetailViewStackParamList, 'SelectWallet'>;
 
-type RouteProps = RouteProp<SendDetailsStackParamList, 'SelectWallet'>;
+type RouteProps = RouteProp<DetailViewStackParamList, 'SelectWallet'>;
 
 const SelectWallet: React.FC = () => {
   const route = useRoute<RouteProps>();

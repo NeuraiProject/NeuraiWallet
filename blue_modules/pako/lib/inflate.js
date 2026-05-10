@@ -1,25 +1,20 @@
 'use strict';
 
-
 const zlib_inflate = require('./zlib/inflate');
-const utils        = require('./utils/common');
-const strings      = require('./utils/strings');
-const msg          = require('./zlib/messages');
-const ZStream      = require('./zlib/zstream');
-const GZheader     = require('./zlib/gzheader');
+const utils = require('./utils/common');
+const strings = require('./utils/strings');
+const msg = require('./zlib/messages');
+const ZStream = require('./zlib/zstream');
+const GZheader = require('./zlib/gzheader');
 
 const toString = Object.prototype.toString;
 
-/* Public constants ==========================================================*/
-/* ===========================================================================*/
+/* Public constants ========================================================== */
+/* =========================================================================== */
 
-const {
-  Z_NO_FLUSH, Z_FINISH,
-  Z_OK, Z_STREAM_END, Z_NEED_DICT, Z_STREAM_ERROR, Z_DATA_ERROR, Z_MEM_ERROR
-} = require('./zlib/constants');
+const { Z_NO_FLUSH, Z_FINISH, Z_OK, Z_STREAM_END, Z_NEED_DICT, Z_STREAM_ERROR, Z_DATA_ERROR, Z_MEM_ERROR } = require('./zlib/constants');
 
-/* ===========================================================================*/
-
+/* =========================================================================== */
 
 /**
  * class Inflate
@@ -55,7 +50,6 @@ const {
  *
  * Error message, if [[Inflate.err]] != 0
  **/
-
 
 /**
  * new Inflate(options)
@@ -99,30 +93,34 @@ const {
  * ```
  **/
 function Inflate(options) {
-  this.options = utils.assign({
-    chunkSize: 1024 * 64,
-    windowBits: 15,
-    to: ''
-  }, options || {});
+  this.options = utils.assign(
+    {
+      chunkSize: 1024 * 64,
+      windowBits: 15,
+      to: '',
+    },
+    options || {},
+  );
 
   const opt = this.options;
 
   // Force window size for `raw` data, if not set directly,
   // because we have no header for autodetect.
-  if (opt.raw && (opt.windowBits >= 0) && (opt.windowBits < 16)) {
+  if (opt.raw && opt.windowBits >= 0 && opt.windowBits < 16) {
     opt.windowBits = -opt.windowBits;
-    if (opt.windowBits === 0) { opt.windowBits = -15; }
+    if (opt.windowBits === 0) {
+      opt.windowBits = -15;
+    }
   }
 
   // If `windowBits` not defined (and mode not raw) - set autodetect flag for gzip/deflate
-  if ((opt.windowBits >= 0) && (opt.windowBits < 16) &&
-      !(options && options.windowBits)) {
+  if (opt.windowBits >= 0 && opt.windowBits < 16 && !(options && options.windowBits)) {
     opt.windowBits += 32;
   }
 
   // Gzip header has no info about windows size, we can do autodetect only
   // for deflate. So, if window size not set, force it to max when gzip possible
-  if ((opt.windowBits > 15) && (opt.windowBits < 48)) {
+  if (opt.windowBits > 15 && opt.windowBits < 48) {
     // bit 3 (16) -> gzipped data
     // bit 4 (32) -> autodetect gzip/deflate
     if ((opt.windowBits & 15) === 0) {
@@ -130,18 +128,15 @@ function Inflate(options) {
     }
   }
 
-  this.err    = 0;      // error code, if happens (0 = Z_OK)
-  this.msg    = '';     // error message
-  this.ended  = false;  // used to avoid multiple onEnd() calls
-  this.chunks = [];     // chunks of compressed data
+  this.err = 0; // error code, if happens (0 = Z_OK)
+  this.msg = ''; // error message
+  this.ended = false; // used to avoid multiple onEnd() calls
+  this.chunks = []; // chunks of compressed data
 
-  this.strm   = new ZStream();
+  this.strm = new ZStream();
   this.strm.avail_out = 0;
 
-  let status  = zlib_inflate.inflateInit2(
-    this.strm,
-    opt.windowBits
-  );
+  let status = zlib_inflate.inflateInit2(this.strm, opt.windowBits);
 
   if (status !== Z_OK) {
     throw new Error(msg[status]);
@@ -159,7 +154,8 @@ function Inflate(options) {
     } else if (toString.call(opt.dictionary) === '[object ArrayBuffer]') {
       opt.dictionary = new Uint8Array(opt.dictionary);
     }
-    if (opt.raw) { //In raw mode we need to set the dictionary early
+    if (opt.raw) {
+      // In raw mode we need to set the dictionary early
       status = zlib_inflate.inflateSetDictionary(this.strm, opt.dictionary);
       if (status !== Z_OK) {
         throw new Error(msg[status]);
@@ -235,11 +231,7 @@ Inflate.prototype.push = function (data, flush_mode) {
     }
 
     // Skip snyc markers if more data follows and not raw mode
-    while (strm.avail_in > 0 &&
-           status === Z_STREAM_END &&
-           strm.state.wrap > 0 &&
-           data[strm.next_in] !== 0)
-    {
+    while (strm.avail_in > 0 && status === Z_STREAM_END && strm.state.wrap > 0 && data[strm.next_in] !== 0) {
       zlib_inflate.inflateReset(strm);
       status = zlib_inflate.inflate(strm, _flush_mode);
     }
@@ -260,13 +252,11 @@ Inflate.prototype.push = function (data, flush_mode) {
 
     if (strm.next_out) {
       if (strm.avail_out === 0 || status === Z_STREAM_END) {
-
         if (this.options.to === 'string') {
+          const next_out_utf8 = strings.utf8border(strm.output, strm.next_out);
 
-          let next_out_utf8 = strings.utf8border(strm.output, strm.next_out);
-
-          let tail = strm.next_out - next_out_utf8;
-          let utf8str = strings.buf2string(strm.output, next_out_utf8);
+          const tail = strm.next_out - next_out_utf8;
+          const utf8str = strings.buf2string(strm.output, next_out_utf8);
 
           // move tail & realign counters
           strm.next_out = tail;
@@ -274,7 +264,6 @@ Inflate.prototype.push = function (data, flush_mode) {
           if (tail) strm.output.set(strm.output.subarray(next_out_utf8, next_out_utf8 + tail), 0);
 
           this.onData(utf8str);
-
         } else {
           this.onData(strm.output.length === strm.next_out ? strm.output : strm.output.subarray(0, strm.next_out));
         }
@@ -298,7 +287,6 @@ Inflate.prototype.push = function (data, flush_mode) {
   return true;
 };
 
-
 /**
  * Inflate#onData(chunk) -> Void
  * - chunk (Uint8Array|String): output data. When string output requested,
@@ -310,7 +298,6 @@ Inflate.prototype.push = function (data, flush_mode) {
 Inflate.prototype.onData = function (chunk) {
   this.chunks.push(chunk);
 };
-
 
 /**
  * Inflate#onEnd(status) -> Void
@@ -334,7 +321,6 @@ Inflate.prototype.onEnd = function (status) {
   this.err = status;
   this.msg = this.strm.msg;
 };
-
 
 /**
  * inflate(data[, options]) -> Uint8Array|String
@@ -386,7 +372,6 @@ function inflate(input, options) {
   return inflator.result;
 }
 
-
 /**
  * inflateRaw(data[, options]) -> Uint8Array|String
  * - data (Uint8Array|ArrayBuffer): input data to decompress.
@@ -401,7 +386,6 @@ function inflateRaw(input, options) {
   return inflate(input, options);
 }
 
-
 /**
  * ungzip(data[, options]) -> Uint8Array|String
  * - data (Uint8Array|ArrayBuffer): input data to decompress.
@@ -410,7 +394,6 @@ function inflateRaw(input, options) {
  * Just shortcut to [[inflate]], because it autodetects format
  * by header.content. Done for convenience.
  **/
-
 
 module.exports.Inflate = Inflate;
 module.exports.inflate = inflate;

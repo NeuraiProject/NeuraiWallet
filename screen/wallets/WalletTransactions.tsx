@@ -2,7 +2,6 @@ import { RouteProp, useFocusEffect, useRoute, useLocale } from '@react-navigatio
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   findNodeHandle,
   FlatList,
@@ -15,33 +14,25 @@ import {
   RefreshControl,
 } from 'react-native';
 import Icon from '../../components/Icon';
-import * as BlueElectrum from '../../blue_modules/BlueElectrum';
 import { isDesktop } from '../../blue_modules/environment';
 import * as fs from '../../blue_modules/fs';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
-import { LightningArkWallet } from '../../class/wallets/lightning-ark-wallet';
-import { LightningCustodianWallet } from '../../class/wallets/lightning-custodian-wallet';
-import { MultisigHDWallet } from '../../class/wallets/multisig-hd-wallet';
-import { WatchOnlyWallet } from '../../class/wallets/watch-only-wallet';
+import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 import presentAlert, { AlertType } from '../../components/Alert';
 import { FButton, FContainer, FloatButtonsBottomFade } from '../../components/FloatButtons';
 import { useTheme } from '../../components/themes';
 import { TransactionListItem } from '../../components/TransactionListItem';
-import TransactionsNavigationHeader, { actionKeys } from '../../components/TransactionsNavigationHeader';
+import TransactionsNavigationHeader from '../../components/TransactionsNavigationHeader';
 import { unlockWithBiometrics, useBiometrics } from '../../hooks/useBiometrics';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc, { formatBalance } from '../../loc';
-import { Chain } from '../../models/bitcoinUnits';
+import { Chain } from '../../models/xnaUnits';
 import ActionSheet from '../ActionSheet';
 import { useStorage } from '../../hooks/context/useStorage';
-import WatchOnlyWarning from '../../components/WatchOnlyWarning';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { DetailViewStackParamList } from '../../navigation/DetailViewStackParamList';
-import { Transaction, TWallet } from '../../class/wallets/types';
+import { Transaction } from '../../class/wallets/types';
 import getWalletTransactionsOptions, { WalletTransactionsRouteProps } from '../../navigation/helpers/getWalletTransactionsOptions';
-import { presentWalletExportReminder } from '../../helpers/presentWalletExportReminder';
-import selectWallet from '../../helpers/select-wallet';
-import assert from 'assert';
 import useMenuElements from '../../hooks/useMenuElements';
 import { useSettings } from '../../hooks/context/useSettings';
 import useWalletSubscribe from '../../hooks/useWalletSubscribe';
@@ -61,12 +52,12 @@ type WalletTransactionsProps = NativeStackScreenProps<DetailViewStackParamList, 
 
 type TransactionListItem = Transaction & { type: 'transaction' | 'header' };
 const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { route: WalletTransactionsRouteProps }) => {
-  const { wallets, saveToDisk } = useStorage();
+  const { saveToDisk } = useStorage();
   const { registerTransactionsHandler, unregisterTransactionsHandler } = useMenuElements();
   const { isBiometricUseCapableAndEnabled } = useBiometrics();
   const { direction } = useLocale();
   const [isLoading, setIsLoading] = useState(false);
-  const { params, name } = useRoute<RouteProps>();
+  const { params } = useRoute<RouteProps>();
   const { walletID } = params;
   const wallet = useWalletSubscribe(walletID);
   const [limit, setLimit] = useState(15);
@@ -81,9 +72,6 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const [balance, setBalance] = useState(wallet.getBalance());
   const [displayUnit, setDisplayUnit] = useState(wallet.preferredBalanceUnit);
   const [isUnitSwitching, setIsUnitSwitching] = useState(false);
-  const [isWatchOnlyWarningVisible, setIsWatchOnlyWarningVisible] = useState<boolean>(() => {
-    return wallet.type === WatchOnlyWallet.type && (wallet as any).isWatchOnlyWarningVisible;
-  });
   const MAX_FAILURES = 3;
   const flatListRef = useRef<FlatList<Transaction>>(null);
   const headerRef = useRef<View>(null);
@@ -140,21 +128,16 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
 
   const onBarCodeRead = useCallback(
     (ret?: { data?: any }) => {
-      if (!isLoading) {
-        setIsLoading(true);
-        const parameters = {
-          walletID,
-          uri: ret?.data ? ret.data : ret,
-        };
-        if (wallet.chain === Chain.ONCHAIN) {
-          navigate('SendDetailsRoot', { screen: 'SendDetails', params: parameters });
-        } else {
-          navigate('ScanLNDInvoiceRoot', { screen: 'ScanLNDInvoice', params: parameters });
-        }
-        setIsLoading(false);
-      }
+      if (isLoading) return;
+      setIsLoading(true);
+      const uri: string | undefined = ret?.data ? ret.data : (ret as unknown as string | undefined);
+      navigate('SendNeurai', {
+        walletID,
+        address: typeof uri === 'string' ? uri : undefined,
+      });
+      setIsLoading(false);
     },
-    [isLoading, walletID, wallet.chain, navigate],
+    [isLoading, walletID, navigate],
   );
 
   useEffect(() => {
@@ -170,11 +153,6 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
     console.debug('[UnitSwitch] sync from wallet preferred unit', { walletID, preferred: wallet.preferredBalanceUnit });
     setDisplayUnit(wallet.preferredBalanceUnit);
   }, [wallet, walletID]);
-
-  useEffect(() => {
-    setIsWatchOnlyWarningVisible(wallet.type === WatchOnlyWallet.type && (wallet as any).isWatchOnlyWarningVisible);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walletID]);
 
   useEffect(() => {
     console.debug('[UnitSwitch] display unit state changed', { walletID, displayUnit, switching: isUnitSwitching });
@@ -215,21 +193,13 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
 
       let smthChanged = false;
       try {
-        await BlueElectrum.waitTillConnected();
-        if (wallet.allowBIP47() && wallet.isBIP47Enabled() && 'fetchBIP47SenderPaymentCodes' in wallet) {
-          await wallet.fetchBIP47SenderPaymentCodes();
-        }
+        // BIP47 / Electrum wait-till-connected were Bitcoin pipeline steps;
+        // Neurai wallets fetch via the RPC backend directly.
         const oldBalance = wallet.getBalance();
         await wallet.fetchBalance();
         if (oldBalance !== wallet.getBalance()) smthChanged = true;
         const oldTxLen = wallet.getTransactions().length;
         await wallet.fetchTransactions();
-        if ('fetchPendingTransactions' in wallet) {
-          await wallet.fetchPendingTransactions();
-        }
-        if ('fetchUserInvoices' in wallet) {
-          await wallet.fetchUserInvoices();
-        }
         if (oldTxLen !== wallet.getTransactions().length) smthChanged = true;
 
         // Success - reset failure counter and update timestamps
@@ -266,7 +236,6 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
     }
   }, [wallet, isElectrumDisabled, isLoading, refreshTransactions, lastFetchTimestamp]);
 
-  const isLightning = useCallback((): boolean => wallet.chain === Chain.OFFCHAIN || false, [wallet]);
   const renderListFooterComponent = () => {
     // if not all txs rendered - display indicator
     return wallet.getTransactions().length > limit ? (
@@ -277,6 +246,10 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   };
 
   const navigateToSendScreen = () => {
+    if (isNeuraiWallet(wallet)) {
+      navigate('SendNeurai', { walletID });
+      return;
+    }
     navigate('SendDetailsRoot', {
       screen: 'SendDetails',
       params: {
@@ -284,61 +257,6 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       },
     });
   };
-
-  const onWalletSelect = useCallback(
-    async (selectedWallet: TWallet) => {
-      assert(
-        wallet.type === LightningCustodianWallet.type || wallet.type === LightningArkWallet.type,
-        `internal error, wallet is not ${LightningCustodianWallet.type} or ${LightningArkWallet.type}`,
-      );
-
-      // getting refill address, either cached or from the server:
-      let toAddress;
-      if (wallet.refill_addressess.length > 0) {
-        toAddress = wallet.refill_addressess[0];
-      } else {
-        try {
-          await wallet.fetchBtcAddress();
-          toAddress = wallet.refill_addressess[0];
-        } catch (Err) {
-          return presentAlert({ message: (Err as Error).message, type: AlertType.Toast });
-        }
-      }
-
-      // navigating to pay screen where user can pay to refill address:
-      navigate('SendDetailsRoot', {
-        screen: 'SendDetails',
-        params: {
-          transactionMemo: loc.lnd.refill_lnd_balance,
-          address: toAddress,
-          walletID: selectedWallet.getID(),
-        },
-      });
-    },
-    [navigate, wallet],
-  );
-
-  const navigateToViewEditCosigners = useCallback(() => {
-    navigate('ViewEditMultisigCosigners', {
-      walletID,
-    });
-  }, [navigate, walletID]);
-
-  const onManageFundsPressed = useCallback(
-    (id?: string) => {
-      if (id === actionKeys.Refill) {
-        const availableWallets = wallets.filter(item => item.chain === Chain.ONCHAIN && item.allowSend());
-        if (availableWallets.length === 0) {
-          presentAlert({ message: loc.lnd.refill_create });
-        } else {
-          selectWallet(navigation, name, Chain.ONCHAIN).then(onWalletSelect);
-        }
-      } else if (id === actionKeys.RefillWithExternalWallet) {
-        navigate('ReceiveDetails', { walletID });
-      }
-    },
-    [name, navigate, navigation, onWalletSelect, walletID, wallets],
-  );
 
   const getItemLayout = (_: any, index: number) => ({
     length: 64,
@@ -375,30 +293,6 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   };
 
   const sendButtonPress = () => {
-    if (wallet.chain === Chain.OFFCHAIN) {
-      return navigate('ScanLNDInvoiceRoot', { screen: 'ScanLNDInvoice', params: { walletID } });
-    }
-
-    if (wallet.type === WatchOnlyWallet.type && wallet.isHd() && !wallet.useWithHardwareWalletEnabled()) {
-      return Alert.alert(
-        loc.wallets.details_title,
-        loc.transactions.enable_offline_signing,
-        [
-          {
-            text: loc._.ok,
-            onPress: async () => {
-              wallet.setUseWithHardwareWalletEnabled(true);
-              await saveToDisk();
-              navigateToSendScreen();
-            },
-            style: 'default',
-          },
-          { text: loc._.cancel, onPress: () => {}, style: 'cancel' },
-        ],
-        { cancelable: false },
-      );
-    }
-
     navigateToSendScreen();
   };
 
@@ -548,55 +442,21 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
             wallet.hideBalance = isShouldBeVisible;
             await saveToDisk();
           }}
-          onManageFundsPressed={id => {
-            if (wallet.type === MultisigHDWallet.type) {
-              navigateToViewEditCosigners();
-            } else if (wallet.type === LightningCustodianWallet.type || wallet.type === LightningArkWallet.type) {
-              if (wallet.getUserHasSavedExport()) {
-                if (!id) return;
-                onManageFundsPressed(id);
-              } else {
-                presentWalletExportReminder()
-                  .then(async () => {
-                    if (!id) return;
-                    wallet.setUserHasSavedExport(true);
-                    await saveToDisk();
-                    onManageFundsPressed(id);
-                  })
-                  .catch(() => {
-                    navigate('WalletExport', {
-                      walletID,
-                    });
-                  });
-              }
-            }
-          }}
+          onManageFundsPressed={() => {}}
         />
         <View style={styles.headerBottomBarSpacer}>
           <View style={stylesHook.headerBottomBar} />
         </View>
-        <>
-          <View style={[styles.flex, stylesHook.backgroundContainer]}>
-            <View style={styles.listHeaderTextRow}>
-              <Text style={[styles.listHeaderText, stylesHook.listHeaderText]}>{loc.transactions.list_title}</Text>
-            </View>
+        <View style={[styles.flex, stylesHook.backgroundContainer]}>
+          <View style={styles.listHeaderTextRow}>
+            <Text style={[styles.listHeaderText, stylesHook.listHeaderText]}>{loc.transactions.list_title}</Text>
           </View>
-          <View style={stylesHook.backgroundContainer}>
-            {wallet.type === WatchOnlyWallet.type && isWatchOnlyWarningVisible && (
-              <WatchOnlyWarning
-                handleDismiss={() => {
-                  setIsWatchOnlyWarningVisible(false);
-                  wallet.isWatchOnlyWarningVisible = false;
-                  saveToDisk();
-                }}
-              />
-            )}
-          </View>
-        </>
+        </View>
       </View>
     ),
     [
       wallet,
+      walletID,
       displayUnit,
       isUnitSwitching,
       measureHeaderHeight,
@@ -605,11 +465,6 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       stylesHook.listHeaderText,
       saveToDisk,
       isBiometricUseCapableAndEnabled,
-      navigateToViewEditCosigners,
-      onManageFundsPressed,
-      navigate,
-      walletID,
-      isWatchOnlyWarningVisible,
     ],
   );
 
@@ -645,9 +500,8 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
         ListEmptyComponent={
           <ScrollView style={[styles.emptyTxsContainer, stylesHook.backgroundContainer]} contentContainerStyle={styles.scrollViewContent}>
             <Text numberOfLines={0} style={styles.emptyTxs} testID="TransactionsListEmpty">
-              {(isLightning() && loc.wallets.list_empty_txs1_lightning) || loc.wallets.list_empty_txs1}
+              {loc.wallets.list_empty_txs1}
             </Text>
-            {isLightning() && <Text style={styles.emptyTxsLightning}>{loc.wallets.list_empty_txs2_lightning}</Text>}
           </ScrollView>
         }
         refreshControl={
@@ -664,11 +518,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
             testID="ReceiveButton"
             text={loc.receive.header}
             onPress={() => {
-              if (wallet.chain === Chain.OFFCHAIN) {
-                navigate('LNDCreateInvoiceRoot', { screen: 'LNDCreateInvoice', params: { walletID } });
-              } else {
-                navigate('ReceiveDetails', { walletID });
-              }
+              navigate('ReceiveDetails', { walletID });
             }}
             icon={
               <View style={styles.iconContainer}>
@@ -683,7 +533,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
             }
           />
         )}
-        {(wallet.allowSend() || (wallet.type === WatchOnlyWallet.type && wallet.isHd())) && (
+        {wallet.allowSend() && (
           <FButton
             onLongPress={sendButtonLongPress}
             onPress={sendButtonPress}
@@ -703,7 +553,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
           />
         )}
       </FContainer>
-      {wallet.chain === Chain.ONCHAIN && wallet.type !== MultisigHDWallet.type && wallet.getXpub && wallet.getXpub() ? (
+      {wallet.chain === Chain.ONCHAIN && wallet.getXpub && wallet.getXpub() ? (
         <HandOffComponent
           title={wallet.getLabel()}
           type={HandOffActivityType.Xpub}
@@ -731,7 +581,6 @@ const styles = StyleSheet.create({
   },
   emptyTxsContainer: { height: '10%', minHeight: '10%', flex: 1 },
   emptyTxs: { fontSize: 18, color: '#9aa0aa', textAlign: 'center', marginVertical: 16 },
-  emptyTxsLightning: { fontSize: 18, color: '#9aa0aa', textAlign: 'center', fontWeight: '600' },
   iconContainer: {
     justifyContent: 'center',
     alignItems: 'center',

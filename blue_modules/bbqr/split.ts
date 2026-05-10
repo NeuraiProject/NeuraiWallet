@@ -76,11 +76,7 @@ function findBestVersion(length: number, opts: Required<SplitOptions>) {
  *
  * @returns An object containing the version of the QR codes, their string parts, and the actual encoding used.
  */
-export function splitQRs(
-  raw: Uint8Array,
-  fileType: string,
-  opts: SplitOptions = {}
-): SplitResult {
+export function splitQRs(raw: Uint8Array, fileType: string, opts: SplitOptions = {}): SplitResult {
   if (!/^[A-Z]$/.test(fileType)) {
     throw new Error('fileType must be a single uppercase letter A-Z');
   }
@@ -94,12 +90,7 @@ export function splitQRs(
   const parts: string[] = [];
 
   for (let n = 0, offset = 0; offset < encoded.length; n++, offset += perEach) {
-    parts.push(
-      `B$${actualEncoding}${fileType}` +
-        intToBase36(count) +
-        intToBase36(n) +
-        encoded.slice(offset, offset + perEach)
-    );
+    parts.push(`B$${actualEncoding}${fileType}` + intToBase36(count) + intToBase36(n) + encoded.slice(offset, offset + perEach));
   }
 
   return { version, parts, encoding: actualEncoding };
@@ -112,12 +103,10 @@ export function splitQRs(
  * @param input - The input to detect the FileType of.
  * @returns A Promise that resolves to an object containing the FileType and raw data.
  */
-export async function detectFileType(
-  input: File | Uint8Array | string
-): Promise<{ fileType: FileType; raw: Uint8Array }> {
+export async function detectFileType(input: File | Uint8Array | string): Promise<{ fileType: FileType; raw: Uint8Array }> {
   // keep references to both raw and decoded versions of the input to run checks on
-  let raw: Uint8Array | undefined = undefined;
-  let decoded: string | undefined = undefined;
+  let raw: Uint8Array | undefined;
+  let decoded: string | undefined;
 
   if (input instanceof File) {
     // convert a File to Uint8Array so we have access to the raw bytes

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useReducer, useMemo } from 'react';
 import { useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { ActivityIndicator, FlatList, StyleSheet, View } from 'react-native';
-import { WatchOnlyWallet } from '../../class/wallets/watch-only-wallet';
 import { AddressItem } from '../../components/addresses/AddressItem';
 import { useTheme } from '../../components/themes';
 import { useStorage } from '../../hooks/context/useStorage';
@@ -10,7 +9,7 @@ import { DetailViewStackParamList } from '../../navigation/DetailViewStackParamL
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import SegmentedControl from '../../components/SegmentedControl';
 import loc from '../../loc';
-import { BitcoinUnit } from '../../models/bitcoinUnits';
+import { XnaUnit } from '../../models/xnaUnits';
 import { useSettings } from '../../hooks/context/useSettings';
 import { useScreenProtect } from '../../hooks/useScreenProtect';
 
@@ -121,9 +120,8 @@ const WalletAddresses: React.FC = () => {
   const addressList = useRef<FlatList<Address>>(null);
   const wallet = wallets.find((w: any) => w.getID() === walletID);
 
-  const balanceUnit = wallet?.getPreferredBalanceUnit() ?? BitcoinUnit.BTC;
-  const isWatchOnly = wallet?.type === WatchOnlyWallet.type;
-  const walletInstance = isWatchOnly ? wallet._hdWalletInstance : wallet;
+  const balanceUnit = wallet?.getPreferredBalanceUnit() ?? XnaUnit.XNA;
+  const walletInstance = wallet;
   const allowSignVerifyMessage = (wallet && 'allowSignVerifyMessage' in wallet && wallet.allowSignVerifyMessage()) ?? false;
 
   const { colors } = useTheme();
@@ -151,7 +149,11 @@ const WalletAddresses: React.FC = () => {
   const getAddresses = useMemo(() => {
     if (!walletInstance) return [];
     const newAddresses: Address[] = [];
-    const changeMaxIndex = 'next_free_change_address_index' in walletInstance ? walletInstance.next_free_change_address_index : 0;
+    const changeMaxIndex = (
+      'next_free_change_address_index' in walletInstance
+        ? (walletInstance as { next_free_change_address_index?: number }).next_free_change_address_index
+        : 0
+    ) as number;
     for (let index = 0; index <= changeMaxIndex; index++) {
       try {
         newAddresses.push(getAddress(walletInstance, index, true));
@@ -160,8 +162,10 @@ const WalletAddresses: React.FC = () => {
       }
     }
 
-    const gapLimit = 'gap_limit' in walletInstance ? walletInstance.gap_limit : 0;
-    const addressMaxIndex = 'next_free_address_index' in walletInstance ? walletInstance.next_free_address_index : 0;
+    const gapLimit = ('gap_limit' in walletInstance ? (walletInstance as { gap_limit?: number }).gap_limit : 0) as number;
+    const addressMaxIndex = (
+      'next_free_address_index' in walletInstance ? (walletInstance as { next_free_address_index?: number }).next_free_address_index : 0
+    ) as number;
     for (let index = 0; index < addressMaxIndex + gapLimit; index++) {
       try {
         newAddresses.push(getAddress(walletInstance, index, false));

@@ -1,6 +1,6 @@
 import { RouteProp, StackActions, useIsFocused, useRoute } from '@react-navigation/native';
-import * as bitcoin from 'bitcoinjs-lib';
 import { sha256 } from '@noble/hashes/sha256';
+import * as bitcoin from 'bitcoinjs-lib';
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import Base43 from '../../blue_modules/base43';
@@ -15,14 +15,14 @@ import loc from '../../loc';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import CameraScreen from '../../components/CameraScreen';
 import SafeArea from '../../components/SafeArea';
-import { SendDetailsStackParamList } from '../../navigation/SendDetailsStackParamList.ts';
+import type { DetailViewStackParamList } from '../../navigation/DetailViewStackParamList';
 import { BlueSpacing40 } from '../../components/BlueSpacing';
 import { BlueLoading } from '../../components/BlueLoading.tsx';
 import { hexToUint8Array, uint8ArrayToBase64, uint8ArrayToHex, uint8ArrayToString } from '../../blue_modules/uint8array-extras/index.js';
 
 let decoder: BlueURDecoder | undefined;
 
-type RouteProps = RouteProp<SendDetailsStackParamList, 'ScanQRCode'>;
+type RouteProps = RouteProp<DetailViewStackParamList, 'ScanQRCode'>;
 
 const styles = StyleSheet.create({
   root: {

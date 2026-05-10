@@ -2,11 +2,11 @@ import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { StyleSheet, ViewStyle, TouchableOpacity, ActivityIndicator, Platform, Animated, View, Text, TextStyle } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import Icon from './Icon';
-import { ExtendedTransaction, LightningTransaction, Transaction, TWallet } from '../class/wallets/types';
+import { ExtendedTransaction, Transaction, TWallet } from '../class/wallets/types';
 import { WalletCarouselItem } from './WalletsCarousel';
 import { TransactionListItem } from './TransactionListItem';
 import { useTheme } from './themes';
-import { BitcoinUnit } from '../models/bitcoinUnits';
+import { XnaUnit } from '../models/xnaUnits';
 import loc from '../loc';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../blue_modules/hapticFeedback';
 import { AddressItem } from './addresses/AddressItem';
@@ -20,7 +20,7 @@ interface WalletItem {
 
 interface TransactionItem {
   type: ItemType.TransactionSection;
-  data: ExtendedTransaction & LightningTransaction;
+  data: ExtendedTransaction;
 }
 
 interface AddressItem {
@@ -232,7 +232,7 @@ const ManageWalletsListItem: React.FC<ManageWalletsListItemProps> = ({
         >
           <TransactionListItem
             item={item.data}
-            itemPriceUnit={w?.getPreferredBalanceUnit() || BitcoinUnit.BTC}
+            itemPriceUnit={w?.getPreferredBalanceUnit() || XnaUnit.XNA}
             walletID={walletID}
             searchQuery={state.searchQuery}
             renderHighlightedText={renderHighlightedText}
@@ -257,7 +257,7 @@ const ManageWalletsListItem: React.FC<ManageWalletsListItemProps> = ({
         balance: 0,
         transactions: 0,
       },
-      balanceUnit: wallet.getPreferredBalanceUnit() || BitcoinUnit.BTC,
+      balanceUnit: wallet.getPreferredBalanceUnit() || XnaUnit.XNA,
       walletID: item.data.walletID,
       allowSignVerifyMessage: wallet.allowSignVerifyMessage ? wallet.allowSignVerifyMessage() : false,
       onPress: navigateToAddress ? () => navigateToAddress(item.data.address, item.data.walletID) : undefined,
@@ -416,7 +416,7 @@ const WalletGroupComponent: React.FC<WalletGroupProps> = ({
                     <View style={childItemStyle()}>
                       <TransactionListItem
                         item={transaction.data}
-                        itemPriceUnit={wallet.getPreferredBalanceUnit() || BitcoinUnit.BTC}
+                        itemPriceUnit={wallet.getPreferredBalanceUnit() || XnaUnit.XNA}
                         walletID={wallet.getID()}
                         searchQuery={state.searchQuery}
                         renderHighlightedText={renderHighlightedText}
@@ -446,7 +446,7 @@ const WalletGroupComponent: React.FC<WalletGroupProps> = ({
                       balance: 0,
                       transactions: 0,
                     },
-                    balanceUnit: wallet.getPreferredBalanceUnit() || BitcoinUnit.BTC,
+                    balanceUnit: wallet.getPreferredBalanceUnit() || XnaUnit.XNA,
                     walletID: address.data.walletID,
                     allowSignVerifyMessage: wallet.allowSignVerifyMessage ? wallet.allowSignVerifyMessage() : false,
                     // Use the onPress function returned by navigateToAddress instead of calling it directly

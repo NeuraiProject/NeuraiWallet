@@ -1,8 +1,6 @@
 import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LayoutAnimation } from 'react-native';
 import { BlueApp as BlueAppClass, TCounterpartyMetadata, TTXMetadata } from '../../class/blue-app';
-import { LegacyWallet } from '../../class/wallets/legacy-wallet';
-import { WatchOnlyWallet } from '../../class/wallets/watch-only-wallet';
 import type { TWallet } from '../../class/wallets/types';
 import presentAlert from '../../components/Alert';
 import loc, { formatBalanceWithoutSuffix } from '../../loc';
@@ -10,7 +8,7 @@ import * as BlueElectrum from '../../blue_modules/BlueElectrum';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { startAndDecrypt } from '../../blue_modules/start-and-decrypt';
 import { isNotificationsEnabled, majorTomToGroundControl, unsubscribe } from '../../blue_modules/notifications';
-import { BitcoinUnit } from '../../models/bitcoinUnits';
+import { XnaUnit } from '../../models/xnaUnits';
 import { navigationRef } from '../../NavigationService';
 import { getScanWasBBQR } from '../../helpers/scan-qr.ts';
 import { setWalletIdMustUseBBQR } from '../../blue_modules/ur';
@@ -449,8 +447,7 @@ export const StorageProvider = ({ children }: { children: React.ReactNode }) => 
         presentAlert({ message: 'This wallet has been previously imported.' });
         return;
       }
-      const emptyWalletLabel = new LegacyWallet().getLabel();
-      if (w.getLabel() === emptyWalletLabel) w.setLabel(loc.wallets.import_imported + ' ' + w.typeReadable);
+      if (!w.getLabel() || w.getLabel() === 'Wallet') w.setLabel(loc.wallets.import_imported + ' ' + w.typeReadable);
       w.setUserHasSavedExport(true);
       addWallet(w);
       if (getScanWasBBQR()) {
@@ -465,7 +462,7 @@ export const StorageProvider = ({ children }: { children: React.ReactNode }) => 
 
       presentAlert({
         hapticFeedback: HapticFeedbackTypes.ImpactHeavy,
-        message: w.type === WatchOnlyWallet.type ? loc.wallets.import_success_watchonly : loc.wallets.import_success,
+        message: loc.wallets.import_success,
       });
 
       await w.fetchBalance();
@@ -482,7 +479,7 @@ export const StorageProvider = ({ children }: { children: React.ReactNode }) => 
   function confirmWalletDeletion(wallet: any, onConfirmed: () => void) {
     triggerHapticFeedback(HapticFeedbackTypes.NotificationWarning);
     try {
-      const balance = formatBalanceWithoutSuffix(wallet.getBalance(), BitcoinUnit.SATS, true);
+      const balance = formatBalanceWithoutSuffix(wallet.getBalance(), XnaUnit.SATS, true);
       presentAlert({
         title: loc.wallets.details_delete_wallet,
         message: loc.formatString(loc.wallets.details_del_wb_q, { balance }),

@@ -4,7 +4,7 @@ export type ReceiveDetailsStackParamList = {
     address?: string;
     customLabel?: string;
     customAmount?: string;
-    customUnit?: import('../models/bitcoinUnits').BitcoinUnit;
+    customUnit?: import('../models/xnaUnits').XnaUnit;
     bip21encoded?: string;
     isCustom?: boolean;
   };
@@ -12,7 +12,7 @@ export type ReceiveDetailsStackParamList = {
     address: string;
     currentLabel?: string;
     currentAmount?: string;
-    currentUnit?: import('../models/bitcoinUnits').BitcoinUnit;
-    preferredUnit?: import('../models/bitcoinUnits').BitcoinUnit;
+    currentUnit?: import('../models/xnaUnits').XnaUnit;
+    preferredUnit?: import('../models/xnaUnits').XnaUnit;
   };
 };

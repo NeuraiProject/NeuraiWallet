@@ -9,9 +9,9 @@ import { BlueSpacing20 } from '../../components/BlueSpacing';
 import Button from '../../components/Button';
 import { useTheme } from '../../components/themes';
 import loc from '../../loc';
-import { BitcoinUnit } from '../../models/bitcoinUnits';
+import { XnaUnit } from '../../models/xnaUnits';
 import DeeplinkSchemaMatch from '../../class/deeplink-schema-match';
-import { satoshiToBTC, fiatToBTC } from '../../blue_modules/currency';
+import { satoshiToXNA, fiatToXNA } from '../../blue_modules/currency';
 import { ReceiveDetailsStackParamList } from '../../navigation/ReceiveDetailsStackParamList';
 
 const ReceiveCustomAmountSheet = () => {
@@ -19,11 +19,11 @@ const ReceiveCustomAmountSheet = () => {
   const route = useRoute<RouteProp<ReceiveDetailsStackParamList, 'ReceiveCustomAmount'>>();
   const { colors } = useTheme();
 
-  const { address, currentLabel = '', currentAmount = '', currentUnit = BitcoinUnit.BTC, preferredUnit = BitcoinUnit.BTC } = route.params;
+  const { address, currentLabel = '', currentAmount = '', currentUnit = XnaUnit.XNA, preferredUnit = XnaUnit.XNA } = route.params;
 
   const [label, setLabel] = useState(currentLabel);
   const [amount, setAmount] = useState(currentAmount);
-  const [unit, setUnit] = useState<BitcoinUnit>(currentUnit);
+  const [unit, setUnit] = useState<XnaUnit>(currentUnit);
   const latestLabel = useRef(currentLabel);
 
   const stylesHook = useMemo(
@@ -41,7 +41,7 @@ const ReceiveCustomAmountSheet = () => {
   );
 
   const computeBip21 = useCallback(
-    (nextAmount: string, nextUnit: BitcoinUnit, nextLabel: string): string => {
+    (nextAmount: string, nextUnit: XnaUnit, nextLabel: string): string => {
       const trimmedAmount = nextAmount.trim();
       if (trimmedAmount.length === 0) {
         return nextLabel ? DeeplinkSchemaMatch.bip21encode(address, { label: nextLabel }) : DeeplinkSchemaMatch.bip21encode(address);
@@ -51,16 +51,16 @@ const ReceiveCustomAmountSheet = () => {
       const numericAmount = Number(trimmedAmount);
 
       switch (nextUnit) {
-        case BitcoinUnit.BTC:
+        case XnaUnit.XNA:
           break;
-        case BitcoinUnit.SATS:
-          normalizedAmount = satoshiToBTC(numericAmount);
+        case XnaUnit.SATS:
+          normalizedAmount = satoshiToXNA(numericAmount);
           break;
-        case BitcoinUnit.LOCAL_CURRENCY:
-          if (AmountInput.conversionCache[trimmedAmount + BitcoinUnit.LOCAL_CURRENCY]) {
-            normalizedAmount = satoshiToBTC(Number(AmountInput.conversionCache[trimmedAmount + BitcoinUnit.LOCAL_CURRENCY]));
+        case XnaUnit.LOCAL_CURRENCY:
+          if (AmountInput.conversionCache[trimmedAmount + XnaUnit.LOCAL_CURRENCY]) {
+            normalizedAmount = satoshiToXNA(Number(AmountInput.conversionCache[trimmedAmount + XnaUnit.LOCAL_CURRENCY]));
           } else {
-            normalizedAmount = fiatToBTC(numericAmount);
+            normalizedAmount = fiatToXNA(numericAmount);
           }
           break;
         default:
@@ -106,7 +106,7 @@ const ReceiveCustomAmountSheet = () => {
   }, [amount, unit, label, computeBip21, navigation]);
 
   const handleReset = useCallback(() => {
-    const fallbackUnit = preferredUnit || BitcoinUnit.BTC;
+    const fallbackUnit = preferredUnit || XnaUnit.XNA;
     const encoded = DeeplinkSchemaMatch.bip21encode(address);
     navigation.popTo(
       'ReceiveDetails',

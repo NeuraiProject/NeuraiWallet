@@ -9,25 +9,10 @@ import Realm from 'realm';
 import * as encryption from '../blue_modules/encryption';
 import presentAlert from '../components/Alert';
 import { randomBytes } from './rng';
-import { HDAezeedWallet } from './wallets/hd-aezeed-wallet';
-import { HDLegacyBreadwalletWallet } from './wallets/hd-legacy-breadwallet-wallet';
-import { HDLegacyElectrumSeedP2PKHWallet } from './wallets/hd-legacy-electrum-seed-p2pkh-wallet';
-import { HDLegacyP2PKHWallet } from './wallets/hd-legacy-p2pkh-wallet';
-import { HDSegwitBech32Wallet } from './wallets/hd-segwit-bech32-wallet';
-import { HDSegwitElectrumSeedP2WPKHWallet } from './wallets/hd-segwit-electrum-seed-p2wpkh-wallet';
-import { HDSegwitP2SHWallet } from './wallets/hd-segwit-p2sh-wallet';
-import { LegacyWallet } from './wallets/legacy-wallet';
-import { LightningCustodianWallet } from './wallets/lightning-custodian-wallet';
-import { MultisigHDWallet } from './wallets/multisig-hd-wallet';
-import { SegwitBech32Wallet } from './wallets/segwit-bech32-wallet';
-import { SegwitP2SHWallet } from './wallets/segwit-p2sh-wallet';
-import { SLIP39LegacyP2PKHWallet, SLIP39SegwitBech32Wallet, SLIP39SegwitP2SHWallet } from './wallets/slip39-wallets';
+import { NeuraiHDWallet } from './wallets/neurai-hd-wallet';
+import { NeuraiPQWallet } from './wallets/neurai-pq-wallet';
 import { ExtendedTransaction, Transaction, TWallet } from './wallets/types';
-import { WatchOnlyWallet } from './wallets/watch-only-wallet';
-import { getLNDHub } from '../helpers/lndHub';
-import { LightningArkWallet } from './wallets/lightning-ark-wallet.ts';
 import { hexToUint8Array, uint8ArrayToHex } from '../blue_modules/uint8array-extras';
-import { HDTaprootWallet } from './wallets/hd-taproot-wallet';
 
 let usedBucketNum: boolean | number = false;
 let savingInProgress = 0; // its both a flag and a counter of attempts to write to disk
@@ -54,12 +39,6 @@ export type TCounterpartyMetadata = {
   };
 };
 
-type TRealmTransaction = {
-  internal: boolean;
-  index: number;
-  tx: string;
-};
-
 type TBucketStorage = {
   wallets: string[]; // array of serialized wallets, not actual wallet objects
   tx_metadata: TTXMetadata;
@@ -70,7 +49,6 @@ const isReactNative = typeof navigator !== 'undefined' && navigator?.product ===
 
 export class BlueApp {
   static FLAG_ENCRYPTED = 'data_encrypted';
-  static LNDHUB = 'lndhub';
   static DO_NOT_TRACK = 'donottrack';
   static HANDOFF_STORAGE_KEY = 'HandOff';
 
@@ -385,96 +363,18 @@ export class BlueApp {
         const tempObj = JSON.parse(key);
         let unserializedWallet: TWallet;
         switch (tempObj.type) {
-          case SegwitBech32Wallet.type:
-            unserializedWallet = SegwitBech32Wallet.fromJson(key) as unknown as SegwitBech32Wallet;
+          case NeuraiHDWallet.type:
+            unserializedWallet = NeuraiHDWallet.fromJson(key) as unknown as NeuraiHDWallet;
             break;
-          case SegwitP2SHWallet.type:
-            unserializedWallet = SegwitP2SHWallet.fromJson(key) as unknown as SegwitP2SHWallet;
+          case NeuraiPQWallet.type:
+            unserializedWallet = NeuraiPQWallet.fromJson(key) as unknown as NeuraiPQWallet;
             break;
-          case WatchOnlyWallet.type:
-            unserializedWallet = WatchOnlyWallet.fromJson(key) as unknown as WatchOnlyWallet;
-            unserializedWallet.init();
-            if (unserializedWallet.isHd() && !unserializedWallet.isXpubValid()) {
-              continue;
-            }
-            break;
-          case HDLegacyP2PKHWallet.type:
-            unserializedWallet = HDLegacyP2PKHWallet.fromJson(key) as unknown as HDLegacyP2PKHWallet;
-            break;
-          case HDSegwitP2SHWallet.type:
-            unserializedWallet = HDSegwitP2SHWallet.fromJson(key) as unknown as HDSegwitP2SHWallet;
-            break;
-          case HDSegwitBech32Wallet.type:
-            unserializedWallet = HDSegwitBech32Wallet.fromJson(key) as unknown as HDSegwitBech32Wallet;
-            break;
-          case HDTaprootWallet.type:
-            unserializedWallet = HDTaprootWallet.fromJson(key) as unknown as HDTaprootWallet;
-            break;
-          case HDLegacyBreadwalletWallet.type:
-            unserializedWallet = HDLegacyBreadwalletWallet.fromJson(key) as unknown as HDLegacyBreadwalletWallet;
-            break;
-          case HDLegacyElectrumSeedP2PKHWallet.type:
-            unserializedWallet = HDLegacyElectrumSeedP2PKHWallet.fromJson(key) as unknown as HDLegacyElectrumSeedP2PKHWallet;
-            break;
-          case HDSegwitElectrumSeedP2WPKHWallet.type:
-            unserializedWallet = HDSegwitElectrumSeedP2WPKHWallet.fromJson(key) as unknown as HDSegwitElectrumSeedP2WPKHWallet;
-            break;
-          case MultisigHDWallet.type:
-            unserializedWallet = MultisigHDWallet.fromJson(key) as unknown as MultisigHDWallet;
-            break;
-          case HDAezeedWallet.type:
-            unserializedWallet = HDAezeedWallet.fromJson(key) as unknown as HDAezeedWallet;
-            // migrate password to this.passphrase field
-            // remove this code somewhere in year 2022
-            if (unserializedWallet.secret.includes(':')) {
-              const [mnemonic, passphrase] = unserializedWallet.secret.split(':');
-              unserializedWallet.secret = mnemonic;
-              unserializedWallet.passphrase = passphrase;
-            }
-
-            break;
-          case SLIP39SegwitP2SHWallet.type:
-            unserializedWallet = SLIP39SegwitP2SHWallet.fromJson(key) as unknown as SLIP39SegwitP2SHWallet;
-            break;
-          case SLIP39LegacyP2PKHWallet.type:
-            unserializedWallet = SLIP39LegacyP2PKHWallet.fromJson(key) as unknown as SLIP39LegacyP2PKHWallet;
-            break;
-          case SLIP39SegwitBech32Wallet.type:
-            unserializedWallet = SLIP39SegwitBech32Wallet.fromJson(key) as unknown as SLIP39SegwitBech32Wallet;
-            break;
-          case LightningArkWallet.type:
-            unserializedWallet = LightningArkWallet.fromJson(key) as unknown as LightningArkWallet;
-            break;
-          case LightningCustodianWallet.type: {
-            unserializedWallet = LightningCustodianWallet.fromJson(key) as unknown as LightningCustodianWallet;
-            let lndhub: false | any = false;
-            try {
-              lndhub = await getLNDHub();
-            } catch (error) {
-              console.warn(error);
-            }
-
-            if (unserializedWallet.baseURI) {
-              unserializedWallet.setBaseURI(unserializedWallet.baseURI); // not really necessary, just for the sake of readability
-              console.log('using saved uri for for ln wallet:', unserializedWallet.baseURI);
-            } else if (lndhub) {
-              console.log('using wallet-wide settings ', lndhub, 'for ln wallet');
-              unserializedWallet.setBaseURI(lndhub);
-            } else {
-              console.log('wallet does not have a baseURI. Continuing init...');
-            }
-            unserializedWallet.init();
-            break;
-          }
-          case 'lightningLdk':
-            // since ldk wallets are deprecated and removed, we need to handle a case when such wallet still exists in storage
-            unserializedWallet = new HDSegwitBech32Wallet();
-            unserializedWallet.setSecret(tempObj.secret.replace('ldk://', ''));
-            break;
-          case LegacyWallet.type:
           default:
-            unserializedWallet = LegacyWallet.fromJson(key) as unknown as LegacyWallet;
-            break;
+            // Unknown wallet type — likely a leftover Bitcoin / LN wallet from
+            // a pre-fork install. Skip it; the user can re-import the
+            // mnemonic into a Neurai wallet.
+            console.warn(`Skipping unknown wallet type: ${tempObj.type}`);
+            continue;
         }
 
         try {
@@ -520,113 +420,17 @@ export class BlueApp {
     this.wallets = tempWallets;
   };
 
-  inflateWalletFromRealm(realm: Realm, walletToInflate: TWallet) {
-    const transactions = realm.objects('WalletTransactions');
-    const transactionsForWallet = transactions.filtered(`walletid = "${walletToInflate.getID()}"`) as unknown as TRealmTransaction[];
-    for (const tx of transactionsForWallet) {
-      if (tx.internal === false) {
-        if ('_hdWalletInstance' in walletToInflate && walletToInflate._hdWalletInstance) {
-          const hd = walletToInflate._hdWalletInstance;
-          hd._txs_by_external_index[tx.index] = hd._txs_by_external_index[tx.index] || [];
-          const transaction = JSON.parse(tx.tx);
-          hd._txs_by_external_index[tx.index].push(transaction);
-        } else {
-          walletToInflate._txs_by_external_index[tx.index] = walletToInflate._txs_by_external_index[tx.index] || [];
-          const transaction = JSON.parse(tx.tx);
-          (walletToInflate._txs_by_external_index[tx.index] as Transaction[]).push(transaction);
-        }
-      } else if (tx.internal === true) {
-        if ('_hdWalletInstance' in walletToInflate && walletToInflate._hdWalletInstance) {
-          const hd = walletToInflate._hdWalletInstance;
-          hd._txs_by_internal_index[tx.index] = hd._txs_by_internal_index[tx.index] || [];
-          const transaction = JSON.parse(tx.tx);
-          hd._txs_by_internal_index[tx.index].push(transaction);
-        } else {
-          walletToInflate._txs_by_internal_index[tx.index] = walletToInflate._txs_by_internal_index[tx.index] || [];
-          const transaction = JSON.parse(tx.tx);
-          (walletToInflate._txs_by_internal_index[tx.index] as Transaction[]).push(transaction);
-        }
-      } else {
-        if (!Array.isArray(walletToInflate._txs_by_external_index)) walletToInflate._txs_by_external_index = [];
-        walletToInflate._txs_by_external_index = walletToInflate._txs_by_external_index || [];
-        const transaction = JSON.parse(tx.tx);
-        (walletToInflate._txs_by_external_index as Transaction[]).push(transaction);
-      }
-    }
+  /**
+   * Neurai wallets cache transactions in the engine's memory and do not
+   * persist per-tx data through Realm. These methods exist to satisfy older
+   * call sites; they are now no-ops.
+   */
+  inflateWalletFromRealm(_realm: Realm, _walletToInflate: TWallet) {
+    // intentional no-op
   }
 
-  offloadWalletToRealm(realm: Realm, wallet: TWallet): void {
-    const id = wallet.getID();
-    const walletToSave = ('_hdWalletInstance' in wallet && wallet._hdWalletInstance) || wallet;
-
-    if (Array.isArray(walletToSave._txs_by_external_index)) {
-      // if this var is an array that means its a single-address wallet class, and this var is a flat array
-      // with transactions
-      realm.write(() => {
-        // cleanup all existing transactions for the wallet first
-        const walletTransactionsToDelete = realm.objects('WalletTransactions').filtered(`walletid = '${id}'`);
-        realm.delete(walletTransactionsToDelete);
-
-        // @ts-ignore walletToSave._txs_by_external_index is array
-        for (const tx of walletToSave._txs_by_external_index) {
-          realm.create(
-            'WalletTransactions',
-            {
-              walletid: id,
-              tx: JSON.stringify(tx),
-            },
-            Realm.UpdateMode.Modified,
-          );
-        }
-      });
-
-      return;
-    }
-
-    /// ########################################################################################################
-
-    if (walletToSave._txs_by_external_index) {
-      realm.write(() => {
-        // cleanup all existing transactions for the wallet first
-        const walletTransactionsToDelete = realm.objects('WalletTransactions').filtered(`walletid = '${id}'`);
-        realm.delete(walletTransactionsToDelete);
-
-        // insert new ones:
-        for (const index of Object.keys(walletToSave._txs_by_external_index)) {
-          // @ts-ignore index is number
-          const txs = walletToSave._txs_by_external_index[index];
-          for (const tx of txs) {
-            realm.create(
-              'WalletTransactions',
-              {
-                walletid: id,
-                internal: false,
-                index: parseInt(index, 10),
-                tx: JSON.stringify(tx),
-              },
-              Realm.UpdateMode.Modified,
-            );
-          }
-        }
-
-        for (const index of Object.keys(walletToSave._txs_by_internal_index)) {
-          // @ts-ignore index is number
-          const txs = walletToSave._txs_by_internal_index[index];
-          for (const tx of txs) {
-            realm.create(
-              'WalletTransactions',
-              {
-                walletid: id,
-                internal: true,
-                index: parseInt(index, 10),
-                tx: JSON.stringify(tx),
-              },
-              Realm.UpdateMode.Modified,
-            );
-          }
-        }
-      });
-    }
+  offloadWalletToRealm(_realm: Realm, _wallet: TWallet): void {
+    // intentional no-op
   }
 
   /**
@@ -660,7 +464,7 @@ export class BlueApp {
         delete key.current;
         const keyCloned = Object.assign({}, key); // stripped-down version of a wallet to save to secure keystore
         if ('_hdWalletInstance' in key) {
-          const k = keyCloned as any & WatchOnlyWallet;
+          const k = keyCloned as any;
           k._hdWalletInstance = Object.assign({}, key._hdWalletInstance);
           k._hdWalletInstance._txs_by_external_index = {};
           k._hdWalletInstance._txs_by_internal_index = {};
@@ -782,48 +586,20 @@ export class BlueApp {
       for (const wallet of this.wallets) {
         if (c++ === index) {
           await wallet.fetchTransactions();
-
-          if ('fetchPendingTransactions' in wallet) {
-            await wallet.fetchPendingTransactions();
-            await wallet.fetchUserInvoices();
-          }
         }
       }
     } else {
-      await Promise.all(
-        this.wallets.map(async wallet => {
-          await wallet.fetchTransactions();
-          if ('fetchPendingTransactions' in wallet) {
-            await wallet.fetchPendingTransactions();
-            await wallet.fetchUserInvoices();
-          }
-        }),
-      );
+      await Promise.all(this.wallets.map(async wallet => wallet.fetchTransactions()));
     }
   };
 
-  fetchSenderPaymentCodes = async (index?: number) => {
-    console.log('fetchSenderPaymentCodes for wallet#', typeof index === 'undefined' ? '(all)' : index);
-    if (index || index === 0) {
-      const wallet = this.wallets[index];
-      try {
-        if (!(wallet.allowBIP47() && wallet.isBIP47Enabled() && 'fetchBIP47SenderPaymentCodes' in wallet)) return;
-        await wallet.fetchBIP47SenderPaymentCodes();
-      } catch (error) {
-        console.error('Failed to fetch sender payment codes for wallet', index, error);
-      }
-    } else {
-      await Promise.all(
-        this.wallets.map(async wallet => {
-          try {
-            if (!(wallet.allowBIP47() && wallet.isBIP47Enabled() && 'fetchBIP47SenderPaymentCodes' in wallet)) return;
-            await wallet.fetchBIP47SenderPaymentCodes();
-          } catch (error) {
-            console.error('Failed to fetch sender payment codes for wallet', wallet.label, error);
-          }
-        }),
-      );
-    }
+  /**
+   * BIP47 was specific to the Bitcoin pipeline. Neurai wallets do not
+   * publish payment codes, so this is a no-op kept around to satisfy older
+   * call sites.
+   */
+  fetchSenderPaymentCodes = async (_index?: number) => {
+    // intentional no-op
   };
 
   getWallets = (): TWallet[] => {
