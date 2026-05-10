@@ -110,6 +110,13 @@ export interface NeuraiBackend {
   /** Smart fee estimate for `targetBlocks` confirmation depth. */
   estimateFee(targetBlocks: number): Promise<FeeEstimate>;
 
+  /**
+   * Unix timestamps (seconds since epoch) for the given block heights.
+   * Returns a mapping `{ height -> blocktime }`. Heights that fail to
+   * resolve are simply omitted; callers should guard with `?? Date.now()/1e3`.
+   */
+  getBlockTimes(heights: number[]): Promise<Record<number, number>>;
+
   /** Verify the backend is reachable. Used by the Settings screen. */
   ping(): Promise<boolean>;
 }

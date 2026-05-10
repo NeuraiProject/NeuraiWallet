@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { RouteProp, useFocusEffect, usePreventRemove, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -8,6 +8,7 @@ import { Linking, StyleSheet, Text, TextInput, View } from 'react-native';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { BlueCard, BlueText } from '../../BlueComponents';
 import { Transaction, TWallet } from '../../class/wallets/types';
+import { getBlockExplorerUrlForWallet } from '../../models/blockExplorer';
 import presentAlert from '../../components/Alert';
 import CopyToClipboardButton from '../../components/CopyToClipboardButton';
 import HandOffComponent from '../../components/HandOffComponent';
@@ -67,6 +68,10 @@ const TransactionDetails = () => {
   const { hash, walletID } = useRoute<RouteProps>().params;
   const { saveToDisk, txMetadata, counterpartyMetadata, wallets, getTransactions } = useStorage();
   const { selectedBlockExplorer } = useSettings();
+  const explorerUrl = useMemo(() => {
+    const w = wallets.find(x => x.getID() === walletID);
+    return getBlockExplorerUrlForWallet(w as any, selectedBlockExplorer.url);
+  }, [wallets, walletID, selectedBlockExplorer]);
   const [from, setFrom] = useState<string[]>([]);
   const [to, setTo] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -151,7 +156,7 @@ const TransactionDetails = () => {
   }, [saveTransactionDetails]);
 
   const handleOnOpenTransactionOnBlockExplorerTapped = () => {
-    const url = `${selectedBlockExplorer.url}/tx/${tx?.hash}`;
+    const url = `${explorerUrl}/tx/${tx?.hash}`;
     Linking.canOpenURL(url)
       .then(supported => {
         if (supported) {
@@ -176,7 +181,7 @@ const TransactionDetails = () => {
   };
 
   const handleCopyPress = (stringToCopy: string) => {
-    Clipboard.setString(stringToCopy !== actionKeys.CopyToClipboard ? stringToCopy : `${selectedBlockExplorer.url}/tx/${tx?.hash}`);
+    Clipboard.setString(stringToCopy !== actionKeys.CopyToClipboard ? stringToCopy : `${explorerUrl}/tx/${tx?.hash}`);
   };
 
   if (isLoading || !tx) {
@@ -247,7 +252,7 @@ const TransactionDetails = () => {
       <HandOffComponent
         title={loc.transactions.details_title}
         type={HandOffActivityType.ViewInBlockExplorer}
-        url={`${selectedBlockExplorer.url}/tx/${tx.hash}`}
+        url={`${explorerUrl}/tx/${tx.hash}`}
       />
       <BlueCard>
         <View>

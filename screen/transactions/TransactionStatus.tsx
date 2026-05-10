@@ -22,7 +22,7 @@ import { useStorage } from '../../hooks/context/useStorage';
 import loc from '../../loc';
 import type { DetailViewStackParamList } from '../../navigation/DetailViewStackParamList';
 import type { Transaction } from '../../class/wallets/types';
-import { getBlockExplorerUrl } from '../../models/blockExplorer';
+import { getBlockExplorerUrl, getBlockExplorerUrlForWallet } from '../../models/blockExplorer';
 
 type RouteProps = RouteProp<DetailViewStackParamList, 'TransactionStatus'>;
 
@@ -35,10 +35,11 @@ const TransactionStatus: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    const wallet = params.walletID ? wallets.find(w => w.getID() === params.walletID) : undefined;
     getBlockExplorerUrl()
-      .then(setExplorerUrl)
+      .then(url => setExplorerUrl(getBlockExplorerUrlForWallet(wallet as any, url)))
       .catch(() => setExplorerUrl(''));
-  }, []);
+  }, [params.walletID, wallets]);
 
   useFocusEffect(
     useCallback(() => {

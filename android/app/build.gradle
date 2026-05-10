@@ -81,9 +81,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdkVersion rootProject.ext.compileSdkVersion
 
-    namespace "io.bluewallet.bluewallet"
+    namespace "org.neurai.wallet"
     defaultConfig {
-        applicationId "io.bluewallet.bluewallet"
+        applicationId "org.neurai.wallet"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -149,5 +149,23 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
 }
-apply plugin: 'com.google.gms.google-services'  // Google Services plugin
+
+// Block the legacy `com.android.support:*` artifacts that some transitive deps
+// (e.g. `play-services-iid` brought in by `react-native-device-info`) still
+// pull in. They duplicate classes that already exist in AndroidX (`androidx.*`)
+// and break the debug build with `Duplicate class` errors.
+configurations.all {
+    exclude group: 'com.android.support'
+}
+
+// Block the legacy `com.android.support:*` artifacts that some transitive deps
+// (e.g. `play-services-iid` brought in by `react-native-device-info`) still
+// pull in. They duplicate classes that already exist in AndroidX (`androidx.*`)
+// and break the debug build with `Duplicate class` errors.
+configurations.all {
+    exclude group: 'com.android.support'
+}
+// Google Services plugin removed: NeuraiWallet does not use Firebase yet
+// (no @react-native-firebase deps). Re-enable once a Neurai Firebase
+// project exists and ship a matching `google-services.json`.
 apply plugin: "com.bugsnag.android.gradle"

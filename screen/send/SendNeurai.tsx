@@ -17,9 +17,10 @@
  */
 
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Keyboard, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 
 import { BlueFormLabel, BlueText } from '../../BlueComponents';
 import presentAlert from '../../components/Alert';
@@ -38,6 +39,28 @@ import type { NeuraiBuildTransactionResult, NeuraiTransactionTarget } from '../.
 type RouteProps = RouteProp<DetailViewStackParamList, 'SendNeurai'>;
 type NavigationProps = NativeStackNavigationProp<DetailViewStackParamList, 'SendNeurai'>;
 
+/**
+ * Parse a payment payload coming from a scanned QR. Accepts either a bare
+ * Neurai address or a `xna:address?amount=N&label=...` URI. Anything that
+ * doesn't look like a URI is returned as the address as-is.
+ */
+function parseScannedPayload(input: string): { address: string; amount?: string } {
+  const trimmed = input.trim();
+  if (!trimmed.toLowerCase().startsWith('xna:')) {
+    return { address: trimmed };
+  }
+  const withoutScheme = trimmed.slice(4);
+  const [addressPart, queryPart] = withoutScheme.split('?', 2);
+  const result: { address: string; amount?: string } = { address: addressPart };
+  if (queryPart) {
+    for (const pair of queryPart.split('&')) {
+      const [k, v] = pair.split('=', 2);
+      if (k === 'amount' && v) result.amount = decodeURIComponent(v);
+    }
+  }
+  return result;
+}
+
 const SendNeurai: React.FC = () => {
   const { colors } = useTheme();
   const { wallets } = useStorage();
@@ -51,6 +74,21 @@ const SendNeurai: React.FC = () => {
   const [draft, setDraft] = useState<NeuraiBuildTransactionResult | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isBroadcasting, setIsBroadcasting] = useState(false);
+
+  // Use the callback path of ScanQRCode (it calls back + goBack()) instead of
+  // the popTo path: SendNeurai lives inside the nested DetailViewScreensStack
+  // while ScanQRCode is registered at the top-level DetailViewStack, so
+  // popTo('SendNeurai') from the modal can't find it across navigators.
+  const handleScanned = useCallback((data: string) => {
+    const parsed = parseScannedPayload(data);
+    if (parsed.address) setAddress(parsed.address);
+    if (parsed.amount) setAmount(parsed.amount);
+    setDraft(null);
+  }, []);
+
+  const openScanner = useCallback(() => {
+    navigate('ScanQRCode', { onBarScanned: handleScanned, showFileImportButton: false });
+  }, [navigate, handleScanned]);
 
   const stylesHook = {
     label: {
@@ -99,6 +137,12 @@ const SendNeurai: React.FC = () => {
       const txid = await wallet.broadcastTx(draft.signedHex);
       triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
       presentAlert({ message: `${loc.send.broadcastSuccess}: ${txid}` });
+      // Pull mempool + balance straight away so the wallet list reflects the
+      // pending tx by the time we land on it. Failures here are non-fatal —
+      // the WalletTransactions auto-poller will catch up within 10 s.
+      Promise.all([wallet.fetchTransactions(), wallet.fetchBalance()]).catch(err =>
+        console.debug('post-broadcast refresh failed:', err),
+      );
       navigate('WalletTransactions', { walletID: wallet.getID(), walletType: wallet.type });
     } catch (err: any) {
       presentAlert({ message: err?.message ?? String(err) });
@@ -132,6 +176,16 @@ const SendNeurai: React.FC = () => {
           style={styles.textInput}
           underlineColorAndroid="transparent"
         />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={loc.send.details_scan}
+          testID="SendNeuraiScan"
+          onPress={openScanner}
+          disabled={isBuilding || isBroadcasting}
+          style={({ pressed }) => [styles.scanButton, pressed && styles.scanButtonPressed]}
+        >
+          <MaterialIcons name="qr-code-scanner" size={22} color={colors.foregroundColor} />
+        </Pressable>
       </View>
 
       <BlueFormLabel>{loc.send.details_amount_field_is_not_valid ? loc.send.create_amount : ''}</BlueFormLabel>
@@ -187,6 +241,13 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   textInput: { flex: 1, marginHorizontal: 8, color: '#81868e' },
+  scanButton: {
+    paddingHorizontal: 12,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanButtonPressed: { opacity: 0.5 },
   unit: { paddingHorizontal: 12, fontWeight: '600', color: '#81868e' },
   feeBox: {
     marginHorizontal: 20,

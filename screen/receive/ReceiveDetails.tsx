@@ -379,6 +379,11 @@ const ReceiveDetails = () => {
   useEffect(() => {
     console.debug('receive/details - useEffect');
 
+    // Neurai wallets use the RPC backend (see blue_modules/neurai); the
+    // BlueElectrum-based polling below is Bitcoin-era code that cannot decode
+    // the `xna:` URI scheme either, so skip it entirely.
+    if (isNeuraiWallet(wallet)) return;
+
     const intervalId = setInterval(async () => {
       try {
         const decoded = DeeplinkSchemaMatch.bip21decode(bip21encoded);
@@ -454,7 +459,46 @@ const ReceiveDetails = () => {
     }, intervalMs);
 
     return () => clearInterval(intervalId);
-  }, [bip21encoded, address, initialConfirmed, initialUnconfirmed, intervalMs, fetchAndSaveWalletTransactions, walletID]);
+  }, [bip21encoded, address, initialConfirmed, initialUnconfirmed, intervalMs, fetchAndSaveWalletTransactions, walletID, wallet]);
+
+  // Neurai-native balance poll. Hits the wallet's RPC backend every 5 s and
+  // surfaces the success / pending UI when funds arrive at the displayed
+  // address. Balances come back as XNA full units; multiply by 1e8 to compare
+  // in satoshis (consistent with the formatter expectations).
+  const neuraiPrevSatRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!isNeuraiWallet(wallet)) return;
+    if (!address) return;
+    neuraiPrevSatRef.current = null;
+    const ONE_FULL_COIN = 1e8;
+    const intervalId = setInterval(async () => {
+      try {
+        const xnaBalance = await wallet.getBackend().getBalance([address]);
+        const satNow = Math.round(xnaBalance * ONE_FULL_COIN);
+        const prev = neuraiPrevSatRef.current;
+        neuraiPrevSatRef.current = satNow;
+        if (prev === null) return;
+        if (satNow <= prev) return;
+        const delta = satNow - prev;
+        triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
+        setShowConfirmedBalance(true);
+        setShowPendingBalance(false);
+        setShowAddress(false);
+        setDisplayBalance(
+          loc.formatString(loc.transactions.received_with_amount, {
+            amt1: formatBalance(delta, XnaUnit.LOCAL_CURRENCY, true).toString(),
+            amt2: formatBalance(delta, XnaUnit.XNA, true).toString(),
+          }),
+        );
+        if (walletID) {
+          fetchAndSaveWalletTransactions(walletID);
+        }
+      } catch (error) {
+        console.debug('Neurai balance poll failed:', error);
+      }
+    }, 5000);
+    return () => clearInterval(intervalId);
+  }, [wallet, address, walletID, fetchAndSaveWalletTransactions]);
 
   useEffect(() => {
     const handleBackButton = () => {

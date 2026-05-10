@@ -78,6 +78,10 @@ export class ElectrumXBackend implements NeuraiBackend {
     throw new NotImplementedError('estimateFee', 'wire blockchain.estimatefee');
   }
 
+  getBlockTimes(_heights: number[]): Promise<Record<number, number>> {
+    throw new NotImplementedError('getBlockTimes', 'wire blockchain.block.header');
+  }
+
   async ping(): Promise<boolean> {
     return false;
   }

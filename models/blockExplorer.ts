@@ -10,7 +10,7 @@ export interface BlockExplorer {
 export const BLOCK_EXPLORERS: { [key: string]: BlockExplorer } = {
   default: { key: 'default', name: 'Neurai Explorer', url: 'https://explorer.neurai.org' },
   rebel: { key: 'rebel', name: 'Rebel XNA Explorer', url: 'https://rebel-xna-explorer.neurai.org' },
-  testnet: { key: 'testnet', name: 'Neurai Testnet Explorer', url: 'https://testnet-explorer.neurai.org' },
+  testnet: { key: 'testnet', name: 'Neurai Testnet Explorer', url: 'https://rebel-explorer-testnet.neurai.org' },
   custom: { key: 'custom', name: 'Custom', url: '' }, // Custom URL will be handled separately
 };
 
@@ -76,4 +76,21 @@ export const getBlockExplorerUrl = async (): Promise<string> => {
     console.error('Error getting block explorer:', error);
     return BLOCK_EXPLORERS.default.url;
   }
+};
+
+/**
+ * Pick the right explorer for a given wallet. Testnet wallets always go to
+ * the testnet explorer regardless of the user's chosen mainnet explorer,
+ * because mainnet explorers won't resolve testnet txids/addresses.
+ */
+export const getBlockExplorerUrlForWallet = (
+  wallet: { type?: string; network?: string } | null | undefined,
+  defaultUrl: string,
+): string => {
+  if (!wallet) return defaultUrl;
+  const network = (wallet as { network?: string }).network;
+  if (network === 'xna-test' || network === 'xna-pq-test') {
+    return BLOCK_EXPLORERS.testnet.url;
+  }
+  return defaultUrl;
 };

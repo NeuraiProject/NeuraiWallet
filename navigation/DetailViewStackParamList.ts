@@ -48,6 +48,7 @@ export type DetailViewStackParamList = {
     walletID: string;
     address?: string;
     amount?: number;
+    onBarScanned?: string;
   };
   ImportNeurai: undefined;
   WalletExport: undefined;

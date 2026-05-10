@@ -1,4 +1,4 @@
-package io.bluewallet.bluewallet
+package org.neurai.wallet
 
 import com.facebook.react.TurboReactPackage
 import com.facebook.react.bridge.NativeModule

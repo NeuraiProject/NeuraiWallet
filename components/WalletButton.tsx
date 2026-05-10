@@ -24,29 +24,17 @@ interface WalletButtonProps {
 }
 
 const buttonDetails: Record<string, ButtonDetails> = {
-  Bitcoin: {
-    image: require('../img/addWallet/bitcoin.png'),
-    title: loc.wallets.add_bitcoin,
-    explain: loc.wallets.add_bitcoin_explain,
+  NeuraiLegacy: {
+    image: require('../img/addWallet/neurai.png'),
+    title: loc.wallets.add_neurai_legacy,
+    explain: loc.wallets.add_neurai_legacy_explain,
     borderColorActive: 'newBlue',
   },
-  Vault: {
-    image: require('../img/addWallet/vault.png'),
-    title: loc.multisig.multisig_vault,
-    explain: loc.multisig.multisig_vault_explain,
+  NeuraiPQ: {
+    image: require('../img/addWallet/neurai.png'),
+    title: loc.wallets.add_neurai_pq,
+    explain: loc.wallets.add_neurai_pq_explain,
     borderColorActive: 'foregroundColor',
-  },
-  Lightning: {
-    image: require('../img/addWallet/lightning.png'),
-    title: loc.wallets.add_lightning,
-    explain: loc.wallets.add_lightning_explain,
-    borderColorActive: 'lnborderColor',
-  },
-  LightningArk: {
-    image: require('../img/addWallet/lightning.png'),
-    title: loc.wallets.add_lightning,
-    explain: loc.wallets.add_lightning_explain + '\nPowered by Arkade',
-    borderColorActive: 'lnborderColor',
   },
 };
 

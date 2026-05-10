@@ -263,6 +263,10 @@
   "wallets": {
     "add_bitcoin": "Neurai HD",
     "add_bitcoin_explain": "Simple and powerful Neurai wallet (BIP44)",
+    "add_neurai_legacy": "Neurai Legacy",
+    "add_neurai_legacy_explain": "Standard ECDSA addresses (BIP44)",
+    "add_neurai_pq": "Neurai Post-Quantum",
+    "add_neurai_pq_explain": "Quantum-safe addresses (ML-DSA-44)",
     "neurai_network_mainnet": "Mainnet",
     "neurai_network_testnet": "Testnet",
     "neurai_network_label": "Neurai Network",

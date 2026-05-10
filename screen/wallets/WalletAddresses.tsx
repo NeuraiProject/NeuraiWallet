@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useReducer, useMemo } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useReducer, useMemo, useState } from 'react';
 import { useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { ActivityIndicator, FlatList, StyleSheet, View } from 'react-native';
 import { AddressItem } from '../../components/addresses/AddressItem';
@@ -12,6 +12,7 @@ import loc from '../../loc';
 import { XnaUnit } from '../../models/xnaUnits';
 import { useSettings } from '../../hooks/context/useSettings';
 import { useScreenProtect } from '../../hooks/useScreenProtect';
+import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 
 export const TABS = {
   EXTERNAL: 'receive',
@@ -146,8 +147,38 @@ const WalletAddresses: React.FC = () => {
     }, [disableScreenProtect, enableScreenProtect, isPrivacyBlurEnabled]),
   );
 
+  // For Neurai wallets the engine is lazy-initialised. Prewarm it once on
+  // mount so the address list populates after a fresh app launch (where the
+  // wallet was rehydrated from disk without an engine).
+  const [engineReady, setEngineReady] = useState(0);
+  useEffect(() => {
+    if (!walletInstance || !isNeuraiWallet(walletInstance)) return;
+    if (walletInstance.getCachedAddresses().length > 0) return;
+    let cancelled = false;
+    walletInstance
+      .prewarmEngine()
+      .then(() => {
+        if (!cancelled) setEngineReady(n => n + 1);
+      })
+      .catch(err => console.warn('prewarmEngine failed:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [walletInstance]);
+
   const getAddresses = useMemo(() => {
     if (!walletInstance) return [];
+    if (isNeuraiWallet(walletInstance)) {
+      const cached = walletInstance.getCachedAddresses();
+      return cached.map((address, index) => ({
+        key: address,
+        index,
+        address,
+        isInternal: false,
+        balance: 0,
+        transactions: 0,
+      }));
+    }
     const newAddresses: Address[] = [];
     const changeMaxIndex = (
       'next_free_change_address_index' in walletInstance
@@ -174,7 +205,7 @@ const WalletAddresses: React.FC = () => {
       }
     }
     return newAddresses;
-  }, [walletInstance]);
+  }, [walletInstance, engineReady]);
 
   useEffect(() => {
     dispatch({ type: SET_ADDRESSES, payload: getAddresses });
@@ -187,10 +218,10 @@ const WalletAddresses: React.FC = () => {
   );
 
   useEffect(() => {
-    if (showAddresses && addressList.current) {
+    if (showAddresses && addressList.current && filteredAddresses.length > 0) {
       addressList.current.scrollToIndex({ animated: false, index: 0 });
     }
-  }, [showAddresses]);
+  }, [showAddresses, filteredAddresses.length]);
 
   useLayoutEffect(() => {
     setOptions({

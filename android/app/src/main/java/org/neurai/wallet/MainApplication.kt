@@ -1,4 +1,4 @@
-package io.bluewallet.bluewallet
+package org.neurai.wallet
 
 import android.app.Application
 import android.content.Context
@@ -15,7 +15,7 @@ import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.modules.i18nmanager.I18nUtil
-import io.bluewallet.bluewallet.components.segmentedcontrol.SegmentedControlPackage
+import org.neurai.wallet.components.segmentedcontrol.SegmentedControlPackage
 
 class MainApplication : Application(), ReactApplication {
 

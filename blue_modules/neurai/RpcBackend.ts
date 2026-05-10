@@ -81,6 +81,24 @@ export class RpcBackend implements NeuraiBackend {
     };
   }
 
+  async getBlockTimes(heights: number[]): Promise<Record<number, number>> {
+    const unique = Array.from(new Set(heights.filter(h => h > 0)));
+    if (unique.length === 0) return {};
+    const out: Record<number, number> = {};
+    await Promise.all(
+      unique.map(async height => {
+        try {
+          const hash = await this.rpcCaller<string>(methods.getblockhash, [height]);
+          const header = await this.rpcCaller<{ time: number }>(methods.getblockheader, [hash]);
+          if (typeof header?.time === 'number') out[height] = header.time;
+        } catch (err) {
+          console.debug('getBlockTimes: failed for height', height, err);
+        }
+      }),
+    );
+    return out;
+  }
+
   async ping(): Promise<boolean> {
     try {
       await this.getTipHeight();

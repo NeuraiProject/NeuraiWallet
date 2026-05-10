@@ -1,4 +1,4 @@
-package io.bluewallet.bluewallet
+package org.neurai.wallet
 
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider

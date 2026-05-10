@@ -157,10 +157,12 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
         console.error('Error setting preference name:', e);
       }
 
+      // BlueElectrum is dead code for NeuraiWallet (we use the RPC backend in
+      // blue_modules/neurai). Force the flag on so consumers like
+      // `WalletTransactions` don't pause auto-refresh and we never reach the
+      // `connectMain()` path below.
+      setIsElectrumDisabled(true);
       const promises: Promise<void>[] = [
-        BlueElectrum.isDisabled().then(disabled => {
-          setIsElectrumDisabled(disabled);
-        }),
         getIsHandOffUseEnabled().then(handOff => {
           setIsHandOffUseEnabledState(handOff);
         }),
@@ -219,10 +221,13 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
   }, []);
 
   useEffect(() => {
+    // Make sure we never accidentally open a Bitcoin Electrum socket — the
+    // hosts in BlueElectrum.ts (electrum1.bluewallet.io etc.) can't serve
+    // Neurai data and produce noisy reconnect loops.
     if (walletsInitialized) {
-      isElectrumDisabled ? BlueElectrum.forceDisconnect() : BlueElectrum.connectMain();
+      BlueElectrum.forceDisconnect();
     }
-  }, [isElectrumDisabled, walletsInitialized]);
+  }, [walletsInitialized]);
 
   const setPreferredFiatCurrencyStorage = useCallback(async (currency: TFiatUnit): Promise<void> => {
     try {

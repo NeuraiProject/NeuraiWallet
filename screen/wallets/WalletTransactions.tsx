@@ -175,7 +175,10 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const refreshTransactions = useCallback(
     async (isManualRefresh = false) => {
       console.debug('refreshTransactions, ', wallet.getLabel());
-      if (isElectrumDisabled || isLoading) return;
+      // Neurai wallets fetch through the RPC backend, not BlueElectrum, so the
+      // legacy "Electrum disabled" toggle no longer applies — only skip when
+      // we're already mid-refresh.
+      if (isLoading) return;
 
       const MIN_REFRESH_INTERVAL = 5000; // 5 seconds
       if (!isManualRefresh && lastFetchTimestamp !== 0 && Date.now() - lastFetchTimestamp < MIN_REFRESH_INTERVAL) {
@@ -231,10 +234,22 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   );
 
   useEffect(() => {
-    if (lastFetchTimestamp === 0 && !isLoading && !isElectrumDisabled) {
+    if (lastFetchTimestamp === 0 && !isLoading) {
       refreshTransactions(false).catch(console.error);
     }
-  }, [wallet, isElectrumDisabled, isLoading, refreshTransactions, lastFetchTimestamp]);
+  }, [wallet, isLoading, refreshTransactions, lastFetchTimestamp]);
+
+  // Auto-poll balance + transactions every 10 s so a freshly-broadcast send,
+  // an incoming receive, or a confirmation lands in the UI without the user
+  // having to pull-to-refresh.
+  useFocusEffect(
+    useCallback(() => {
+      const id = setInterval(() => {
+        refreshTransactions(false).catch(console.error);
+      }, 10000);
+      return () => clearInterval(id);
+    }, [refreshTransactions]),
+  );
 
   const renderListFooterComponent = () => {
     // if not all txs rendered - display indicator

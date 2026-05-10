@@ -54,6 +54,7 @@ const WalletsAdd: React.FC = () => {
       wallet.setNetwork(chainFor(network, walletKind));
       wallet.setLabel(label.trim() || loc.wallets.details_title);
       wallet.generate();
+      await wallet.prewarmEngine();
       addWallet(wallet);
       await saveToDisk();
       triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
@@ -93,14 +94,14 @@ const WalletsAdd: React.FC = () => {
         <BlueFormLabel>{loc.wallets.add_wallet_type}</BlueFormLabel>
         <View style={styles.buttons}>
           <WalletButton
-            buttonType="Bitcoin"
+            buttonType="NeuraiLegacy"
             testID="ActivateNeuraiHDButton"
             active={walletKind === 'legacy'}
             onPress={() => setWalletKind('legacy')}
             size={styles.button}
           />
           <WalletButton
-            buttonType="Vault"
+            buttonType="NeuraiPQ"
             testID="ActivateNeuraiPQButton"
             active={walletKind === 'pq'}
             onPress={() => setWalletKind('pq')}

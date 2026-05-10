@@ -179,6 +179,24 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     return engine.getReceiveAddress();
   }
 
+  // The Bitcoin pipeline (ReceiveDetails, deeplink router, push-notifications)
+  // calls `getAddress()` synchronously and `getAddressAsync()` for the slow
+  // path. Wire both to the engine so freshly-created Neurai wallets show a QR
+  // and copyable address as soon as they're prewarmed.
+  getAddress(): string | false | undefined {
+    if (!this._engine) return false;
+    try {
+      const addrs = this._engine.getAddresses();
+      return addrs[0] ?? false;
+    } catch {
+      return false;
+    }
+  }
+
+  async getAddressAsync(): Promise<string | false | undefined> {
+    return this.getReceiveAddressAsync();
+  }
+
   async getChangeAddressAsync(): Promise<string> {
     const engine = await this.ensureEngine();
     return engine.getChangeAddress();
@@ -187,6 +205,25 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   async getAddressesAsync(): Promise<string[]> {
     const engine = await this.ensureEngine();
     return engine.getAddresses();
+  }
+
+  /**
+   * Initialise the engine without waiting for any blocking operation.
+   * Safe to call right after `generate()`/`setSecret()` so callers that need
+   * synchronous address access (carousels, QR display) can read the cached
+   * `_engine.getAddresses()` immediately afterwards.
+   */
+  async prewarmEngine(): Promise<void> {
+    await this.ensureEngine();
+  }
+
+  /**
+   * Synchronously returns engine-derived addresses if the engine has been
+   * initialised; otherwise returns an empty array. Bitcoin-pipeline screens
+   * call this without awaiting, so they get whatever is cached.
+   */
+  getCachedAddresses(): string[] {
+    return this._engine ? this._engine.getAddresses() : [];
   }
 
   weOwnAddress(address: string): boolean {
@@ -289,11 +326,21 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   async fetchTransactions(): Promise<void> {
     const engine = await this.ensureEngine();
     const addresses = engine.getAddresses();
-    const deltas = (await this.getBackend().getAddressHistory(addresses)) as IDelta[];
+    const backend = this.getBackend();
+    const deltas = (await backend.getAddressHistory(addresses)) as IDelta[];
     const baseCurrency = engine.getBaseCurrency();
     const items = getHistory(deltas, baseCurrency);
+    const heights = Array.from(new Set(items.map(i => i.blockHeight).filter(h => h > 0)));
+    let blockTimes: Record<number, number> = {};
+    if (heights.length > 0) {
+      try {
+        blockTimes = await backend.getBlockTimes(heights);
+      } catch (err) {
+        console.debug('fetchTransactions: getBlockTimes failed', err);
+      }
+    }
     this._historyItems = items;
-    this._txCache = items.map(item => this._historyItemToTransaction(item, deltas));
+    this._txCache = items.map(item => this._historyItemToTransaction(item, deltas, blockTimes));
     this._lastTxFetch = Date.now();
   }
 
@@ -350,11 +397,17 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   // ---------- helpers --------------------------------------------------------------
 
-  private _historyItemToTransaction(item: IHistoryItem, deltas: IDelta[]): Transaction {
+  private _historyItemToTransaction(
+    item: IHistoryItem,
+    _deltas: IDelta[],
+    blockTimes: Record<number, number>,
+  ): Transaction {
     const xnaAsset = item.assets.find(a => a.assetName === 'XNA');
     const value = xnaAsset ? Math.round(xnaAsset.satoshis) : 0;
-    const matchingDelta = deltas.find(d => d.txid === item.transactionId);
-    const blockindex = matchingDelta?.blockindex ?? 0;
+    // Mempool txs (height 0) get the current wall clock so the UI shows
+    // "just now" instead of 1970. Confirmed txs use the block header time.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const time = item.blockHeight > 0 ? blockTimes[item.blockHeight] ?? nowSec : nowSec;
     return {
       txid: item.transactionId,
       hash: item.transactionId,
@@ -367,9 +420,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       outputs: [],
       blockhash: '',
       confirmations: item.blockHeight > 0 ? 1 : 0,
-      time: 0,
-      blocktime: blockindex,
-      timestamp: blockindex,
+      time,
+      blocktime: time,
+      timestamp: time,
       value: item.isSent ? -Math.abs(value) : Math.abs(value),
     };
   }
