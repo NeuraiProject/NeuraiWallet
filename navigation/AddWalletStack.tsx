@@ -12,6 +12,7 @@ export type AddWalletStackParamList = {
   PleaseBackup: {
     walletID: string;
   };
+  ImportNeurai: undefined;
   ScanQRCode: ScanQRCodeParamList;
 };
 
@@ -19,10 +20,12 @@ const Stack = createNativeStackNavigator<AddWalletStackParamList>();
 
 const WalletsAdd = lazy(() => import('../screen/wallets/Add'));
 const PleaseBackup = lazy(() => import('../screen/wallets/PleaseBackup'));
+const ImportNeurai = lazy(() => import('../screen/wallets/ImportNeurai'));
 const ScanQRCode = lazy(() => import('../screen/send/ScanQRCode'));
 
 const AddComponent = withLazySuspense(WalletsAdd);
 const PleaseBackupComponent = withLazySuspense(PleaseBackup);
+const ImportNeuraiComponent = withLazySuspense(ImportNeurai);
 const ScanQRCodeComponent = withLazySuspense(ScanQRCode);
 
 const AddWalletStack = () => {
@@ -45,6 +48,11 @@ const AddWalletStack = () => {
           headerBackVisible: false,
           title: loc.pleasebackup.title,
         })(theme)}
+      />
+      <Stack.Screen
+        name="ImportNeurai"
+        component={ImportNeuraiComponent}
+        options={navigationStyle({ title: loc.wallets.import_title })(theme)}
       />
       <Stack.Screen
         name="ScanQRCode"

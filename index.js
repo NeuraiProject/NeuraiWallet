@@ -34,4 +34,4 @@ const BlueAppComponent = () => {
   return <App />;
 };
 
-AppRegistry.registerComponent('BlueWallet', () => BlueAppComponent);
+AppRegistry.registerComponent('NeuraiWallet', () => BlueAppComponent);

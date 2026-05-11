@@ -1,7 +1,7 @@
 /**
  * Push notifications stub.
  *
- * BlueWallet shipped with `react-native-notifications` + a self-hosted
+ * NeuraiWallet shipped with `react-native-notifications` + a self-hosted
  * GroundControl backend, plus FCM (Firebase) on Android. NeuraiWallet does
  * not have a Firebase project yet, so calling FCM crashes the process at
  * startup with `Default FirebaseApp is not initialized`. Until we wire up a

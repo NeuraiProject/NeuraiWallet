@@ -4,14 +4,14 @@ import { Appearance } from 'react-native';
 /**
  * NeuraiWallet color tokens.
  *
- * Re-skinned from BlueWallet's blue scheme to the orange-on-neutral palette
+ * Re-skinned from NeuraiWallet's blue scheme to the orange-on-neutral palette
  * the neurai-faucet frontend uses (orange #f97316 accent, Tailwind gray
  * scale). Token names are kept so existing consumers across screens/buttons
  * keep working; only the values change.
  */
 
 // Brand accent — Tailwind orange-500/600 family. Used everywhere a CTA, link
-// or "selected" indicator was rendered with BlueWallet's `newBlue`.
+// or "selected" indicator was rendered with NeuraiWallet's `newBlue`.
 const NEURAI_ORANGE = '#f97316';
 const NEURAI_ORANGE_HOVER = '#ea6c10';
 const NEURAI_ORANGE_LIGHT = '#fff7ed';

@@ -237,7 +237,7 @@ export type FiatUnitType = {
 /**
  * Returns the Neurai (XNA) → fiat exchange rate.
  *
- * The original BlueWallet routed each fiat ticker through its preferred Bitcoin
+ * The original NeuraiWallet routed each fiat ticker through its preferred Bitcoin
  * data source (Coinbase BTC-USD, Bitstamp btcusd, Kraken XXBT..., Yadio,
  * Exir IRT, coinpaprika btc-bitcoin, etc). Neurai has no equivalents on those
  * venues, so we force every lookup through CoinGecko, which exposes XNA via

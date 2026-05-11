@@ -86,7 +86,7 @@ android {
         applicationId "org.neurai.wallet"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // versionCode is the Unix timestamp of the build (BlueWallet legacy
+        // versionCode is the Unix timestamp of the build (NeuraiWallet legacy
         // convention: the About screen renders `new Date(versionCode * 1000)`).
         // Bump this on each release to keep the timeline correct.
         versionCode 1778371200
@@ -160,18 +160,10 @@ dependencies {
 configurations.all {
     exclude group: 'com.android.support'
 }
-
-// Block the legacy `com.android.support:*` artifacts that some transitive deps
-// (e.g. `play-services-iid` brought in by `react-native-device-info`) still
-// pull in. They duplicate classes that already exist in AndroidX (`androidx.*`)
-// and break the debug build with `Duplicate class` errors.
-configurations.all {
-    exclude group: 'com.android.support'
-}
 // Google Services plugin removed: NeuraiWallet does not use Firebase yet
 // (no @react-native-firebase deps). Re-enable once a Neurai Firebase
 // project exists and ship a matching `google-services.json`.
 //
 // Bugsnag plugin removed: NeuraiWallet has no crash-reporting backend; the
-// inherited BlueWallet Bugsnag project key was leaking error reports off to
-// BlueWallet's account. Re-add once Neurai has its own Bugsnag project.
+// inherited NeuraiWallet Bugsnag project key was leaking error reports off to
+// NeuraiWallet's account. Re-add once Neurai has its own Bugsnag project.

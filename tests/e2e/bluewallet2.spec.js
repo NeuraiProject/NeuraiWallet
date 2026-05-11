@@ -58,7 +58,7 @@ beforeAll(async () => {
   } catch (_) {}
 }, 1200_000);
 
-describe('BlueWallet UI Tests - import BIP84 wallet', () => {
+describe('NeuraiWallet UI Tests - import BIP84 wallet', () => {
   it('can create a transaction; can scanQR with bip21; can switch units', async () => {
     const lockFile = '/tmp/travislock.' + hashIt('t21');
     if (process.env.CI) {

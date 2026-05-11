@@ -5,7 +5,7 @@ import { NeuraiPQWallet } from './neurai-pq-wallet';
 /**
  * Minimal UTXO shape consumed by the legacy abstract-wallet code paths and
  * the Neurai engine wrapper. The Neurai-specific UTXO carries `outputIndex`
- * and `satoshis`; here we keep the BlueWallet-style fields the older
+ * and `satoshis`; here we keep the NeuraiWallet-style fields the older
  * `_utxo` cache uses.
  */
 export type Utxo = {

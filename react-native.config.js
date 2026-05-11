@@ -19,7 +19,7 @@ module.exports = {
     },
   },
   codegenConfig: {
-    name: 'BlueWalletSpec',
+    name: 'NeuraiWalletSpec',
     type: 'all',
     jsSrcsDir: './codegen',
     android: {

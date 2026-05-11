@@ -1,7 +1,7 @@
 /**
  * Release notes screen.
  *
- * Lists the changes made when forking BlueWallet into NeuraiWallet. The
+ * Lists the changes made when forking NeuraiWallet into NeuraiWallet. The
  * upstream `release-notes.txt` is generated from `git log` by `postinstall`
  * and resets on every `npm install`, so we hard-code the adaptation summary
  * here and keep it under source control.
@@ -13,7 +13,7 @@ import { BlueCard } from '../../BlueComponents';
 import { useTheme } from '../../components/themes';
 
 const NEURAI_ADAPTATION_NOTES: string[] = [
-  'Initial port of BlueWallet to Neurai (XNA).',
+  'Initial port of NeuraiWallet to Neurai (XNA).',
   'Native support for Neurai mainnet and testnet, with per-wallet network selection.',
   'Two wallet kinds available at creation time: Neurai Legacy (ECDSA, BIP44) and Neurai Post-Quantum (ML-DSA-44, AuthScript v1).',
   'Bech32m AuthScript receive addresses for PQ wallets (nq1… on mainnet, tnq1… on testnet).',
@@ -27,7 +27,7 @@ const NEURAI_ADAPTATION_NOTES: string[] = [
   'Wallet list and transaction history auto-refresh every 10 seconds; pull-to-refresh remains for manual sync.',
   'Bitcoin / Lightning / Multisig / Watch-only / BIP47 flows removed; navigation, types and storage trimmed accordingly.',
   'Bundle ID and Android namespace changed to org.neurai.wallet; launcher icons regenerated from the Neurai logo.',
-  'BlueElectrum, GroundControl push notifications, BlueWallet Bugsnag and Firebase Cloud Messaging dependencies removed.',
+  'BlueElectrum, GroundControl push notifications, NeuraiWallet Bugsnag and Firebase Cloud Messaging dependencies removed.',
   'Hermes runtime polyfills added (Uint8Array.prototype.equals, Buffer.prototype.subarray) so the post-quantum signer works on React Native.',
   'Settings > Tools restored with two NeuraiWallet-native tools: raw transaction broadcaster and BIP39 final-word completer.',
 ];

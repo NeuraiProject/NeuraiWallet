@@ -1,7 +1,7 @@
 /**
  * Diagnostic screen.
  *
- * The original BlueWallet self-test exercised every Bitcoin wallet class
+ * The original NeuraiWallet self-test exercised every Bitcoin wallet class
  * (legacy, segwit, multisig, taproot, aezeed, slip39, payjoin, BIP38) plus
  * BlueElectrum end-to-end. None of that ships in NeuraiWallet, so this screen
  * is a placeholder while we decide which Neurai-side checks make sense

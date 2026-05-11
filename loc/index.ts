@@ -432,7 +432,7 @@ export function _leaveNumbersAndDots(newInputValue: string) {
 }
 
 /**
- * @see https://github.com/BlueWallet/BlueWallet/issues/3466
+ * @see https://github.com/NeuraiWallet/NeuraiWallet/issues/3466
  */
 export function formatStringAddTwoWhiteSpaces(text: string): string {
   return `${text}  `;

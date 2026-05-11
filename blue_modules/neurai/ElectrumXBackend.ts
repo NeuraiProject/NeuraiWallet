@@ -7,7 +7,7 @@
  * for Neurai is available and the protocol is wired up.
  *
  * Reference for a future port:
- *   - BlueWallet's pre-fork BlueElectrum.ts (multiGetBalanceByAddress,
+ *   - NeuraiWallet's pre-fork BlueElectrum.ts (multiGetBalanceByAddress,
  *     multiGetHistoryByAddress, multiGetTransactionByTxid, broadcast, ping...)
  *     consult `git log -- blue_modules/BlueElectrum.ts`.
  *   - Neurai address-index RPC equivalents documented in
@@ -24,7 +24,7 @@
  *      broadcast         -> blockchain.transaction.broadcast
  *      estimateFee       -> blockchain.estimatefee
  *      getTipHeight      -> blockchain.headers.subscribe (height field)
- *  - Connection retry, peer rotation, batching (the BlueWallet client batches
+ *  - Connection retry, peer rotation, batching (the NeuraiWallet client batches
  *    address calls; preserve that behaviour for performance).
  *  - Convert Neurai addresses to scripthashes (sha256 of the scriptPubKey,
  *    reversed) — Neurai uses Bitcoin-compatible script encoding for legacy
