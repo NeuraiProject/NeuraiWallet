@@ -8,7 +8,7 @@ const Licensing = () => {
       <SettingsCard>
         <SettingsText>MIT License</SettingsText>
         <BlueSpacing20 />
-        <SettingsText>Copyright (c) 2018-2024 BlueWallet developers</SettingsText>
+        <SettingsText>Copyright (c) 2026 Neurai developers</SettingsText>
         <BlueSpacing20 />
         <SettingsText>
           Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files

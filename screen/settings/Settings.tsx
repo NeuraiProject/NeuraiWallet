@@ -19,13 +19,13 @@ const Settings = () => {
   }, [setOptions, language, colors, settingsScreenBackgroundColor, dark]); // Include language to trigger re-render when language changes
 
   const handleDonatePress = useCallback(() => {
-    Linking.openURL('https://donate.bluewallet.io/');
+    Linking.openURL('https://neurai.org');
   }, []);
 
   const donateIcon = useMemo(
     () => (
       <View style={styles.donateIconContainer}>
-        <Image source={require('../../img/bluebeast.png')} style={styles.donateIconImage} resizeMode="contain" />
+        <Image source={require('../../img/addWallet/neurai.png')} style={styles.donateIconImage} resizeMode="contain" />
       </View>
     ),
     [],

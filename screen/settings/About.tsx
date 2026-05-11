@@ -1,7 +1,7 @@
 import Clipboard from '@react-native-clipboard/clipboard';
 import React, { useCallback } from 'react';
 import { Alert, Image, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { getApplicationName, getBuildNumber, getBundleId, getUniqueIdSync, getVersion, hasGmsSync } from 'react-native-device-info';
+import { getApplicationName, getBuildNumber, getBundleId, getUniqueIdSync, getVersion } from 'react-native-device-info';
 import Icon from '@react-native-vector-icons/fontawesome6';
 
 import A from '../../blue_modules/analytics';
@@ -9,7 +9,6 @@ import { BlueTextCentered } from '../../BlueComponents';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import presentAlert from '../../components/Alert';
 import { BlueSpacing20 } from '../../components/BlueSpacing';
-import Button from '../../components/Button';
 import {
   SettingsCard,
   SettingsFlatList,
@@ -53,25 +52,19 @@ const About: React.FC = () => {
   }, [navigate]);
 
   const handleOnXPress = useCallback(() => {
-    Linking.openURL('https://x.com/bluewalletio');
+    Linking.openURL('https://x.com/neuraiproject');
   }, []);
 
   const handleOnTelegramPress = useCallback(() => {
-    Linking.openURL('https://t.me/neurai');
+    Linking.openURL('https://t.me/neuraiproject');
+  }, []);
+
+  const handleOnWebsitePress = useCallback(() => {
+    Linking.openURL('https://neurai.org');
   }, []);
 
   const handleOnGithubPress = useCallback(() => {
     Linking.openURL('https://github.com/neuraiproject/NeuraiWallet');
-  }, []);
-
-  const handleOnRatePress = useCallback(async () => {
-    try {
-      // App-store URLs intentionally point to Neurai's eventual listings; the
-      // BlueWallet store IDs from the upstream are gone.
-      await Linking.openURL('https://neurai.org');
-    } catch (error: any) {
-      console.error('Rate app failed:', error.message);
-    }
   }, []);
 
   const handlePerformanceTest = useCallback(async () => {
@@ -97,21 +90,23 @@ const About: React.FC = () => {
           <SettingsSection compact>
             <SettingsCard style={[styles.card, styles.headerCard]}>
               <View style={styles.center}>
-                <Image style={styles.logo} source={require('../../img/bluebeast.png')} />
+                <Image style={styles.logo} source={require('../../img/addWallet/neurai.png')} />
                 <Text style={[styles.textFree, { color: colors.foregroundColor }]}>{loc.settings.about_free}</Text>
                 <Text style={[styles.textBackup, { color: colors.alternativeTextColor }]}>
                   {formatStringAddTwoWhiteSpaces(loc.settings.about_backup)}
                 </Text>
-                {((Platform.OS === 'android' && hasGmsSync()) || Platform.OS !== 'android') && (
-                  <View style={styles.headerButton}>
-                    <Button onPress={handleOnRatePress} title={loc.settings.about_review + ' ⭐🙏'} />
-                  </View>
-                )}
               </View>
             </SettingsCard>
           </SettingsSection>
         ),
         section: 1,
+      },
+      {
+        id: 'website',
+        title: loc.settings.about_sm_website,
+        leftIcon: <Icon name="globe" size={24} color={colors.foregroundColor} iconStyle="solid" />,
+        onPress: handleOnWebsitePress,
+        section: 2,
       },
       {
         id: 'x',
@@ -226,7 +221,7 @@ const About: React.FC = () => {
   }, [
     colors.foregroundColor,
     colors.alternativeTextColor,
-    handleOnRatePress,
+    handleOnWebsitePress,
     handleOnXPress,
     handleOnTelegramPress,
     handleOnGithubPress,

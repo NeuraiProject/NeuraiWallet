@@ -5,17 +5,6 @@ import { SettingsScrollView, SettingsSection, SettingsListItem } from '../../com
 
 const SettingsTools: React.FC = () => {
   const navigation = useExtendedNavigation();
-  const navigateToIsItMyAddress = () => {
-    navigation.navigate('IsItMyAddress');
-  };
-
-  const navigateToBroadcast = () => {
-    navigation.navigate('Broadcast');
-  };
-
-  const navigateToGenerateWord = () => {
-    navigation.navigate('GenerateWord');
-  };
 
   return (
     <SettingsScrollView>
@@ -23,7 +12,7 @@ const SettingsTools: React.FC = () => {
         <SettingsListItem
           title={loc.is_it_my_address.title}
           iconName="search"
-          onPress={navigateToIsItMyAddress}
+          onPress={() => navigation.navigate('IsItMyAddress')}
           testID="IsItMyAddress"
           chevron
           position="first"
@@ -31,7 +20,7 @@ const SettingsTools: React.FC = () => {
         <SettingsListItem
           title={loc.settings.network_broadcast}
           iconName="paperPlane"
-          onPress={navigateToBroadcast}
+          onPress={() => navigation.navigate('Broadcast')}
           testID="Broadcast"
           chevron
           position="middle"
@@ -39,7 +28,7 @@ const SettingsTools: React.FC = () => {
         <SettingsListItem
           title={loc.autofill_word.title}
           iconName="key"
-          onPress={navigateToGenerateWord}
+          onPress={() => navigation.navigate('GenerateWord')}
           testID="GenerateWord"
           chevron
           position="last"

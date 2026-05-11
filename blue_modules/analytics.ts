@@ -1,53 +1,17 @@
-import Bugsnag from '@bugsnag/react-native';
-import { getUniqueId } from 'react-native-device-info';
-
-import { BlueApp as BlueAppClass } from '../class/blue-app';
-
-const BlueApp = BlueAppClass.getInstance();
-
 /**
- * in case Bugsnag was started, but user decided to opt out while using the app, we have this
- * flag `userHasOptedOut` and we forbid logging in `onError` handler
- * @type {boolean}
+ * Analytics stub.
+ *
+ * BlueWallet routed crash reports + opt-out logic through Bugsnag, hosted on
+ * the BlueWallet team's account. NeuraiWallet does not currently have its own
+ * crash-reporting backend, so we ship a no-op surface here to keep call sites
+ * compiling (e.g. `setOptOut` from Settings, `logError` from About). When/if
+ * Neurai sets up its own backend, swap this module's body — the public API
+ * stays the same.
  */
-let userHasOptedOut: boolean = false;
 
-(async () => {
-  try {
-    // Don't try to start Bugsnag again as it's already initialized in native code.
-    // Configure it only when tracking is allowed.
-    const doNotTrack = await BlueApp.isDoNotTrackEnabled();
-    if (doNotTrack) {
-      userHasOptedOut = true;
-      return;
-    }
-
-    const uniqueID = await getUniqueId();
-    Bugsnag.setUser(uniqueID);
-    Bugsnag.addOnError(function () {
-      return !userHasOptedOut;
-    });
-  } catch (error) {
-    // Never let analytics setup crash the app.
-    console.error('Failed to initialize analytics:', error);
-  }
-})();
-
-const A = async (event: string) => {};
-
-A.setOptOut = (value: boolean) => {
-  if (value) userHasOptedOut = true;
+const NoopAnalytics = {
+  setOptOut(_optOut: boolean): void {},
+  logError(_message: string): void {},
 };
 
-A.logError = (errorString: string) => {
-  console.error(errorString);
-  if (!userHasOptedOut) {
-    try {
-      Bugsnag.notify(new Error(String(errorString)));
-    } catch (error) {
-      console.error('Failed to report error to Bugsnag:', error);
-    }
-  }
-};
-
-export default A;
+export default NoopAnalytics;

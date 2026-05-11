@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.util.Log
-import com.bugsnag.android.Bugsnag
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -100,7 +99,6 @@ class MainApplication : Application(), ReactApplication {
         loadReactNative(this)
 
         initializeDeviceUID()
-        initializeBugsnag()
     }
 
     override fun onTerminate() {
@@ -112,13 +110,6 @@ class MainApplication : Application(), ReactApplication {
             unregisterReceiver(themeChangeReceiver)
         } catch (e: Exception) {
             Log.e("MainApplication", "Error unregistering theme receiver", e)
-        }
-    }
-
-    private fun initializeBugsnag() {
-        val isDoNotTrackEnabled = sharedPref.getString("donottrack", "0")
-        if (isDoNotTrackEnabled != "1") {
-            Bugsnag.start(this)
         }
     }
 

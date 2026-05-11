@@ -7,6 +7,8 @@ import { useTheme } from '../components/themes';
 import { useExtendedNavigation } from '../hooks/useExtendedNavigation';
 import loc from '../loc';
 import IsItMyAddress from '../screen/settings/IsItMyAddress';
+import Broadcast from '../screen/settings/Broadcast';
+import GenerateWord from '../screen/settings/GenerateWord';
 import TransactionDetails from '../screen/transactions/TransactionDetails';
 import TransactionStatus from '../screen/transactions/TransactionStatus';
 import WalletAddresses from '../screen/wallets/WalletAddresses';
@@ -151,41 +153,14 @@ const DetailViewStackScreensStack = () => {
   }, [navigation]);
 
   const walletListScreenOptions = useMemo<NativeStackNavigationOptions>(() => {
+    // The "Offline" and "Not connected" pills referred to BlueElectrum
+    // health; Neurai goes through RPC and has its own status panel in
+    // NetworkSettings, so the only header pill we still surface is the
+    // transient "Updating…" indicator while a refresh is in flight.
     const isUpdating = walletTransactionUpdateStatus !== WalletTransactionsStatus.NONE;
-    const showOffline = isElectrumDisabled;
-    // When the user explicitly pulls to refresh, we always prefer showing
-    // the "Updating..." pill over "Not connected" during that refresh.
-    const showNotConnected = !isElectrumDisabled && electrumConnected === false && !isUpdating;
-    const showUpdating = !isElectrumDisabled && isUpdating;
 
     const renderHeaderLeft = () => {
-      if (showOffline) {
-        const offlineBg = theme.dark ? theme.colors.darkGray : '#000000';
-        return (
-          <Pressable
-            onPress={navigateToElectrumSettings}
-            style={[styles.updatingLabelContainer, styles.offlineLabelRow, { backgroundColor: offlineBg }]}
-          >
-            <Icon name="mask" type="font-awesome-6" size={14} color="#ffffff" style={styles.offlineLabelIcon} />
-            <Text style={styles.offlineLabelText}>{loc.settings.electrum_offline_mode}</Text>
-          </Pressable>
-        );
-      }
-      if (showNotConnected) {
-        return (
-          <Pressable
-            onPress={() => {
-              BlueElectrum.presentElectrumDisconnectedHelpAlert().catch(() => {
-                /* alert helper failed; ignore */
-              });
-            }}
-            style={[styles.updatingLabelContainer, { backgroundColor: theme.colors.redBG }]}
-          >
-            <Text style={[styles.updatingLabelText, { color: theme.colors.redText }]}>{loc.settings.electrum_connected_not}</Text>
-          </Pressable>
-        );
-      }
-      if (showUpdating) {
+      if (isUpdating) {
         return (
           <UpdatingLabel
             containerStyle={[styles.updatingLabelContainer, { backgroundColor: theme.colors.lightButton }]}
@@ -212,13 +187,6 @@ const DetailViewStackScreensStack = () => {
     theme.colors.customHeader,
     theme.colors.foregroundColor,
     theme.colors.lightButton,
-    theme.colors.redBG,
-    theme.colors.redText,
-    theme.colors.darkGray,
-    theme.dark,
-    electrumConnected,
-    isElectrumDisabled,
-    navigateToElectrumSettings,
     walletTransactionUpdateStatus,
   ]);
 
@@ -307,6 +275,16 @@ const DetailViewStackScreensStack = () => {
           component={IsItMyAddress}
           initialParams={{ address: undefined }}
           options={navigationStyle(getSettingsHeaderOptions(loc.is_it_my_address.title))(theme)}
+        />
+        <DetailViewStack.Screen
+          name="Broadcast"
+          component={Broadcast}
+          options={navigationStyle(getSettingsHeaderOptions(loc.settings.network_broadcast))(theme)}
+        />
+        <DetailViewStack.Screen
+          name="GenerateWord"
+          component={GenerateWord}
+          options={navigationStyle(getSettingsHeaderOptions(loc.autofill_word.title))(theme)}
         />
         <DetailViewStack.Screen
           name="WalletAddresses"

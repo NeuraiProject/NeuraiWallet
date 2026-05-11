@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Platform, View, ListRenderItem } from 'react-native';
 import { openSettings } from 'react-native-permissions';
-import A from '../../blue_modules/analytics';
 import loc from '../../loc';
 import { useStorage } from '../../hooks/context/useStorage';
 import { useSettings } from '../../hooks/context/useSettings';
@@ -34,8 +33,6 @@ const GeneralSettings: React.FC = () => {
   const { wallets, isStorageEncrypted } = useStorage();
 
   const {
-    isDoNotTrackEnabled,
-    setDoNotTrackStorage,
     isPrivacyBlurEnabled,
     setIsPrivacyBlurEnabled,
     isWidgetBalanceDisplayAllowed,
@@ -62,20 +59,6 @@ const GeneralSettings: React.FC = () => {
       setIsLoading(SettingsPrivacySection.None);
     })();
   }, [isStorageEncrypted]);
-
-  const onDoNotTrackValueChange = useCallback(
-    async (value: boolean) => {
-      setIsLoading(SettingsPrivacySection.All);
-      try {
-        setDoNotTrackStorage(value);
-        A.setOptOut(value);
-      } catch (e) {
-        console.debug('onDoNotTrackValueChange catch', e);
-      }
-      setIsLoading(SettingsPrivacySection.None);
-    },
-    [setDoNotTrackStorage],
-  );
 
   const onQuickActionsValueChange = useCallback(
     async (value: boolean) => {
@@ -206,19 +189,6 @@ const GeneralSettings: React.FC = () => {
       });
     }
 
-    items.push({
-      id: 'doNotTrack',
-      title: loc.settings.privacy_do_not_track,
-      subtitle: <SettingsSubtitle>{loc.settings.privacy_do_not_track_explanation}</SettingsSubtitle>,
-      switch: {
-        value: isDoNotTrackEnabled,
-        onValueChange: onDoNotTrackValueChange,
-        disabled: isLoading === SettingsPrivacySection.All,
-      },
-      Component: View,
-      showItem: true,
-    });
-
     if (Platform.OS === 'ios') {
       items.push({
         id: 'widgetsSectionHeader',
@@ -284,13 +254,11 @@ const GeneralSettings: React.FC = () => {
     isQuickActionsEnabled,
     isTotalBalanceEnabled,
     isPrivacyBlurEnabled,
-    isDoNotTrackEnabled,
     isWidgetBalanceDisplayAllowed,
     isLoading,
     storageIsEncrypted,
     wallets.length,
     setIsClipboardGetContentEnabledStorage,
-    onDoNotTrackValueChange,
     onQuickActionsValueChange,
     onTemporaryScreenshotsValueChange,
     onTotalBalanceEnabledValueChange,

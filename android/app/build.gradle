@@ -86,7 +86,10 @@ android {
         applicationId "org.neurai.wallet"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        // versionCode is the Unix timestamp of the build (BlueWallet legacy
+        // convention: the About screen renders `new Date(versionCode * 1000)`).
+        // Bump this on each release to keep the timeline correct.
+        versionCode 1778371200
         versionName "8.0.0"
         testBuildType System.getProperty('testBuildType', 'debug')
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
@@ -168,4 +171,7 @@ configurations.all {
 // Google Services plugin removed: NeuraiWallet does not use Firebase yet
 // (no @react-native-firebase deps). Re-enable once a Neurai Firebase
 // project exists and ship a matching `google-services.json`.
-apply plugin: "com.bugsnag.android.gradle"
+//
+// Bugsnag plugin removed: NeuraiWallet has no crash-reporting backend; the
+// inherited BlueWallet Bugsnag project key was leaking error reports off to
+// BlueWallet's account. Re-add once Neurai has its own Bugsnag project.

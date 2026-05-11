@@ -42,6 +42,8 @@ export type DetailViewStackParamList = {
     selectedWalletID?: string;
   };
   IsItMyAddress: object;
+  Broadcast: undefined;
+  GenerateWord: undefined;
   WalletAddresses: { walletID: string };
   AddWalletRoot: undefined;
   SendNeurai: {

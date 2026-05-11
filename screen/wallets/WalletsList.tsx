@@ -106,7 +106,7 @@ const WalletsList: React.FC = () => {
   const currentWalletIndex = useRef<number>(0);
   const { registerTransactionsHandler, unregisterTransactionsHandler } = useMenuElements();
   const { wallets, getTransactions, refreshAllWalletTransactions } = useStorage();
-  const { isTotalBalanceEnabled, isElectrumDisabled } = useSettings();
+  const { isTotalBalanceEnabled } = useSettings();
   const { width } = useWindowDimensions();
   const { colors, scanImage } = useTheme();
   const navigation = useExtendedNavigation<NavigationProps>();
@@ -131,7 +131,8 @@ const WalletsList: React.FC = () => {
 
   const refreshWallets = useCallback(
     async (index: number | undefined, showLoadingIndicator = true, showUpdateStatusIndicator = false) => {
-      if (isElectrumDisabled) return;
+      // Neurai wallets fetch through RPC (blue_modules/neurai), so we no
+      // longer gate refresh on the BlueElectrum offline toggle.
       dispatch({ type: ActionTypes.SET_LOADING, payload: showLoadingIndicator });
       try {
         await refreshAllWalletTransactions(index, showUpdateStatusIndicator);
@@ -139,14 +140,12 @@ const WalletsList: React.FC = () => {
         console.error(error);
       } finally {
         dispatch({ type: ActionTypes.SET_LOADING, payload: false });
-        // After a native Electrum error alert, the first `refreshing={false}` can fail to repaint until the
-        // alert is dismissed; run again once interactions finish so pull-to-refresh does not appear stuck.
         InteractionManager.runAfterInteractions(() => {
           dispatch({ type: ActionTypes.SET_LOADING, payload: false });
         });
       }
     },
-    [isElectrumDisabled, refreshAllWalletTransactions],
+    [refreshAllWalletTransactions],
   );
 
   const refreshTransactions = useCallback(() => {
@@ -158,7 +157,6 @@ const WalletsList: React.FC = () => {
   useEffect(() => {
     // Initial load of transactions without triggering scroll
     const initialLoad = async () => {
-      if (isElectrumDisabled) return;
       try {
         await refreshAllWalletTransactions(undefined, true);
       } catch (error) {
@@ -202,12 +200,14 @@ const WalletsList: React.FC = () => {
   );
 
   useEffect(() => {
-    if (!isFocused || isElectrumDisabled || !connectionPoll) return;
+    // Electrum health polling is no longer relevant for Neurai; the connection
+    // poller is a no-op stub kept around for compile-time compatibility.
+    if (!isFocused || !connectionPoll) return;
     const interval = setInterval(() => {
       connectionPoll.pollConnection();
     }, ELECTRUM_HEALTH_POLL_WHILE_WALLETS_LIST_FOCUSED_MS);
     return () => clearInterval(interval);
-  }, [isFocused, isElectrumDisabled, connectionPoll]);
+  }, [isFocused, connectionPoll]);
 
   useEffect(() => {
     // new wallet added - no longer auto-scrolls
@@ -466,7 +466,7 @@ const WalletsList: React.FC = () => {
     return `${item}${index}`;
   }, []);
 
-  const refreshProps = isDesktop || isElectrumDisabled ? {} : { refreshing: isLoading, onRefresh };
+  const refreshProps = isDesktop ? {} : { refreshing: isLoading, onRefresh };
 
   const sections: SectionData[] = useMemo(() => {
     // On large screens, only show transactions section

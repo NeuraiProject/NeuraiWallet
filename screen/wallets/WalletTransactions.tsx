@@ -34,7 +34,6 @@ import { DetailViewStackParamList } from '../../navigation/DetailViewStackParamL
 import { Transaction } from '../../class/wallets/types';
 import getWalletTransactionsOptions, { WalletTransactionsRouteProps } from '../../navigation/helpers/getWalletTransactionsOptions';
 import useMenuElements from '../../hooks/useMenuElements';
-import { useSettings } from '../../hooks/context/useSettings';
 import useWalletSubscribe from '../../hooks/useWalletSubscribe';
 import { getClipboardContent } from '../../blue_modules/clipboard';
 import HandOffComponent from '../../components/HandOffComponent';
@@ -65,7 +64,6 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const navigation = useExtendedNavigation();
   const { setOptions, navigate } = navigation;
   const { colors } = useTheme();
-  const { isElectrumDisabled } = useSettings();
   const walletActionButtonsRef = useRef<View>(null);
   const [lastFetchTimestamp, setLastFetchTimestamp] = useState(() => wallet._lastTxFetch || 0);
   const [fetchFailures, setFetchFailures] = useState(0);
@@ -230,7 +228,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
         setIsLoading(false);
       }
     },
-    [wallet, isElectrumDisabled, isLoading, saveToDisk, pageSize, lastFetchTimestamp, fetchFailures],
+    [wallet, isLoading, saveToDisk, pageSize, lastFetchTimestamp, fetchFailures],
   );
 
   useEffect(() => {
@@ -520,7 +518,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
           </ScrollView>
         }
         refreshControl={
-          !isDesktop && !isElectrumDisabled ? (
+          !isDesktop ? (
             <RefreshControl refreshing={isLoading} onRefresh={() => refreshTransactions(true)} tintColor={colors.msSuccessCheck} />
           ) : undefined
         }
