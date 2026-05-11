@@ -109,8 +109,21 @@ android {
         }
     }
 
+    signingConfigs {
+        // Self-signed key for sideloaded release builds. NOT for Play Store —
+        // generate a proper upload keystore (and keep it off git) when the
+        // release pipeline goes live.
+        release {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             proguardFile "${rootProject.projectDir}/../node_modules/detox/android/detox/proguard-rules-app.pro"
