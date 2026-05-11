@@ -34,8 +34,6 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({ values, selectedInd
         selectedIndex={selectedIndex}
         enabled
         backgroundColor="transparent"
-        tintColor="#007AFF"
-        textColor="#007AFF"
         momentary={false}
         style={styles.segmentedControl}
         onChange={handleChange}

@@ -349,8 +349,12 @@ export const FButton = ({
         ...baseStyles,
         backgroundColor: colors.buttonBackgroundColor,
       },
+      // Float buttons render on the orange brand surface, so the label must
+      // be the on-brand contrast color (`buttonTextColor`), not the orange
+      // accent itself — otherwise we get orange-on-orange and the text
+      // disappears.
       text: {
-        color: colors.buttonAlternativeTextColor,
+        color: colors.buttonTextColor,
         fontSize,
       },
       textDisabled: {

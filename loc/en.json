@@ -61,6 +61,7 @@
     "broadcastButton": "Broadcast",
     "broadcastSuccess": "Success",
     "create_amount": "Amount",
+    "create_avail_max": "Available: {amount} XNA (tap to use max)",
     "create_details": "Details",
     "create_fee": "Fee",
     "create_memo": "Memo",

@@ -539,7 +539,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
                   name="arrow-down"
                   size={buttonFontSize}
                   type="font-awesome"
-                  color={colors.buttonAlternativeTextColor}
+                  color={colors.buttonTextColor}
                   style={stylesHook.receiveIcon}
                 />
               </View>
@@ -558,7 +558,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
                   name="arrow-down"
                   size={buttonFontSize}
                   type="font-awesome"
-                  color={colors.buttonAlternativeTextColor}
+                  color={colors.buttonTextColor}
                   style={stylesHook.sendIcon}
                 />
               </View>

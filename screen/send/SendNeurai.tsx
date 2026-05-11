@@ -75,6 +75,12 @@ const SendNeurai: React.FC = () => {
   const [isBuilding, setIsBuilding] = useState(false);
   const [isBroadcasting, setIsBroadcasting] = useState(false);
 
+  // Available balance is stored in sats on the wallet; convert to whole XNA
+  // for display next to the amount field so the user knows the cap without
+  // backing out to the wallet view.
+  const availableSats = wallet?.getBalance() ?? 0;
+  const availableXna = availableSats / 1e8;
+
   // Use the callback path of ScanQRCode (it calls back + goBack()) instead of
   // the popTo path: SendNeurai lives inside the nested DetailViewScreensStack
   // while ScanQRCode is registered at the top-level DetailViewStack, so
@@ -188,7 +194,7 @@ const SendNeurai: React.FC = () => {
         </Pressable>
       </View>
 
-      <BlueFormLabel>{loc.send.details_amount_field_is_not_valid ? loc.send.create_amount : ''}</BlueFormLabel>
+      <BlueFormLabel>{loc.send.create_amount}</BlueFormLabel>
       <View style={[styles.input, stylesHook.label]}>
         <TextInput
           testID="SendNeuraiAmount"
@@ -203,6 +209,16 @@ const SendNeurai: React.FC = () => {
         />
         <Text style={styles.unit}>XNA</Text>
       </View>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setAmount(availableXna.toString())}
+        disabled={isBuilding || isBroadcasting || availableSats === 0}
+        style={styles.balanceHintRow}
+      >
+        <Text style={[styles.balanceHint, { color: colors.alternativeTextColor }]}>
+          {loc.formatString(loc.send.create_avail_max, { amount: availableXna.toFixed(8) })}
+        </Text>
+      </Pressable>
 
       {draft && (
         <View style={[styles.feeBox, stylesHook.feeBox]}>
@@ -241,6 +257,8 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   textInput: { flex: 1, marginHorizontal: 8, color: '#81868e' },
+  balanceHintRow: { marginHorizontal: 20, marginTop: -4, marginBottom: 8 },
+  balanceHint: { fontSize: 12, textAlign: 'right' },
   scanButton: {
     paddingHorizontal: 12,
     height: '100%',
