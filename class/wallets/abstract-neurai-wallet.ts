@@ -183,6 +183,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     const engine = await this.ensureEngine();
     const addrs = engine.getAddresses();
     if (addrs.length === 0) throw new Error('Engine has no addresses');
+    // Mark this address as the active receive so the engine excludes it when
+    // picking a change address; otherwise getChangeAddress() can return the
+    // same index and trip "Change address cannot be the same as to address".
+    (engine as unknown as { receiveAddress: string }).receiveAddress = addrs[0];
     return addrs[0];
   }
 
