@@ -22,6 +22,7 @@ import { majorTomToGroundControl, tryToObtainPermissions } from '../../blue_modu
 import { BlueButtonLink, BlueCard, BlueText } from '../../BlueComponents';
 import DeeplinkSchemaMatch from '../../class/deeplink-schema-match';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
+import { isTestnetChain } from '../../blue_modules/neurai/networkConfig';
 import presentAlert from '../../components/Alert';
 import Button from '../../components/Button';
 import CopyTextToClipboard, { CopyTextToClipboardHandle } from '../../components/CopyTextToClipboard';
@@ -275,10 +276,12 @@ const ReceiveDetails = () => {
       console.warn('Wallet not found');
       return;
     }
+    const walletChain = isNeuraiWallet(wallet) ? (isTestnetChain(wallet.network) ? 'testnet' : 'mainnet') : 'mainnet';
+
     if (address) {
       try {
         await tryToObtainPermissions();
-        majorTomToGroundControl([address], [], []);
+        majorTomToGroundControl([address], [], [], walletChain);
       } catch (error) {
         console.error('Error obtaining notifications permissions:', error);
       }
@@ -315,7 +318,7 @@ const ReceiveDetails = () => {
 
     try {
       await tryToObtainPermissions();
-      majorTomToGroundControl([newAddress], [], []);
+      majorTomToGroundControl([newAddress], [], [], walletChain);
     } catch (error) {
       console.error('Error obtaining notifications permissions:', error);
     }

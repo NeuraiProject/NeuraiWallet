@@ -41,6 +41,8 @@ type TPushToken = {
   os: 'ios' | 'android';
 };
 
+export type TNeuraiChain = 'mainnet' | 'testnet';
+
 type TPayload = {
   subText?: string;
   title?: string;
@@ -280,14 +282,18 @@ export const tryToObtainPermissions = async (): Promise<boolean> => {
 
 /**
  * Submits onchain Neurai addresses and txids to GroundControl server so we
- * later get notified when they're paid.
+ * later get notified when they're paid. The `chain` argument tags every
+ * registered address/txid as belonging to mainnet or testnet — the server uses
+ * it to avoid cross-chain false positives when the same string happens to be
+ * valid on both networks.
  */
-export const majorTomToGroundControl = async (addresses: string[], hashes: string[], txids: string[]) => {
+export const majorTomToGroundControl = async (addresses: string[], hashes: string[], txids: string[], chain: TNeuraiChain) => {
   if (nativeDisabled) return;
   console.log('majorTomToGroundControl: Starting notification registration', {
     addressCount: addresses?.length,
     hashCount: hashes?.length,
     txidCount: txids?.length,
+    chain,
   });
 
   try {
@@ -313,6 +319,7 @@ export const majorTomToGroundControl = async (addresses: string[], hashes: strin
       txids,
       token: pushToken.token,
       os: pushToken.os,
+      chain,
     });
 
     let response;
@@ -613,7 +620,7 @@ const getLevels = async () => {
 /**
  * The opposite of `majorTomToGroundControl` call.
  */
-export const unsubscribe = async (addresses: string[], hashes: string[], txids: string[]) => {
+export const unsubscribe = async (addresses: string[], hashes: string[], txids: string[], chain: TNeuraiChain) => {
   if (nativeDisabled) return;
   if (!Array.isArray(addresses) || !Array.isArray(hashes) || !Array.isArray(txids)) {
     throw new Error('No addresses, hashes, or txids provided');
@@ -631,6 +638,7 @@ export const unsubscribe = async (addresses: string[], hashes: string[], txids: 
     txids,
     token: token.token,
     os: token.os,
+    chain,
   });
 
   try {

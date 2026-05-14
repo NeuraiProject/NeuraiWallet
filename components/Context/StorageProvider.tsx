@@ -8,6 +8,8 @@ import * as BlueElectrum from '../../blue_modules/BlueElectrum';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { startAndDecrypt } from '../../blue_modules/start-and-decrypt';
 import { isNotificationsEnabled, majorTomToGroundControl, unsubscribe } from '../../blue_modules/notifications';
+import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
+import { isTestnetChain } from '../../blue_modules/neurai/networkConfig';
 import { XnaUnit } from '../../models/xnaUnits';
 import { navigationRef } from '../../NavigationService';
 import { getScanWasBBQR } from '../../helpers/scan-qr.ts';
@@ -232,8 +234,9 @@ export const StorageProvider = ({ children }: { children: React.ReactNode }) => 
           const externalAddresses = wallet.getAllExternalAddresses();
           if (externalAddresses.length > 0) {
             console.debug(`handleWalletDeletion: unsubscribing addresses for wallet ${walletID}`);
+            const walletChain = isNeuraiWallet(wallet) ? (isTestnetChain(wallet.network) ? 'testnet' : 'mainnet') : 'mainnet';
             try {
-              await unsubscribe(externalAddresses, [], []);
+              await unsubscribe(externalAddresses, [], [], walletChain);
               console.debug(`handleWalletDeletion: unsubscribe succeeded for wallet ${walletID}`);
             } catch (unsubscribeError) {
               console.error(`handleWalletDeletion: unsubscribe failed for wallet ${walletID}`, unsubscribeError);
@@ -467,7 +470,8 @@ export const StorageProvider = ({ children }: { children: React.ReactNode }) => 
 
       await w.fetchBalance();
       try {
-        await majorTomToGroundControl(w.getAllExternalAddresses(), [], []);
+        const walletChain = isNeuraiWallet(w) ? (isTestnetChain(w.network) ? 'testnet' : 'mainnet') : 'mainnet';
+        await majorTomToGroundControl(w.getAllExternalAddresses(), [], [], walletChain);
       } catch (error) {
         console.warn('Failed to setup notifications:', error);
         // Consider if user should be notified of notification setup failure
