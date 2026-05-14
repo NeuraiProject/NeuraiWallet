@@ -237,6 +237,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     return this._engine ? this._engine.getAddresses() : [];
   }
 
+  getAllExternalAddresses(): string[] {
+    return this.getCachedAddresses();
+  }
+
   weOwnAddress(address: string): boolean {
     if (!this._engine) return false;
     return this._engine.getAddresses().includes(address);

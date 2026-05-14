@@ -164,6 +164,15 @@ dependencies {
     }
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
+
+    // Firebase Cloud Messaging — required by react-native-notifications (Wix)
+    // to compile its Android FCM bridge. Without a google-services.json the
+    // FirebaseApp won't initialize at runtime (FirebaseInitProvider logs a
+    // warning and stays dormant), and the JS notifications module catches any
+    // resulting errors. Drop in a Neurai Firebase google-services.json to
+    // activate push delivery.
+    implementation platform("com.google.firebase:firebase-bom:33.6.0")
+    implementation 'com.google.firebase:firebase-messaging'
 }
 
 // Block the legacy `com.android.support:*` artifacts that some transitive deps
@@ -173,10 +182,14 @@ dependencies {
 configurations.all {
     exclude group: 'com.android.support'
 }
-// Google Services plugin removed: NeuraiWallet does not use Firebase yet
-// (no @react-native-firebase deps). Re-enable once a Neurai Firebase
-// project exists and ship a matching `google-services.json`.
-//
+// Apply the Google Services plugin only when google-services.json is present.
+// This lets fresh checkouts compile without Firebase config; drop the file in
+// to activate FCM token registration. The classpath dep is unconditional in
+// android/build.gradle so this `apply plugin` is the only switch.
+if (file('google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
+}
+
 // Bugsnag plugin removed: NeuraiWallet has no crash-reporting backend; the
 // inherited NeuraiWallet Bugsnag project key was leaking error reports off to
 // NeuraiWallet's account. Re-add once Neurai has its own Bugsnag project.
