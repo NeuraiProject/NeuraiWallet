@@ -45,6 +45,8 @@ const GeneralSettings: React.FC = () => {
     setIsTotalBalanceEnabledStorage,
     isHandOffUseEnabled,
     setIsHandOffUseEnabledAsyncStorage,
+    isPQAddressReuseEnabled,
+    setIsPQAddressReuseEnabledStorage,
   } = useSettings();
   const [isLoading, setIsLoading] = useState<number>(SettingsPrivacySection.All);
   const [storageIsEncrypted, setStorageIsEncrypted] = useState<boolean>(true);
@@ -172,6 +174,19 @@ const GeneralSettings: React.FC = () => {
         Component: View,
         showItem: true,
       },
+      {
+        id: 'pqAddressReuse',
+        title: loc.settings.pq_address_reuse,
+        subtitle: <SettingsSubtitle>{loc.settings.pq_address_reuse_explanation}</SettingsSubtitle>,
+        switch: {
+          value: isPQAddressReuseEnabled,
+          onValueChange: setIsPQAddressReuseEnabledStorage,
+          disabled: isLoading === SettingsPrivacySection.All,
+        },
+        testID: 'PQAddressReuseSwitch',
+        Component: View,
+        showItem: true,
+      },
     ];
 
     if (!isDesktop) {
@@ -266,6 +281,8 @@ const GeneralSettings: React.FC = () => {
     openApplicationSettings,
     isHandOffUseEnabled,
     onHandOffUseEnabledChange,
+    isPQAddressReuseEnabled,
+    setIsPQAddressReuseEnabledStorage,
   ]);
 
   const renderItem: ListRenderItem<SettingItem> = useCallback(

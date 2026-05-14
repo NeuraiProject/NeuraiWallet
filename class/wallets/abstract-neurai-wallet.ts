@@ -179,6 +179,13 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     return engine.getReceiveAddress();
   }
 
+  async getStaticReceiveAddress(): Promise<string> {
+    const engine = await this.ensureEngine();
+    const addrs = engine.getAddresses();
+    if (addrs.length === 0) throw new Error('Engine has no addresses');
+    return addrs[0];
+  }
+
   // The Bitcoin pipeline (ReceiveDetails, deeplink router, push-notifications)
   // calls `getAddress()` synchronously and `getAddressAsync()` for the slow
   // path. Wire both to the engine so freshly-created Neurai wallets show a QR

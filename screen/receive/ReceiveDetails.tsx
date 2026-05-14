@@ -186,7 +186,7 @@ const ReceiveDetails = () => {
   const route = useRoute<RouteProps>();
   const { walletID, address } = route.params;
   const { wallets, saveToDisk, sleep, fetchAndSaveWalletTransactions } = useStorage();
-  const { isElectrumDisabled } = useSettings();
+  const { isElectrumDisabled, isPQAddressReuseEnabled } = useSettings();
   const { colors, closeImage } = useTheme();
   const isDarkTheme = useColorScheme() === 'dark';
   const [customLabel, setCustomLabel] = useState('');
@@ -285,11 +285,20 @@ const ReceiveDetails = () => {
       return;
     }
 
+    const usePQReuse = isNeuraiWallet(wallet) && wallet.walletKind === 'pq' && isPQAddressReuseEnabled;
     let newAddress;
-    try {
-      if (!isElectrumDisabled) newAddress = await Promise.race([wallet.getAddressAsync(), sleep(1000)]);
-    } catch (error) {
-      console.warn('Error fetching wallet address:', error);
+    if (usePQReuse) {
+      try {
+        newAddress = await wallet.getStaticReceiveAddress();
+      } catch (error) {
+        console.warn('PQ static address fetch failed:', error);
+      }
+    } else {
+      try {
+        if (!isElectrumDisabled) newAddress = await Promise.race([wallet.getAddressAsync(), sleep(1000)]);
+      } catch (error) {
+        console.warn('Error fetching wallet address:', error);
+      }
     }
     if (newAddress === undefined) {
       newAddress = wallet.getAddress();
@@ -310,7 +319,7 @@ const ReceiveDetails = () => {
     } catch (error) {
       console.error('Error obtaining notifications permissions:', error);
     }
-  }, [wallet, saveToDisk, address, setAddressBIP21Encoded, isElectrumDisabled, sleep]);
+  }, [wallet, saveToDisk, address, setAddressBIP21Encoded, isElectrumDisabled, isPQAddressReuseEnabled, sleep]);
 
   const onEnablePaymentsCodeSwitchValue = useCallback(() => {
     // BIP47 is Bitcoin-only; left as a no-op so the existing handler wiring

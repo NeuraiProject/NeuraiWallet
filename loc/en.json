@@ -212,6 +212,8 @@
     "privacy_clipboard_explanation": "Provide shortcuts if an address or invoice is found in your clipboard.",
     "privacy_do_not_track": "Disable Analytics",
     "privacy_do_not_track_explanation": "Performance and reliability information will not be submitted for analysis.",
+    "pq_address_reuse": "Reuse PQ address",
+    "pq_address_reuse_explanation": "Always show the same Post-Quantum address when receiving. Disable to generate a new PQ address each time (better privacy, less convenient).",
     "rate": "Rate",
     "push_notifications_explanation": "By enabling notifications, your device token will be sent to the server, along with wallet addresses and transaction IDs for all wallets and transactions made after enabling notifications. The device token is used to send notifications, and the wallet information allows us to notify you about incoming XNA or transaction confirmations.\n\nOnly information from after you enable notifications is transmitted—nothing from before is collected.\n\nDisabling notifications will remove all of this information from the server. Additionally, deleting a wallet from the app will also remove its associated information from the server.",
     "selfTest": "Self-Test",

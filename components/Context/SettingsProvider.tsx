@@ -72,6 +72,28 @@ export const getTotalBalancePreferredUnit = async (): Promise<XnaUnit> => {
   }
 };
 
+const PQ_ADDRESS_REUSE_KEY = 'PQ_ADDRESS_REUSE';
+
+export const getIsPQAddressReuseEnabled = async (): Promise<boolean> => {
+  try {
+    await DefaultPreference.setName(GROUP_IO_BLUEWALLET);
+    const value = await DefaultPreference.get(PQ_ADDRESS_REUSE_KEY);
+    return value !== 'false';
+  } catch (e) {
+    console.error('Error getting PQAddressReuse:', e);
+    return true;
+  }
+};
+
+export const setIsPQAddressReuseEnabledStorageFunc = async (value: boolean): Promise<void> => {
+  try {
+    await DefaultPreference.setName(GROUP_IO_BLUEWALLET);
+    await DefaultPreference.set(PQ_ADDRESS_REUSE_KEY, value ? 'true' : 'false');
+  } catch (e) {
+    console.error('Error setting PQAddressReuse:', e);
+  }
+};
+
 interface SettingsContextType {
   preferredFiatCurrency: TFiatUnit;
   setPreferredFiatCurrencyStorage: (currency: TFiatUnit) => Promise<void>;
@@ -99,6 +121,8 @@ interface SettingsContextType {
   setBlockExplorerStorage: (explorer: BlockExplorer) => Promise<boolean>;
   isElectrumDisabled: boolean;
   setIsElectrumDisabled: (value: boolean) => void;
+  isPQAddressReuseEnabled: boolean;
+  setIsPQAddressReuseEnabledStorage: (value: boolean) => Promise<void>;
 }
 
 const defaultSettingsContext: SettingsContextType = {
@@ -128,6 +152,8 @@ const defaultSettingsContext: SettingsContextType = {
   setBlockExplorerStorage: async () => false,
   isElectrumDisabled: false,
   setIsElectrumDisabled: () => {},
+  isPQAddressReuseEnabled: true,
+  setIsPQAddressReuseEnabledStorage: async () => {},
 };
 
 export const SettingsContext = createContext<SettingsContextType>(defaultSettingsContext);
@@ -146,6 +172,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
   const [totalBalancePreferredUnit, setTotalBalancePreferredUnit] = useState<XnaUnit>(XnaUnit.XNA);
   const [selectedBlockExplorer, setSelectedBlockExplorer] = useState<BlockExplorer>(BLOCK_EXPLORERS.default);
   const [isElectrumDisabled, setIsElectrumDisabled] = useState<boolean>(true);
+  const [isPQAddressReuseEnabled, setIsPQAddressReuseEnabled] = useState<boolean>(true);
 
   const { walletsInitialized } = useStorage();
 
@@ -193,6 +220,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
         getBlockExplorerUrl().then(url => {
           const predefinedExplorer = Object.values(BLOCK_EXPLORERS).find(explorer => normalizeUrl(explorer.url) === normalizeUrl(url));
           setSelectedBlockExplorer(predefinedExplorer ?? ({ key: 'custom', name: 'Custom', url } as BlockExplorer));
+        }),
+        getIsPQAddressReuseEnabled().then(enabled => {
+          setIsPQAddressReuseEnabled(enabled);
         }),
       ];
 
@@ -328,6 +358,15 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
     }
   }, []);
 
+  const setIsPQAddressReuseEnabledStorage = useCallback(async (value: boolean): Promise<void> => {
+    try {
+      await setIsPQAddressReuseEnabledStorageFunc(value);
+      setIsPQAddressReuseEnabled(value);
+    } catch (e) {
+      console.error('Error setting isPQAddressReuseEnabled:', e);
+    }
+  }, []);
+
   const setBlockExplorerStorage = useCallback(async (explorer: BlockExplorer): Promise<boolean> => {
     try {
       const success = await saveBlockExplorer(explorer.url);
@@ -369,6 +408,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
       setBlockExplorerStorage,
       isElectrumDisabled,
       setIsElectrumDisabled,
+      isPQAddressReuseEnabled,
+      setIsPQAddressReuseEnabledStorage,
     }),
     [
       preferredFiatCurrency,
@@ -396,6 +437,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
       selectedBlockExplorer,
       setBlockExplorerStorage,
       isElectrumDisabled,
+      isPQAddressReuseEnabled,
+      setIsPQAddressReuseEnabledStorage,
     ],
   );
 
