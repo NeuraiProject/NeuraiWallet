@@ -239,9 +239,11 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
 
   // Auto-poll balance + transactions every 10 s so a freshly-broadcast send,
   // an incoming receive, or a confirmation lands in the UI without the user
-  // having to pull-to-refresh.
+  // having to pull-to-refresh. Fire once immediately on focus so re-entering
+  // the wallet shows fresh data without waiting for the first interval tick.
   useFocusEffect(
     useCallback(() => {
+      refreshTransactions(false).catch(console.error);
       const id = setInterval(() => {
         refreshTransactions(false).catch(console.error);
       }, 10000);
