@@ -154,19 +154,9 @@ const WalletsList: React.FC = () => {
     return refreshWallets(undefined, true, false);
   }, [refreshWallets]);
 
-  useEffect(() => {
-    // Initial load of transactions without triggering scroll
-    const initialLoad = async () => {
-      try {
-        await refreshAllWalletTransactions(undefined, true);
-      } catch (error) {
-        console.error(error);
-      }
-    };
-
-    initialLoad();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Initial load is handled by `useFocusEffect` below (which fires on mount
+  // too, deferred via InteractionManager so the UI stays interactive while
+  // the first RPC roundtrip runs in the background).
 
   const onRefresh = useCallback(() => {
     console.debug('WalletsList onRefresh');
@@ -192,14 +182,19 @@ const WalletsList: React.FC = () => {
       const screenKey = route.name;
 
       // Refresh on focus so re-entering from a notification tap or after a
-      // background→foreground transition shows the latest balances/txs, then
+      // background→foreground transition shows the latest balances/txs. Defer
+      // the first RPC until after the navigation animation completes so the
+      // bridge stays free and button taps remain responsive on entry. Then
       // poll periodically while the list is visible.
-      refreshAllWalletTransactions(undefined, false).catch(console.error);
+      const handle = InteractionManager.runAfterInteractions(() => {
+        refreshAllWalletTransactions(undefined, false).catch(console.error);
+      });
       const interval = setInterval(() => {
         refreshAllWalletTransactions(undefined, false).catch(console.error);
       }, 10000);
 
       return () => {
+        handle.cancel();
         clearInterval(interval);
         console.log(`[WalletsList] Blurred - cleaning up handler for: ${screenKey}`);
         unregisterTransactionsHandler(screenKey);

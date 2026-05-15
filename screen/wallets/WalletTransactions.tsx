@@ -5,6 +5,7 @@ import {
   Dimensions,
   findNodeHandle,
   FlatList,
+  InteractionManager,
   Platform,
   PixelRatio,
   ScrollView,
@@ -239,15 +240,21 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
 
   // Auto-poll balance + transactions every 10 s so a freshly-broadcast send,
   // an incoming receive, or a confirmation lands in the UI without the user
-  // having to pull-to-refresh. Fire once immediately on focus so re-entering
-  // the wallet shows fresh data without waiting for the first interval tick.
+  // having to pull-to-refresh. Fire once on focus after the navigation
+  // animation completes (via InteractionManager) so the initial RPC doesn't
+  // saturate the bridge during the transition and freeze button taps.
   useFocusEffect(
     useCallback(() => {
-      refreshTransactions(false).catch(console.error);
+      const handle = InteractionManager.runAfterInteractions(() => {
+        refreshTransactions(false).catch(console.error);
+      });
       const id = setInterval(() => {
         refreshTransactions(false).catch(console.error);
       }, 10000);
-      return () => clearInterval(id);
+      return () => {
+        handle.cancel();
+        clearInterval(id);
+      };
     }, [refreshTransactions]),
   );
 
