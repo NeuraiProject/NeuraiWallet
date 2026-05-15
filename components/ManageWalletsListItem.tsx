@@ -317,7 +317,7 @@ const WalletGroupComponent: React.FC<WalletGroupProps> = ({
     }).start();
   }, [fadeAnim]);
 
-  const walletGradientColors = WalletGradient.gradientsFor(wallet.type);
+  const walletGradientColors = WalletGradient.gradientsForWallet(wallet);
   const primaryColor = walletGradientColors[0];
 
   const containerStyle: ViewStyle = {

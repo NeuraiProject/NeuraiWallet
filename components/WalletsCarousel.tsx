@@ -223,7 +223,7 @@ const iStyles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
   },
   chainBadgeCompact: {
     top: 8,
@@ -441,7 +441,7 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
               { backgroundColor: colors.background, shadowColor: colors.shadowColor },
             ]}
           >
-            <LinearGradient colors={WalletGradient.gradientsFor(item.type)} style={[iStyles.grad, isCompact && iStyles.gradCompact]}>
+            <LinearGradient colors={WalletGradient.gradientsForWallet(item)} style={[iStyles.grad, isCompact && iStyles.gradCompact]}>
               <ImageBackground source={image} style={[iStyles.image, isCompact && iStyles.imageCompact]} />
               {isNeuraiWallet(item) && !isPlaceHolder && (
                 <View style={[iStyles.chainBadge, isCompact && iStyles.chainBadgeCompact]}>

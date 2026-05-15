@@ -87,7 +87,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       backgroundColor: colors.background,
     },
     gradientBackground: {
-      backgroundColor: headerHeight > 0 ? WalletGradient.headerColorFor(wallet.type) : colors.background,
+      backgroundColor: headerHeight > 0 ? WalletGradient.headerColorForWallet(wallet) : colors.background,
       height: headerHeight > 0 ? headerHeight : '30%',
     },
     activityIndicatorStyle: {

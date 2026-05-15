@@ -164,7 +164,7 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
   const shapeImage = direction === 'rtl' ? require('../img/neurai-shape-rtl.png') : require('../img/neurai-shape.png');
 
   return (
-    <LinearGradient colors={WalletGradient.gradientsFor(wallet.type)} style={styles.lineaderGradient}>
+    <LinearGradient colors={WalletGradient.gradientsForWallet(wallet)} style={styles.lineaderGradient}>
       <ImageBackground source={shapeImage} style={styles.shapeImage} />
       <View style={styles.contentContainer}>
         <Text testID="WalletLabel" numberOfLines={1} style={[styles.walletLabel, { writingDirection: direction }]}>

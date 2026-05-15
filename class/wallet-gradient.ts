@@ -1,33 +1,35 @@
 /**
- * Wallet card gradients. Only Neurai HD (legacy ECDSA) and Neurai PQ
- * (post-quantum) survive after the Bitcoin classes were removed.
+ * Wallet card gradients. Colour is keyed off the wallet's chain
+ * (mainnet/testnet) so the user can tell at a glance which network a wallet
+ * belongs to — the PQ-vs-legacy distinction is already conveyed by other
+ * affordances (badge label, send/receive flows).
  */
-import { NeuraiHDWallet } from './wallets/neurai-hd-wallet';
-import { NeuraiPQWallet } from './wallets/neurai-pq-wallet';
+import { isTestnetChain, type NeuraiChainType } from '../blue_modules/neurai/networkConfig';
+
+type WalletLike = { network?: NeuraiChainType } | undefined | null;
 
 export default class WalletGradient {
-  // Wallet card gradients in the Neurai orange family.
-  // Legacy HD wallets get a warmer, lighter orange (Tailwind orange-400 →
-  // orange-500); PQ wallets get a deeper, darker amber so the two kinds are
-  // visually distinguishable while still feeling like the same brand.
+  // Mainnet uses the lighter Neurai orange (Tailwind orange-400 → orange-500).
+  // Testnet uses a deeper amber so the two networks are visually distinct.
   static defaultGradients: string[] = ['#fb923c', '#f97316'];
-  static neuraiHDWallet: string[] = ['#fb923c', '#f97316'];
-  static neuraiPQWallet: string[] = ['#ea580c', '#c2410c'];
+  static mainnetGradient: string[] = ['#fb923c', '#f97316'];
+  static testnetGradient: string[] = ['#ea580c', '#c2410c'];
 
   static createWallet = () => WalletGradient.defaultGradients[0];
 
-  static gradientsFor(type: string): string[] {
-    switch (type) {
-      case NeuraiHDWallet.type:
-        return WalletGradient.neuraiHDWallet;
-      case NeuraiPQWallet.type:
-        return WalletGradient.neuraiPQWallet;
-      default:
-        return WalletGradient.defaultGradients;
-    }
+  static gradientsForChain(chain?: NeuraiChainType | null): string[] {
+    return chain && isTestnetChain(chain) ? WalletGradient.testnetGradient : WalletGradient.mainnetGradient;
   }
 
-  static headerColorFor(type: string): string {
-    return WalletGradient.gradientsFor(type)[0];
+  static gradientsForWallet(wallet: WalletLike): string[] {
+    return WalletGradient.gradientsForChain(wallet?.network);
+  }
+
+  static headerColorForChain(chain?: NeuraiChainType | null): string {
+    return WalletGradient.gradientsForChain(chain)[0];
+  }
+
+  static headerColorForWallet(wallet: WalletLike): string {
+    return WalletGradient.gradientsForWallet(wallet)[0];
   }
 }

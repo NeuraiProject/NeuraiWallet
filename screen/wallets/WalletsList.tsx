@@ -249,6 +249,7 @@ const WalletsList: React.FC = () => {
         navigation.navigate('WalletTransactions', {
           walletID,
           walletType: item.type,
+          walletNetwork: (item as { network?: string }).network,
         });
       } else {
         navigation.navigate('AddWalletRoot');
