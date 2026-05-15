@@ -191,12 +191,21 @@ const WalletsList: React.FC = () => {
       connectionPoll?.pollConnection();
       const screenKey = route.name;
 
+      // Refresh on focus so re-entering from a notification tap or after a
+      // background→foreground transition shows the latest balances/txs, then
+      // poll periodically while the list is visible.
+      refreshAllWalletTransactions(undefined, false).catch(console.error);
+      const interval = setInterval(() => {
+        refreshAllWalletTransactions(undefined, false).catch(console.error);
+      }, 10000);
+
       return () => {
+        clearInterval(interval);
         console.log(`[WalletsList] Blurred - cleaning up handler for: ${screenKey}`);
         unregisterTransactionsHandler(screenKey);
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [connectionPoll, unregisterTransactionsHandler]),
+    }, [connectionPoll, unregisterTransactionsHandler, refreshAllWalletTransactions]),
   );
 
   useEffect(() => {
