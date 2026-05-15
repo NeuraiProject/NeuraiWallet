@@ -447,7 +447,10 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
                           const balanceText = `${balance} `;
                           const match = balanceText.match(/^([^.]*)(\.\d+)?(.*)$/);
                           const intPart = match?.[1] ?? balanceText;
-                          const decPart = match?.[2] ?? '';
+                          // Card view: cap visible decimals at 4 (`. + 4 digits = 5 chars`).
+                          // Full precision is still available in the Send screen.
+                          const decRaw = match?.[2] ?? '';
+                          const decPart = decRaw.length > 5 ? decRaw.slice(0, 5) : decRaw;
                           const suffix = match?.[3] ?? '';
                           return (
                             <Animated.Text

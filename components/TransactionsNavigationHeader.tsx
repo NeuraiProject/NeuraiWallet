@@ -190,7 +190,10 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
                     const balanceText = String(balance);
                     const match = balanceText.match(/^([^.]*)(\.\d+)?(.*)$/);
                     const intPart = match?.[1] ?? balanceText;
-                    const decPart = match?.[2] ?? '';
+                    // Wallet header: cap visible decimals at 4. Full precision
+                    // is still available in the Send screen's "Available" hint.
+                    const decRaw = match?.[2] ?? '';
+                    const decPart = decRaw.length > 5 ? decRaw.slice(0, 5) : decRaw;
                     const suffix = match?.[3] ?? '';
                     return (
                       <Animated.Text

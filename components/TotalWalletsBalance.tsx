@@ -97,12 +97,28 @@ const TotalWalletsBalance: React.FC = React.memo(() => {
       <View style={styles.container}>
         <Text style={styles.label}>{loc.wallets.total_balance}</Text>
         <TouchableOpacity onPress={handleBalanceOnPress}>
-          <Text style={[styles.balance, { color: colors.foregroundColor }]}>
-            {totalBalanceFormatted}{' '}
-            {totalBalancePreferredUnit !== XnaUnit.LOCAL_CURRENCY && (
-              <Text style={[styles.currency, { color: colors.foregroundColor }]}>{totalBalancePreferredUnit}</Text>
-            )}
-          </Text>
+          {(() => {
+            // Split into integer / decimal / suffix so the decimal portion can
+            // render smaller (matches the wallet card treatment).
+            const balanceText = String(totalBalanceFormatted);
+            const match = balanceText.match(/^([^.]*)(\.\d+)?(.*)$/);
+            const intPart = match?.[1] ?? balanceText;
+            // Total view: cap visible decimals at 4. Full precision is still
+            // available in the Send screen's "Available" hint.
+            const decRaw = match?.[2] ?? '';
+            const decPart = decRaw.length > 5 ? decRaw.slice(0, 5) : decRaw;
+            const suffix = match?.[3] ?? '';
+            return (
+              <Text style={[styles.balance, { color: colors.foregroundColor }]}>
+                {intPart}
+                {decPart ? <Text style={styles.balanceDecimal}>{decPart}</Text> : null}
+                {suffix}{' '}
+                {totalBalancePreferredUnit !== XnaUnit.LOCAL_CURRENCY && (
+                  <Text style={[styles.currency, { color: colors.foregroundColor }]}>{totalBalancePreferredUnit}</Text>
+                )}
+              </Text>
+            );
+          })()}
         </TouchableOpacity>
       </View>
     </ToolTipMenu>
@@ -127,6 +143,11 @@ const styles = StyleSheet.create({
   balance: {
     fontSize: 32,
     fontWeight: 'bold',
+  },
+  // Same treatment as the wallet card: decimals smaller than the integer so
+  // long totals stay readable.
+  balanceDecimal: {
+    fontSize: 22,
   },
   currency: {
     fontSize: 18,
