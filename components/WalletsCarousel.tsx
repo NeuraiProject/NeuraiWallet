@@ -238,6 +238,32 @@ const iStyles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.5,
   },
+  // Flap pegado a la esquina superior-izquierda: top-left sigue la curva del
+  // card (mismo radio que `grad.borderRadius`), bottom-right con ligera curva
+  // para terminar suavemente; los otros corners quedan a 90° contra el borde.
+  kindBadge: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderTopLeftRadius: 12,
+    borderBottomRightRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kindBadgeCompact: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderTopLeftRadius: 10,
+    borderBottomRightRadius: 8,
+  },
+  kindBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
   latestTx: {
     backgroundColor: 'transparent',
     fontSize: 13,
@@ -446,6 +472,17 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
               {isNeuraiWallet(item) && !isPlaceHolder && (
                 <View style={[iStyles.chainBadge, isCompact && iStyles.chainBadgeCompact]}>
                   <Text style={iStyles.chainBadgeText}>{isTestnetChain(item.network) ? 'TESTNET' : 'MAINNET'}</Text>
+                </View>
+              )}
+              {isNeuraiWallet(item) && !isPlaceHolder && (
+                <View
+                  style={[
+                    iStyles.kindBadge,
+                    isCompact && iStyles.kindBadgeCompact,
+                    { backgroundColor: '#dc2626' },
+                  ]}
+                >
+                  <Text style={iStyles.kindBadgeText}>{item.walletKind === 'pq' ? 'PQ' : 'HD'}</Text>
                 </View>
               )}
               <View style={[iStyles.gradContent, isCompact && iStyles.gradContentCompact]}>
