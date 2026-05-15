@@ -29,6 +29,8 @@ import loc, { formatBalance, transactionTimeToReadable } from '../loc';
 import { BlurredBalanceView } from './BlurredBalanceView';
 import { useTheme } from './themes';
 import { Transaction, TWallet } from '../class/wallets/types';
+import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
+import { isTestnetChain } from '../blue_modules/neurai/networkConfig';
 import { BlueSpacing10 } from './BlueSpacing';
 import { useLocale } from '@react-navigation/native';
 
@@ -213,6 +215,28 @@ const iStyles = StyleSheet.create({
   },
   balanceDecimalCompact: {
     fontSize: 19,
+  },
+  chainBadge: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+  },
+  chainBadgeCompact: {
+    top: 8,
+    right: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  chainBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   latestTx: {
     backgroundColor: 'transparent',
@@ -419,6 +443,11 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
           >
             <LinearGradient colors={WalletGradient.gradientsFor(item.type)} style={[iStyles.grad, isCompact && iStyles.gradCompact]}>
               <ImageBackground source={image} style={[iStyles.image, isCompact && iStyles.imageCompact]} />
+              {isNeuraiWallet(item) && !isPlaceHolder && (
+                <View style={[iStyles.chainBadge, isCompact && iStyles.chainBadgeCompact]}>
+                  <Text style={iStyles.chainBadgeText}>{isTestnetChain(item.network) ? 'TESTNET' : 'MAINNET'}</Text>
+                </View>
+              )}
               <View style={[iStyles.gradContent, isCompact && iStyles.gradContentCompact]}>
                 <Text style={iStyles.br} />
                 {!isPlaceHolder && (
