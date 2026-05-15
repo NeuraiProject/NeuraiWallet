@@ -59,9 +59,13 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   passphrase: string;
   /** Highest derivation index ever seen. Persisted; used to skip RPC scan. */
   addressPosition: number;
-  /** Cached `IHistoryItem[]` for the wallet list view. Not persisted. */
+  /** Cached `IHistoryItem[]` for the wallet list view. Persisted to disk so
+   * the UI can render history immediately on app launch, before the refresh
+   * RPC round-trip completes. Replaced wholesale on each `fetchTransactions`. */
   protected _historyItems: IHistoryItem[];
-  /** Cached lightweight transactions for `getTransactions()`. Not persisted. */
+  /** Cached lightweight transactions for `getTransactions()`. Persisted to
+   * disk so the wallet shows its known history before the next RPC fetch.
+   * Replaced wholesale on each `fetchTransactions`. */
   protected _txCache: Transaction[];
 
   /** Lazy engine + backend; created on first use, cleared on network change. */
@@ -81,11 +85,12 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._backend = null;
 
     // Hide non-serializable runtime caches from JSON.stringify so they never
-    // end up in persisted wallet JSON.
+    // end up in persisted wallet JSON. `_historyItems` and `_txCache` are
+    // intentionally left enumerable — they are plain JSON-serializable and
+    // we want them on disk so the UI can render previous history instantly
+    // on app launch, before the next refresh RPC completes.
     Object.defineProperty(this, '_engine', { writable: true, enumerable: false, value: null });
     Object.defineProperty(this, '_backend', { writable: true, enumerable: false, value: null });
-    Object.defineProperty(this, '_historyItems', { writable: true, enumerable: false, value: [] });
-    Object.defineProperty(this, '_txCache', { writable: true, enumerable: false, value: [] });
   }
 
   // ---------- network / passphrase ------------------------------------------------
