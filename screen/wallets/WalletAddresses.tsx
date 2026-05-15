@@ -126,8 +126,9 @@ const WalletAddresses: React.FC = () => {
   const allowSignVerifyMessage = (wallet && 'allowSignVerifyMessage' in wallet && wallet.allowSignVerifyMessage()) ?? false;
 
   const { colors } = useTheme();
-  const { isPrivacyBlurEnabled } = useSettings();
+  const { isPrivacyBlurEnabled, isPQAddressReuseEnabled } = useSettings();
   const { enableScreenProtect, disableScreenProtect } = useScreenProtect();
+  const isPQ = !!walletInstance && isNeuraiWallet(walletInstance) && walletInstance.walletKind === 'pq';
   const { setOptions } = useExtendedNavigation<NavigationProps>();
 
   const stylesHook = StyleSheet.create({
@@ -170,11 +171,27 @@ const WalletAddresses: React.FC = () => {
     if (!walletInstance) return [];
     if (isNeuraiWallet(walletInstance)) {
       const cached = walletInstance.getCachedAddresses();
-      return cached.map((address, index) => ({
+      if (walletInstance.walletKind === 'pq') {
+        // PQ wallets have a single derivation chain (no external/internal
+        // split). When address-reuse is on, the wallet only ever exposes the
+        // first address as the receive address — surface just that one.
+        const items = isPQAddressReuseEnabled ? cached.slice(0, 1) : cached;
+        return items.map((address, index) => ({
+          key: address,
+          index,
+          address,
+          isInternal: false,
+          balance: 0,
+          transactions: 0,
+        }));
+      }
+      // HD legacy wallets interleave external/internal at each derivation
+      // index (even = receive, odd = change). Mirror that here.
+      return cached.map((address, i) => ({
         key: address,
-        index,
+        index: Math.floor(i / 2),
         address,
-        isInternal: false,
+        isInternal: i % 2 !== 0,
         balance: 0,
         transactions: 0,
       }));
@@ -205,7 +222,7 @@ const WalletAddresses: React.FC = () => {
       }
     }
     return newAddresses;
-  }, [walletInstance, engineReady]);
+  }, [walletInstance, engineReady, isPQAddressReuseEnabled]);
 
   useEffect(() => {
     dispatch({ type: SET_ADDRESSES, payload: getAddresses });
@@ -271,23 +288,27 @@ const WalletAddresses: React.FC = () => {
       keyExtractor={keyExtractor}
       initialNumToRender={20}
       renderItem={renderRow}
-      ListEmptyComponent={search.length > 0 ? null : <ActivityIndicator />}
+      ListEmptyComponent={showAddresses || search.length > 0 ? null : <ActivityIndicator />}
       centerContent={!showAddresses}
       contentInsetAdjustmentBehavior="automatic"
       automaticallyAdjustContentInsets
       automaticallyAdjustsScrollIndicatorInsets
       automaticallyAdjustKeyboardInsets
       ListHeaderComponent={
-        <View style={styles.segmentedHeader}>
-          <SegmentedControl
-            values={Object.values(TABS).map(tab => loc.addresses[`type_${tab}`])}
-            selectedIndex={Object.values(TABS).findIndex(tab => tab === currentTab)}
-            onChange={index => {
-              const tabKey = Object.keys(TABS)[index] as TabKey;
-              dispatch({ type: SET_CURRENT_TAB, payload: TABS[tabKey] });
-            }}
-          />
-        </View>
+        // PQ wallets have a single derivation chain — no change addresses,
+        // so hide the receive/change segmented control entirely.
+        isPQ ? null : (
+          <View style={styles.segmentedHeader}>
+            <SegmentedControl
+              values={Object.values(TABS).map(tab => loc.addresses[`type_${tab}`])}
+              selectedIndex={Object.values(TABS).findIndex(tab => tab === currentTab)}
+              onChange={index => {
+                const tabKey = Object.keys(TABS)[index] as TabKey;
+                dispatch({ type: SET_CURRENT_TAB, payload: TABS[tabKey] });
+              }}
+            />
+          </View>
+        )
       }
     />
   );
