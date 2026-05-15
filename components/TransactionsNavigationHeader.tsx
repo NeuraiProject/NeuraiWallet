@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import Clipboard from '@react-native-clipboard/clipboard';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ImageBackground, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import LinearGradient from 'react-native-linear-gradient';
 import WalletGradient from '../class/wallet-gradient';
@@ -161,8 +161,11 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
     });
   }, [wallet, unit, hideBalance, preferredFiatCurrency, unitSwitching]);
 
+  const shapeImage = direction === 'rtl' ? require('../img/neurai-shape-rtl.png') : require('../img/neurai-shape.png');
+
   return (
     <LinearGradient colors={WalletGradient.gradientsFor(wallet.type)} style={styles.lineaderGradient}>
+      <ImageBackground source={shapeImage} style={styles.shapeImage} />
       <View style={styles.contentContainer}>
         <Text testID="WalletLabel" numberOfLines={1} style={[styles.walletLabel, { writingDirection: direction }]}>
           {wallet.getLabel()}
@@ -223,6 +226,17 @@ const styles = StyleSheet.create({
   lineaderGradient: {
     minHeight: 140,
     justifyContent: 'flex-start',
+    overflow: 'hidden',
+  },
+  // Faint Neurai mark behind the header content, matching the wallet card.
+  shapeImage: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
   },
   contentContainer: {
     padding: 15,

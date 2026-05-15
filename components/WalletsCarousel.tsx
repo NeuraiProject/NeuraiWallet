@@ -173,17 +173,18 @@ const iStyles = StyleSheet.create({
   balanceContainerCompact: {
     height: 32,
   },
+  // Fill the whole card so the asset's hard rectangle edges live outside the
+  // rounded gradient — the visible part is just the transparent silhouette.
   image: {
-    width: 99,
-    height: 94,
     position: 'absolute',
-    bottom: 0,
+    top: 0,
+    left: 0,
     right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
   },
-  imageCompact: {
-    width: 78,
-    height: 74,
-  },
+  imageCompact: {},
   br: {
     backgroundColor: 'transparent',
   },
@@ -204,12 +205,14 @@ const iStyles = StyleSheet.create({
     lineHeight: 34,
   },
   // Decimal portion smaller than the integer so long balances like
-  // 1045.892327832 XNA still fit without truncation.
+  // 1045.892327832 XNA still fit without truncation. Bumped a notch because
+  // `adjustsFontSizeToFit` proportionally shrinks nested Text — the parent's
+  // `minimumFontScale` floors the shrink at 0.7 so this stays legible.
   balanceDecimal: {
-    fontSize: 22,
+    fontSize: 25,
   },
   balanceDecimalCompact: {
-    fontSize: 18,
+    fontSize: 19,
   },
   latestTx: {
     backgroundColor: 'transparent',
@@ -370,7 +373,7 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
       transform: [{ translateY: balanceTranslateY.value }],
     }));
 
-    const image = direction === 'rtl' ? require('../img/btc-shape-rtl.png') : require('../img/btc-shape.png');
+    const image = direction === 'rtl' ? require('../img/neurai-shape-rtl.png') : require('../img/neurai-shape.png');
 
     let latestTransactionText;
     const txs = item.getTransactions();
@@ -450,6 +453,7 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
                             <Animated.Text
                               numberOfLines={1}
                               adjustsFontSizeToFit
+                              minimumFontScale={0.7}
                               key={`${balance}`} // force component recreation on balance change. To fix right-to-left languages, like Farsi
                               style={[
                                 iStyles.balance,
