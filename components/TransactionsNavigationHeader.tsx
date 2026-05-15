@@ -181,16 +181,29 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
                 <BlurredBalanceView />
               ) : (
                 <View key={`wallet-balance-textwrap-${wallet.getID?.() ?? ''}-${String(balance)}`}>
-                  <Animated.Text
-                    key={`wallet-balance-text-${wallet.getID?.() ?? ''}-${String(balance)}`} // force recreation on balance change for RTL correctness
-                    testID="WalletBalance"
-                    numberOfLines={1}
-                    minimumFontScale={0.5}
-                    adjustsFontSizeToFit
-                    style={[styles.walletBalanceText, animatedBalanceTextStyle]}
-                  >
-                    {balance}
-                  </Animated.Text>
+                  {(() => {
+                    // Split into integer / decimal / suffix so the decimal
+                    // portion can render smaller while the integer stays big.
+                    const balanceText = String(balance);
+                    const match = balanceText.match(/^([^.]*)(\.\d+)?(.*)$/);
+                    const intPart = match?.[1] ?? balanceText;
+                    const decPart = match?.[2] ?? '';
+                    const suffix = match?.[3] ?? '';
+                    return (
+                      <Animated.Text
+                        key={`wallet-balance-text-${wallet.getID?.() ?? ''}-${String(balance)}`} // force recreation on balance change for RTL correctness
+                        testID="WalletBalance"
+                        numberOfLines={1}
+                        minimumFontScale={0.5}
+                        adjustsFontSizeToFit
+                        style={[styles.walletBalanceText, animatedBalanceTextStyle]}
+                      >
+                        {intPart}
+                        {decPart ? <Text style={styles.walletBalanceDecimal}>{decPart}</Text> : null}
+                        {suffix}
+                      </Animated.Text>
+                    );
+                  })()}
                 </View>
               )}
             </View>
@@ -234,6 +247,11 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 36,
     flexShrink: 1, // Allow the text to shrink if there's not enough space
+  },
+  // Smaller font for the decimal portion so long balances like
+  // 1045.892327832 fit in the header without aggressive font shrinking.
+  walletBalanceDecimal: {
+    fontSize: 22,
   },
   walletPreferredUnitView: {
     justifyContent: 'center',

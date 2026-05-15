@@ -203,6 +203,14 @@ const iStyles = StyleSheet.create({
     fontSize: 28,
     lineHeight: 34,
   },
+  // Decimal portion smaller than the integer so long balances like
+  // 1045.892327832 XNA still fit without truncation.
+  balanceDecimal: {
+    fontSize: 22,
+  },
+  balanceDecimalCompact: {
+    fontSize: 18,
+  },
   latestTx: {
     backgroundColor: 'transparent',
     fontSize: 13,
@@ -429,19 +437,35 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
                           <BlurredBalanceView />
                         </>
                       ) : (
-                        <Animated.Text
-                          numberOfLines={1}
-                          adjustsFontSizeToFit
-                          key={`${balance}`} // force component recreation on balance change. To fix right-to-left languages, like Farsi
-                          style={[
-                            iStyles.balance,
-                            isCompact && iStyles.balanceCompact,
-                            { color: colors.inverseForegroundColor, writingDirection: direction },
-                            animatedBalanceStyle,
-                          ]}
-                        >
-                          {`${balance} `}
-                        </Animated.Text>
+                        (() => {
+                          // Split into integer / decimal / suffix so the decimal
+                          // portion can render smaller (matches the timestamp
+                          // label size) while keeping the integer + unit big.
+                          const balanceText = `${balance} `;
+                          const match = balanceText.match(/^([^.]*)(\.\d+)?(.*)$/);
+                          const intPart = match?.[1] ?? balanceText;
+                          const decPart = match?.[2] ?? '';
+                          const suffix = match?.[3] ?? '';
+                          return (
+                            <Animated.Text
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
+                              key={`${balance}`} // force component recreation on balance change. To fix right-to-left languages, like Farsi
+                              style={[
+                                iStyles.balance,
+                                isCompact && iStyles.balanceCompact,
+                                { color: colors.inverseForegroundColor, writingDirection: direction },
+                                animatedBalanceStyle,
+                              ]}
+                            >
+                              {intPart}
+                              {decPart ? (
+                                <Text style={[iStyles.balanceDecimal, isCompact && iStyles.balanceDecimalCompact]}>{decPart}</Text>
+                              ) : null}
+                              {suffix}
+                            </Animated.Text>
+                          );
+                        })()
                       )}
                     </View>
                     <Text style={iStyles.br} />
