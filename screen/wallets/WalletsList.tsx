@@ -13,6 +13,7 @@ import { useTheme } from '../../components/themes';
 import { TransactionListItem } from '../../components/TransactionListItem';
 import WalletsCarousel, { getWalletCarouselItemWidth } from '../../components/WalletsCarousel';
 import { useSizeClass, SizeClass } from '../../blue_modules/sizeClass';
+import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 import loc from '../../loc';
 import ActionSheet from '../ActionSheet';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -30,6 +31,7 @@ const WalletsListSections = { CAROUSEL: 'CAROUSEL', TRANSACTIONS: 'TRANSACTIONS'
 
 /** Electrum `ping` while the list is visible; detects mid-session drops without polling when user is elsewhere. */
 const ELECTRUM_HEALTH_POLL_WHILE_WALLETS_LIST_FOCUSED_MS = 30_000;
+const BLOCK_POLL_INTERVAL_MS = 20_000;
 
 type SectionData = {
   key: string;
@@ -154,10 +156,6 @@ const WalletsList: React.FC = () => {
     return refreshWallets(undefined, true, false);
   }, [refreshWallets]);
 
-  // Initial load is handled by `useFocusEffect` below (which fires on mount
-  // too, deferred via InteractionManager so the UI stays interactive while
-  // the first RPC roundtrip runs in the background).
-
   const onRefresh = useCallback(() => {
     console.debug('WalletsList onRefresh');
     return refreshTransactions();
@@ -181,26 +179,33 @@ const WalletsList: React.FC = () => {
       connectionPoll?.pollConnection();
       const screenKey = route.name;
 
-      // Refresh on focus so re-entering from a notification tap or after a
-      // background→foreground transition shows the latest balances/txs. Defer
-      // the first RPC until after the navigation animation completes so the
-      // bridge stays free and button taps remain responsive on entry. Then
-      // poll periodically while the list is visible.
-      const handle = InteractionManager.runAfterInteractions(() => {
+      // Poll only the chain tip while the list is visible. The heavier
+      // balance/history scan runs only after a new block appears.
+      const refreshIfNewBlock = async () => {
+        const hasNewBlock = await Promise.all(
+          wallets.map(async wallet => {
+            if (!isNeuraiWallet(wallet)) return false;
+            return wallet.shouldRefreshTransactionsForNewBlock().catch(error => {
+              console.debug('[WalletsList] block poll failed', error);
+              return false;
+            });
+          }),
+        );
+        if (!hasNewBlock.some(Boolean)) return;
         refreshAllWalletTransactions(undefined, false).catch(console.error);
-      });
+      };
+
       const interval = setInterval(() => {
-        refreshAllWalletTransactions(undefined, false).catch(console.error);
-      }, 10000);
+        refreshIfNewBlock().catch(console.error);
+      }, BLOCK_POLL_INTERVAL_MS);
 
       return () => {
-        handle.cancel();
         clearInterval(interval);
         console.log(`[WalletsList] Blurred - cleaning up handler for: ${screenKey}`);
         unregisterTransactionsHandler(screenKey);
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [connectionPoll, unregisterTransactionsHandler, refreshAllWalletTransactions]),
+    }, [connectionPoll, unregisterTransactionsHandler, refreshAllWalletTransactions, wallets]),
   );
 
   useEffect(() => {

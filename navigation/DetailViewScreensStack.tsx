@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, AppState, View, Platform, PlatformColor, Text, StyleSheet, Pressable } from 'react-native';
+import { Animated, AppState, View, Platform, PlatformColor, Text, StyleSheet, Image } from 'react-native';
 import { NativeStackNavigationOptions } from '@react-navigation/native-stack';
 import HeaderRightButton from '../components/HeaderRightButton';
 import navigationStyle, { CloseButtonPosition } from '../components/navigationStyle';
@@ -16,7 +16,6 @@ import WalletDetails from '../screen/wallets/WalletDetails';
 import SelectWallet from '../screen/wallets/SelectWallet';
 import WalletsList from '../screen/wallets/WalletsList';
 import { DetailViewStack } from './index';
-import Icon from '../components/Icon';
 import SettingsButton from '../components/icons/SettingsButton';
 import { useSettings } from '../hooks/context/useSettings';
 import { useStorage } from '../hooks/context/useStorage';
@@ -50,6 +49,8 @@ import ReceiveDetails from '../screen/receive/ReceiveDetails';
 import ReceiveCustomAmountSheet from '../screen/receive/ReceiveCustomAmountSheet';
 import SendNeurai from '../screen/send/SendNeurai';
 import ImportNeurai from '../screen/wallets/ImportNeurai';
+
+const NEURAI_LOGO = require('../img/addWallet/neurai.png');
 
 const UpdatingLabel: React.FC<{ containerStyle: object; textStyle: object }> = ({ containerStyle, textStyle }) => {
   const opacity = useRef(new Animated.Value(1)).current;
@@ -143,15 +144,6 @@ const DetailViewStackScreensStack = () => {
     [sizeClass, navigateToAddWallet],
   );
 
-  const navigateToElectrumSettings = useCallback(() => {
-    const routeNames = navigation.getState()?.routeNames;
-    if (routeNames?.includes('ElectrumSettings')) {
-      navigation.navigate('ElectrumSettings');
-    } else {
-      navigation.navigate('DetailViewStackScreensStack', { screen: 'ElectrumSettings' });
-    }
-  }, [navigation]);
-
   const walletListScreenOptions = useMemo<NativeStackNavigationOptions>(() => {
     // The "Offline" and "Not connected" pills referred to BlueElectrum
     // health; Neurai goes through RPC and has its own status panel in
@@ -159,20 +151,23 @@ const DetailViewStackScreensStack = () => {
     // transient "Updating…" indicator while a refresh is in flight.
     const isUpdating = walletTransactionUpdateStatus !== WalletTransactionsStatus.NONE;
 
-    const renderHeaderLeft = () => {
-      if (isUpdating) {
-        return (
+    const renderHeaderLeft = () => (
+      <View style={styles.walletListHeaderLeft}>
+        <Image source={NEURAI_LOGO} style={styles.walletListHeaderLogo} resizeMode="contain" />
+        <Text style={[styles.walletListHeaderTitle, { color: theme.colors.foregroundColor }]} numberOfLines={1}>
+          Neurai Wallet
+        </Text>
+        {isUpdating && (
           <UpdatingLabel
-            containerStyle={[styles.updatingLabelContainer, { backgroundColor: theme.colors.lightButton }]}
+            containerStyle={[styles.updatingLabelContainer, styles.walletListUpdatingLabel, { backgroundColor: theme.colors.lightButton }]}
             textStyle={[styles.updatingLabelText, { color: theme.colors.foregroundColor }]}
           />
-        );
-      }
-      return null;
-    };
+        )}
+      </View>
+    );
 
     return {
-      title: sizeClass === SizeClass.Large ? loc.wallets.list_title : '',
+      title: '',
       headerLargeTitle: false,
       headerShadowVisible: false,
       headerStyle: {
@@ -181,14 +176,7 @@ const DetailViewStackScreensStack = () => {
       headerLeft: renderHeaderLeft,
       headerRight: () => (isDesktop ? undefined : RightBarButtons),
     };
-  }, [
-    RightBarButtons,
-    sizeClass,
-    theme.colors.customHeader,
-    theme.colors.foregroundColor,
-    theme.colors.lightButton,
-    walletTransactionUpdateStatus,
-  ]);
+  }, [RightBarButtons, theme.colors.customHeader, theme.colors.foregroundColor, theme.colors.lightButton, walletTransactionUpdateStatus]);
 
   const isIOSLightMode = Platform.OS === 'ios' && !theme.dark;
   const settingsCardColor = theme.colors.lightButton ?? theme.colors.modal ?? theme.colors.elevated ?? theme.colors.background;
@@ -452,23 +440,29 @@ const styles = StyleSheet.create({
   width24: {
     width: 24,
   },
+  walletListHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 0,
+  },
+  walletListHeaderLogo: {
+    width: 29,
+    height: 29,
+    marginRight: 8,
+  },
+  walletListHeaderTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+  },
+  walletListUpdatingLabel: {
+    marginLeft: 10,
+  },
   updatingLabelContainer: {
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 6,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  offlineLabelRow: {
-    flexDirection: 'row',
-  },
-  offlineLabelIcon: {
-    marginRight: 6,
-  },
-  offlineLabelText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#ffffff',
   },
   updatingLabelText: {
     fontSize: 13,

@@ -5,7 +5,6 @@ import {
   Dimensions,
   findNodeHandle,
   FlatList,
-  InteractionManager,
   Platform,
   PixelRatio,
   ScrollView,
@@ -46,6 +45,8 @@ const buttonFontSize =
     ? 22
     : PixelRatio.roundToNearestPixel(Dimensions.get('window').width / 26);
 
+const BLOCK_POLL_INTERVAL_MS = 20_000;
+
 type RouteProps = RouteProp<DetailViewStackParamList, 'WalletTransactions'>;
 
 type WalletTransactionsProps = NativeStackScreenProps<DetailViewStackParamList, 'WalletTransactions'>;
@@ -75,6 +76,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const flatListRef = useRef<FlatList<Transaction>>(null);
   const headerRef = useRef<View>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
+  const refreshInProgressRef = useRef(false);
 
   const stylesHook = StyleSheet.create({
     listHeaderText: {
@@ -158,7 +160,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   }, [walletID, displayUnit, isUnitSwitching]);
 
   const sortedTransactions = useMemo(() => {
-    const txs = wallet.getTransactions();
+    const txs = wallet.getTransactions().slice();
     txs.sort((a, b) => b.timestamp - a.timestamp);
     return txs;
   }, [wallet]);
@@ -177,7 +179,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       // Neurai wallets fetch through the RPC backend, not BlueElectrum, so the
       // legacy "Electrum disabled" toggle no longer applies — only skip when
       // we're already mid-refresh.
-      if (isLoading) return;
+      if (refreshInProgressRef.current) return;
 
       const MIN_REFRESH_INTERVAL = 5000; // 5 seconds
       if (!isManualRefresh && lastFetchTimestamp !== 0 && Date.now() - lastFetchTimestamp < MIN_REFRESH_INTERVAL) {
@@ -188,6 +190,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
         return; // Silently stop auto-retrying, but allow manual refresh
       }
 
+      refreshInProgressRef.current = true;
       // Only show loading indicator on manual refresh or after first successful fetch
       if (isManualRefresh || lastFetchTimestamp !== 0) {
         setIsLoading(true);
@@ -218,44 +221,46 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
               presentAlert({ message: errorMessage, type: AlertType.Toast });
             }
           }
-          setIsLoading(true);
           return newFailures;
         });
       } finally {
-        if (smthChanged) {
-          await saveToDisk();
-          setLimit(prev => prev + pageSize);
+        try {
+          if (smthChanged) {
+            await saveToDisk();
+            setLimit(prev => prev + pageSize);
+          }
+        } finally {
+          refreshInProgressRef.current = false;
+          setIsLoading(false);
         }
-        setIsLoading(false);
       }
     },
-    [wallet, isLoading, saveToDisk, pageSize, lastFetchTimestamp, fetchFailures],
+    [wallet, saveToDisk, pageSize, lastFetchTimestamp, fetchFailures],
   );
 
-  useEffect(() => {
-    if (lastFetchTimestamp === 0 && !isLoading) {
-      refreshTransactions(false).catch(console.error);
+  const refreshTransactionsIfNewBlock = useCallback(async () => {
+    if (refreshInProgressRef.current) return;
+    if (isNeuraiWallet(wallet)) {
+      const hasNewBlock = await wallet.shouldRefreshTransactionsForNewBlock().catch(error => {
+        console.debug('[WalletTransactions] block poll failed', error);
+        return false;
+      });
+      if (!hasNewBlock) return;
     }
-  }, [wallet, isLoading, refreshTransactions, lastFetchTimestamp]);
+    await refreshTransactions(false);
+  }, [refreshTransactions, wallet]);
 
-  // Auto-poll balance + transactions every 10 s so a freshly-broadcast send,
-  // an incoming receive, or a confirmation lands in the UI without the user
-  // having to pull-to-refresh. Fire once on focus after the navigation
-  // animation completes (via InteractionManager) so the initial RPC doesn't
-  // saturate the bridge during the transition and freeze button taps.
+  // Poll only the chain tip while the screen is open. Fetching the tip is cheap;
+  // the heavier balance/history scan runs only after a new block appears.
   useFocusEffect(
     useCallback(() => {
-      const handle = InteractionManager.runAfterInteractions(() => {
-        refreshTransactions(false).catch(console.error);
-      });
       const id = setInterval(() => {
-        refreshTransactions(false).catch(console.error);
-      }, 10000);
+        refreshTransactionsIfNewBlock().catch(console.error);
+      }, BLOCK_POLL_INTERVAL_MS);
       return () => {
-        handle.cancel();
         clearInterval(id);
       };
-    }, [refreshTransactions]),
+    }, [refreshTransactionsIfNewBlock]),
   );
 
   const renderListFooterComponent = () => {

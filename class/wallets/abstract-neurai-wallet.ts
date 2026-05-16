@@ -14,7 +14,7 @@
 
 import NeuraiJsWallet from '@neuraiproject/neurai-jswallet';
 import NeuraiKey from '@neuraiproject/neurai-key';
-import { getHistory, type IDelta, type IHistoryItem } from '@neuraiproject/neurai-history-list';
+import { type IDelta, type IHistoryItem } from '@neuraiproject/neurai-history-list';
 
 import {
   CHAIN_PARAMS,
@@ -34,6 +34,96 @@ type NeuraiEngine = Awaited<ReturnType<typeof NeuraiJsWallet.createInstance>>;
 
 const ONE_FULL_COIN = 1e8;
 const FEE_TARGET_BLOCKS = 6;
+const HISTORY_DELTA_BATCH_SIZE = 250;
+const HISTORY_ITEM_BATCH_SIZE = 100;
+const TX_CACHE_BATCH_SIZE = 100;
+
+const yieldToEventLoop = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+type HistoryAsset = IHistoryItem['assets'][number];
+
+const getHistoryItem = (deltas: IDelta[], baseCurrency: string): IHistoryItem => {
+  if (deltas.length === 1) {
+    const delta = deltas[0];
+    return {
+      isSent: delta.satoshis < 0,
+      fee: 0,
+      assets: [
+        {
+          assetName: delta.assetName,
+          satoshis: delta.satoshis,
+          value: delta.satoshis / ONE_FULL_COIN,
+        },
+      ],
+      blockHeight: delta.height,
+      transactionId: delta.txid,
+    };
+  }
+
+  const balanceByAsset: Record<string, number> = {};
+  for (const delta of deltas) {
+    balanceByAsset[delta.assetName] = (balanceByAsset[delta.assetName] || 0) + delta.satoshis;
+  }
+
+  let isSent = false;
+  let assets: HistoryAsset[] = Object.keys(balanceByAsset).map(assetName => {
+    if (balanceByAsset[assetName] < 0) isSent = true;
+    return {
+      assetName,
+      satoshis: balanceByAsset[assetName],
+      value: balanceByAsset[assetName] / ONE_FULL_COIN,
+    };
+  });
+
+  if (isSent && assets.some(asset => asset.assetName !== baseCurrency)) {
+    assets = assets.filter(asset => asset.assetName !== baseCurrency || asset.value >= 5);
+  }
+
+  return {
+    assets,
+    blockHeight: deltas[0].height,
+    transactionId: deltas[0].txid,
+    isSent,
+    fee: 0,
+  };
+};
+
+const getHistoryYielding = async (deltas: IDelta[], baseCurrency: string): Promise<IHistoryItem[]> => {
+  if (!deltas) {
+    throw Error('Argument deltas is mandatory and cannot be nullish');
+  }
+
+  const deltasByTransactionId = new Map<string, IDelta[]>();
+  for (let i = 0; i < deltas.length; i += HISTORY_DELTA_BATCH_SIZE) {
+    for (const delta of deltas.slice(i, i + HISTORY_DELTA_BATCH_SIZE)) {
+      const txDeltas = deltasByTransactionId.get(delta.txid) || [];
+      txDeltas.push(delta);
+      deltasByTransactionId.set(delta.txid, txDeltas);
+    }
+    if (i + HISTORY_DELTA_BATCH_SIZE < deltas.length) {
+      await yieldToEventLoop();
+    }
+  }
+
+  const groupedDeltas = Array.from(deltasByTransactionId.values());
+  const history: IHistoryItem[] = [];
+  for (let i = 0; i < groupedDeltas.length; i += HISTORY_ITEM_BATCH_SIZE) {
+    history.push(...groupedDeltas.slice(i, i + HISTORY_ITEM_BATCH_SIZE).map(items => getHistoryItem(items, baseCurrency)));
+    if (i + HISTORY_ITEM_BATCH_SIZE < groupedDeltas.length) {
+      await yieldToEventLoop();
+    }
+  }
+
+  history.sort((h1, h2) => {
+    const value1 = `${h1.blockHeight}_${h1.transactionId}`;
+    const value2 = `${h2.blockHeight}_${h2.transactionId}`;
+    if (value1 > value2) return -1;
+    if (value1 < value2) return 1;
+    return 0;
+  });
+
+  return history;
+};
 
 export interface NeuraiTransactionTarget {
   address: string;
@@ -59,6 +149,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   passphrase: string;
   /** Highest derivation index ever seen. Persisted; used to skip RPC scan. */
   addressPosition: number;
+  /** Highest chain tip height covered by the last successful transaction scan. Persisted. */
+  _lastTxBlockHeight: number;
   /** Cached `IHistoryItem[]` for the wallet list view. Persisted to disk so
    * the UI can render history immediately on app launch, before the refresh
    * RPC round-trip completes. Replaced wholesale on each `fetchTransactions`. */
@@ -79,6 +171,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this.network = chainFor(DEFAULT_NETWORK, 'legacy');
     this.passphrase = '';
     this.addressPosition = 0;
+    this._lastTxBlockHeight = 0;
     this._historyItems = [];
     this._txCache = [];
     this._engine = null;
@@ -104,6 +197,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this.balance = 0;
     this.unconfirmed_balance = 0;
     this.addressPosition = 0;
+    this._lastTxBlockHeight = 0;
     this._historyItems = [];
     this._txCache = [];
   }
@@ -320,6 +414,11 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     return Date.now() - this._lastTxFetch > 5 * 60 * 1000;
   }
 
+  async shouldRefreshTransactionsForNewBlock(): Promise<boolean> {
+    const tipHeight = await this.getBackend().getTipHeight();
+    return this._lastTxBlockHeight <= 0 || tipHeight > this._lastTxBlockHeight;
+  }
+
   // Bitcoin HD wallets expose `addressIsChange` to mark internal addresses on
   // CoinControl. The Neurai engine differentiates external/internal via its
   // own derivation tree; for now we don't expose change addresses to coin
@@ -347,9 +446,14 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     const engine = await this.ensureEngine();
     const addresses = engine.getAddresses();
     const backend = this.getBackend();
-    const deltas = (await backend.getAddressHistory(addresses)) as IDelta[];
+    const [deltas, tipHeight] = await Promise.all([
+      backend.getAddressHistory(addresses) as Promise<IDelta[]>,
+      backend.getTipHeight().catch(() => 0),
+    ]);
+    await yieldToEventLoop();
     const baseCurrency = engine.getBaseCurrency();
-    const items = getHistory(deltas, baseCurrency);
+    const items = await getHistoryYielding(deltas, baseCurrency);
+    await yieldToEventLoop();
     const heights = Array.from(new Set(items.map(i => i.blockHeight).filter(h => h > 0)));
     let blockTimes: Record<number, number> = {};
     if (heights.length > 0) {
@@ -359,9 +463,17 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
         console.debug('fetchTransactions: getBlockTimes failed', err);
       }
     }
+    const txCache: Transaction[] = [];
+    for (let i = 0; i < items.length; i += TX_CACHE_BATCH_SIZE) {
+      txCache.push(...items.slice(i, i + TX_CACHE_BATCH_SIZE).map(item => this._historyItemToTransaction(item, deltas, blockTimes)));
+      if (i + TX_CACHE_BATCH_SIZE < items.length) {
+        await yieldToEventLoop();
+      }
+    }
     this._historyItems = items;
-    this._txCache = items.map(item => this._historyItemToTransaction(item, deltas, blockTimes));
+    this._txCache = txCache;
     this._lastTxFetch = Date.now();
+    this._lastTxBlockHeight = Math.max(tipHeight, this._lastTxBlockHeight, ...items.map(item => item.blockHeight));
   }
 
   getTransactions(): Transaction[] {
@@ -417,17 +529,13 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   // ---------- helpers --------------------------------------------------------------
 
-  private _historyItemToTransaction(
-    item: IHistoryItem,
-    _deltas: IDelta[],
-    blockTimes: Record<number, number>,
-  ): Transaction {
+  private _historyItemToTransaction(item: IHistoryItem, _deltas: IDelta[], blockTimes: Record<number, number>): Transaction {
     const xnaAsset = item.assets.find(a => a.assetName === 'XNA');
     const value = xnaAsset ? Math.round(xnaAsset.satoshis) : 0;
     // Mempool txs (height 0) get the current wall clock so the UI shows
     // "just now" instead of 1970. Confirmed txs use the block header time.
     const nowSec = Math.floor(Date.now() / 1000);
-    const time = item.blockHeight > 0 ? blockTimes[item.blockHeight] ?? nowSec : nowSec;
+    const time = item.blockHeight > 0 ? (blockTimes[item.blockHeight] ?? nowSec) : nowSec;
     return {
       txid: item.transactionId,
       hash: item.transactionId,
