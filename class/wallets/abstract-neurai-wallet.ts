@@ -487,16 +487,21 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   // ---------- transactions ---------------------------------------------------------
 
-  async buildSendTransaction(targets: NeuraiTransactionTarget[]): Promise<NeuraiBuildTransactionResult> {
+  async buildSendTransaction(
+    targets: NeuraiTransactionTarget[],
+    opts?: { forcedChangeAddress?: string },
+  ): Promise<NeuraiBuildTransactionResult> {
     if (targets.length === 0) {
       throw new Error('buildSendTransaction requires at least one target');
     }
     const engine = await this.ensureEngine();
+    const forcedChangeAddressBaseCurrency = opts?.forcedChangeAddress;
 
     if (targets.length === 1) {
       const result = await engine.createTransaction({
         toAddress: targets[0].address,
         amount: targets[0].amount,
+        forcedChangeAddressBaseCurrency,
       });
       return {
         signedHex: result.debug.signedTransaction ?? '',
@@ -508,7 +513,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
     const outputs: Record<string, number> = {};
     for (const t of targets) outputs[t.address] = t.amount;
-    const result = await engine.createSendManyTransaction({ outputs });
+    const result = await engine.createSendManyTransaction({ outputs, forcedChangeAddressBaseCurrency });
     return {
       signedHex: result.debug.signedTransaction ?? '',
       unsignedHex: result.debug.rawUnsignedTransaction ?? '',

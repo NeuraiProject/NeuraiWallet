@@ -30,6 +30,7 @@ import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import { useTheme } from '../../components/themes';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
+import { useSettings } from '../../hooks/context/useSettings';
 import { useStorage } from '../../hooks/context/useStorage';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc from '../../loc';
@@ -64,6 +65,7 @@ function parseScannedPayload(input: string): { address: string; amount?: string 
 const SendNeurai: React.FC = () => {
   const { colors } = useTheme();
   const { wallets } = useStorage();
+  const { isPQAddressReuseEnabled } = useSettings();
   const { navigate } = useExtendedNavigation<NavigationProps>();
   const { params } = useRoute<RouteProps>();
   const found = wallets.find(w => w.getID() === params.walletID);
@@ -126,7 +128,15 @@ const SendNeurai: React.FC = () => {
     const targets: NeuraiTransactionTarget[] = [{ address: address.trim(), amount: xna }];
     setIsBuilding(true);
     try {
-      const result = await wallet.buildSendTransaction(targets);
+      // PQ wallets with address reuse on should send change back to the static
+      // receive address; otherwise the engine picks a fresh index and surprises
+      // the user who explicitly disabled rotation.
+      let forcedChangeAddress: string | undefined;
+      if (isPQAddressReuseEnabled && wallet.walletKind === 'pq') {
+        const receiveAddr = await wallet.getStaticReceiveAddress();
+        if (receiveAddr !== address.trim()) forcedChangeAddress = receiveAddr;
+      }
+      const result = await wallet.buildSendTransaction(targets, { forcedChangeAddress });
       if (!result.signedHex) throw new Error('Engine did not return a signed transaction');
       setDraft(result);
     } catch (err: any) {
@@ -134,7 +144,7 @@ const SendNeurai: React.FC = () => {
     } finally {
       setIsBuilding(false);
     }
-  }, [wallet, address, amount]);
+  }, [wallet, address, amount, isPQAddressReuseEnabled]);
 
   const broadcast = useCallback(async () => {
     if (!draft || !wallet) return;
