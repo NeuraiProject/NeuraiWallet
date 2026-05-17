@@ -402,16 +402,18 @@ export class WssBackend implements NeuraiBackend {
           .then(async hello => {
             clearTimeout(timer);
             if (typeof hello.tip_height === 'number') this.tipHeight = hello.tip_height;
+            console.log('[WssBackend] hello OK, tip=', hello.tip_height, 'pending subs=', this.subscribedAddresses.size);
             // Re-subscribe to any addresses the wallet asked for in a previous
             // session. The server uses this to push address.changed events
             // back to us — no client-side polling.
             if (this.subscribedAddresses.size > 0) {
               try {
-                await this.sendRequest('address.subscribe.bulk', {
+                const result = await this.sendRequest('address.subscribe.bulk', {
                   addresses: Array.from(this.subscribedAddresses),
                 });
+                console.log('[WssBackend] subscribe.bulk OK', Array.from(this.subscribedAddresses).length, 'addrs; sample result:', JSON.stringify(result).slice(0, 200));
               } catch (err) {
-                console.debug('WssBackend.ensureConnected: resubscribe failed', err);
+                console.warn('[WssBackend] subscribe.bulk failed', err);
               }
             }
             resolve();
@@ -481,6 +483,7 @@ export class WssBackend implements NeuraiBackend {
     if (method === 'address.changed') {
       const event = params as AddressChangedEvent;
       if (!event || typeof event.address !== 'string') return;
+      console.log('[WssBackend] address.changed', event.address, 'reason=', event.reason, 'listeners=', this.addressChangedListeners.size);
       // Fan out to listeners. They typically re-fetch the address's state
       // and update the wallet's persisted history/balance.
       for (const listener of this.addressChangedListeners) {

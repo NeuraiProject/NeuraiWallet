@@ -504,7 +504,14 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   private _notifyBackendAddresses(backend: NeuraiBackend, addresses: string[]): void {
     const setSubscribed = (backend as { setSubscribedAddresses?: (addrs: string[]) => Promise<void> }).setSubscribedAddresses;
     if (typeof setSubscribed !== 'function') return;
-    setSubscribed.call(backend, addresses).catch(err => {
+    // PQ wallets currently always reuse the receive address (no change
+    // address), so every state transition collapses on addresses[0] — no
+    // need to subscribe to the rest of the derivation window. Legacy HD
+    // wallets need every external/change address so a tx to any index
+    // triggers a refresh.
+    const target = this.walletKind === 'pq' && addresses.length > 0 ? [addresses[0]] : addresses;
+    console.log('[AbstractNeuraiWallet] notifying backend of', target.length, 'addresses for', this.network, 'kind=', this.walletKind);
+    setSubscribed.call(backend, target).catch(err => {
       console.debug('AbstractNeuraiWallet: setSubscribedAddresses failed', err);
     });
   }
