@@ -4,7 +4,7 @@ import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc from '../../loc';
 import { SettingsScrollView, SettingsSection, SettingsListItem } from '../../components/platform';
 import { useTheme } from '../../components/themes';
-import { createDefaultRpcBackend } from '../../blue_modules/neurai';
+import { createDefaultBackend } from '../../blue_modules/neurai';
 
 type PingState = { status: 'idle' | 'pinging' | 'ok' | 'fail'; detail?: string };
 
@@ -22,7 +22,7 @@ const NetworkSettings: React.FC = () => {
     await Promise.all([
       (async () => {
         try {
-          const backend = createDefaultRpcBackend('mainnet', 'legacy');
+          const backend = createDefaultBackend('mainnet', 'legacy');
           const height = await backend.getTipHeight();
           setMainnet({ status: 'ok', detail: loc.formatString(loc.settings.network_backend_height, { height }) });
         } catch (err: any) {
@@ -31,7 +31,7 @@ const NetworkSettings: React.FC = () => {
       })(),
       (async () => {
         try {
-          const backend = createDefaultRpcBackend('testnet', 'legacy');
+          const backend = createDefaultBackend('testnet', 'legacy');
           const height = await backend.getTipHeight();
           setTestnet({ status: 'ok', detail: loc.formatString(loc.settings.network_backend_height, { height }) });
         } catch (err: any) {

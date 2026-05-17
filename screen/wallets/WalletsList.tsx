@@ -133,7 +133,7 @@ const WalletsList: React.FC = () => {
 
   const refreshWallets = useCallback(
     async (index: number | undefined, showLoadingIndicator = true, showUpdateStatusIndicator = false) => {
-      // Neurai wallets fetch through RPC (blue_modules/neurai), so we no
+      // Neurai wallets fetch through blue_modules/neurai, so we no
       // longer gate refresh on the BlueElectrum offline toggle.
       dispatch({ type: ActionTypes.SET_LOADING, payload: showLoadingIndicator });
       try {

@@ -2,7 +2,8 @@
  * Backend abstraction for Neurai network access.
  *
  * Two implementations live alongside each other:
- *   - RpcBackend (operational) talks to a Neurai full node via JSON-RPC,
+ *   - WssBackend (default) talks to neurai-wallet-services over WebSocket.
+ *   - RpcBackend (fallback) talks to a Neurai full node via JSON-RPC,
  *     wrapped by `@neuraiproject/neurai-jswallet` and `@neuraiproject/neurai-rpc`.
  *   - ElectrumXBackend (skeleton) is reserved for the future, when an ElectrumX
  *     server for Neurai is available. All methods throw `NotImplementedError`
@@ -10,21 +11,23 @@
  *     against a single interface.
  *
  * The active backend is selected from settings (`backendKind`). Default is
- * `'rpc'`.
+ * `'wss'`.
  */
 
 import type { NeuraiChainType } from './networkConfig';
 
-export type BackendKind = 'rpc' | 'electrumx';
+export type BackendKind = 'wss' | 'rpc' | 'electrumx';
 
 export interface BackendConfig {
   kind: BackendKind;
   chain: NeuraiChainType;
-  /** RPC endpoint (https://...) or Electrum host (host:port). */
+  /** WSS endpoint (wss://.../push), RPC endpoint (https://...) or Electrum host (host:port). */
   url: string;
   /** Optional credentials for self-hosted RPC. Public endpoints accept anonymous. */
   username?: string;
   password?: string;
+  /** Optional neurai-wallet-services auth token. Sent as `auth.<token>` subprotocol. */
+  authToken?: string;
 }
 
 /** Address-level activity item. Mirrors `IAddressDelta` from neurai-jswallet. */

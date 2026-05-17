@@ -391,7 +391,7 @@ const ReceiveDetails = () => {
   useEffect(() => {
     console.debug('receive/details - useEffect');
 
-    // Neurai wallets use the RPC backend (see blue_modules/neurai); the
+    // Neurai wallets use the Neurai backend (see blue_modules/neurai); the
     // BlueElectrum-based polling below is Bitcoin-era code that cannot decode
     // the `xna:` URI scheme either, so skip it entirely.
     if (isNeuraiWallet(wallet)) return;
@@ -473,7 +473,7 @@ const ReceiveDetails = () => {
     return () => clearInterval(intervalId);
   }, [bip21encoded, address, initialConfirmed, initialUnconfirmed, intervalMs, fetchAndSaveWalletTransactions, walletID, wallet]);
 
-  // Neurai-native balance poll. Hits the wallet's RPC backend every 5 s and
+  // Neurai-native balance poll. Hits the wallet's backend every 5 s and
   // surfaces the success / pending UI when funds arrive at the displayed
   // address. Balances come back as XNA full units; multiply by 1e8 to compare
   // in satoshis (consistent with the formatter expectations).

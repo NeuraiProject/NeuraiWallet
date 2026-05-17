@@ -176,7 +176,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const refreshTransactions = useCallback(
     async (isManualRefresh = false) => {
       console.debug('refreshTransactions, ', wallet.getLabel());
-      // Neurai wallets fetch through the RPC backend, not BlueElectrum, so the
+      // Neurai wallets fetch through the Neurai backend, not BlueElectrum, so the
       // legacy "Electrum disabled" toggle no longer applies — only skip when
       // we're already mid-refresh.
       if (refreshInProgressRef.current) return;
@@ -199,7 +199,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       let smthChanged = false;
       try {
         // BIP47 / Electrum wait-till-connected were Bitcoin pipeline steps;
-        // Neurai wallets fetch via the RPC backend directly.
+        // Neurai wallets fetch via the Neurai backend directly.
         const oldBalance = wallet.getBalance();
         await wallet.fetchBalance();
         if (oldBalance !== wallet.getBalance()) smthChanged = true;

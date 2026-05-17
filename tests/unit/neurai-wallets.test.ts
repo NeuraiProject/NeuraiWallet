@@ -1,6 +1,6 @@
 import assert from 'assert';
 
-import { CHAIN_PARAMS } from '../../blue_modules/neurai';
+import { CHAIN_PARAMS, createDefaultBackend, createDefaultRpcBackend } from '../../blue_modules/neurai';
 import { AbstractNeuraiWallet } from '../../class/wallets/abstract-neurai-wallet';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
@@ -8,6 +8,16 @@ import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
 const KNOWN_MNEMONIC = 'result pact model attract result puzzle final boss private educate luggage era';
 
 describe('Neurai wallets', () => {
+  describe('backend defaults', () => {
+    it('uses wallet-service WSS endpoints by default', () => {
+      assert.strictEqual(CHAIN_PARAMS.xna.defaultWssUrl, 'wss://wallet-main-wss.neurai.org:443/push');
+      assert.strictEqual(CHAIN_PARAMS['xna-test'].defaultWssUrl, 'wss://wallet-testnet-wss.neurai.org:443/push');
+      assert.strictEqual(CHAIN_PARAMS['xna-test'].defaultWssAuthToken, 'testnet-wss-token-do-not-use-in-production');
+      assert.strictEqual(createDefaultBackend('mainnet', 'legacy').kind, 'wss');
+      assert.strictEqual(createDefaultRpcBackend('mainnet', 'legacy').kind, 'rpc');
+    });
+  });
+
   describe('NeuraiHDWallet', () => {
     it('defaults to xna-test on testnet', () => {
       const w = new NeuraiHDWallet();

@@ -23,7 +23,7 @@ import {
   NeuraiNetwork,
   WalletKind,
   chainFor,
-  createDefaultRpcBackend,
+  createDefaultBackend,
   isPQChain,
   type NeuraiBackend,
 } from '../../blue_modules/neurai';
@@ -266,7 +266,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   getBackend(): NeuraiBackend {
     if (!this._backend) {
-      this._backend = createDefaultRpcBackend(this.getNeuraiNetwork(), this.walletKind);
+      this._backend = createDefaultBackend(this.getNeuraiNetwork(), this.walletKind);
     }
     return this._backend;
   }
@@ -367,7 +367,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   async fetchUtxo(): Promise<void> {
     const engine = await this.ensureEngine();
-    const utxos = await engine.getUTXOs();
+    const utxos = await this.getBackend().getUtxos(engine.getAddresses());
     this._utxo = utxos.map(u => ({
       height: u.height ?? 0,
       address: u.address,

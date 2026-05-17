@@ -2,16 +2,16 @@
  * Raw transaction broadcaster for Neurai.
  *
  * The user pastes a signed transaction hex, picks a network (testnet by
- * default), and we relay it through the default RPC backend
- * (`createDefaultRpcBackend`). On success we surface the txid the node
- * accepts; on failure we show the RPC error verbatim so users debugging
+ * default), and we relay it through the default Neurai backend
+ * (`createDefaultBackend`). On success we surface the txid the node
+ * accepts; on failure we show the backend error verbatim so users debugging
  * a build can see *why* the node rejected it.
  */
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Keyboard, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 
-import { createDefaultRpcBackend, NeuraiNetwork } from '../../blue_modules/neurai';
+import { createDefaultBackend, NeuraiNetwork } from '../../blue_modules/neurai';
 import { BlueFormLabel, BlueText } from '../../BlueComponents';
 import presentAlert from '../../components/Alert';
 import Button from '../../components/Button';
@@ -55,7 +55,7 @@ const Broadcast: React.FC = () => {
     setIsBroadcasting(true);
     setResultTxid(null);
     try {
-      const backend = createDefaultRpcBackend(network, 'legacy');
+      const backend = createDefaultBackend(network, 'legacy');
       const txid = await backend.broadcast(trimmed);
       setResultTxid(txid);
     } catch (err: any) {
@@ -81,11 +81,7 @@ const Broadcast: React.FC = () => {
       <BlueSpacing20 />
       <BlueFormLabel>{loc.wallets.neurai_network_label}</BlueFormLabel>
       <View style={styles.segmentRow}>
-        <SegmentedControl
-          values={networkSegments}
-          selectedIndex={selectedIndex}
-          onChange={idx => setNetwork(NETWORK_OPTIONS[idx])}
-        />
+        <SegmentedControl values={networkSegments} selectedIndex={selectedIndex} onChange={idx => setNetwork(NETWORK_OPTIONS[idx])} />
       </View>
 
       <BlueFormLabel>{loc.send.create_tx_signed_label}</BlueFormLabel>
@@ -112,11 +108,7 @@ const Broadcast: React.FC = () => {
       </View>
 
       <BlueSpacing20 />
-      {isBroadcasting ? (
-        <ActivityIndicator />
-      ) : (
-        <Button testID="BroadcastButton" title={loc.send.broadcastButton} onPress={onBroadcast} />
-      )}
+      {isBroadcasting ? <ActivityIndicator /> : <Button testID="BroadcastButton" title={loc.send.broadcastButton} onPress={onBroadcast} />}
 
       {resultTxid && (
         <>
@@ -133,9 +125,7 @@ const Broadcast: React.FC = () => {
       )}
 
       <BlueSpacing40 />
-      <Text style={[styles.hint, stylesHook.txidText]}>
-        {loc.formatString(loc.settings.network_broadcast_explanation, { network })}
-      </Text>
+      <Text style={[styles.hint, stylesHook.txidText]}>{loc.formatString(loc.settings.network_broadcast_explanation, { network })}</Text>
     </ScrollView>
   );
 };
