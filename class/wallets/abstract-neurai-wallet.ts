@@ -335,13 +335,32 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * any balance/history fetch on its own — the subscribe.bulk response is
    * compared against the persisted status cache by the backend, and a
    * synthetic address.changed event is fired only when something actually
-   * changed. The UI stays responsive while this runs.
+   * changed.
+   *
+   * Critically, this does NOT bootstrap the engine if we already have a
+   * persisted address set from a previous session: PQ engines do ML-DSA
+   * key derivation that can stall the JS thread for 1–2s per wallet, so
+   * making the home screen wait for that just to send a subscribe is a
+   * non-starter. The engine bootstraps lazily on the first Send/Receive
+   * action or the first push-triggered refetch.
    */
   async ensureBackendConnected(): Promise<void> {
-    const engine = await this.ensureEngine();
-    const addresses = engine.getAddresses();
     const backend = this.getBackend();
-    this._notifyBackendAddresses(backend, addresses);
+    // Skip entirely if the active backend has no push protocol (the
+    // DisabledBackend mainnet stub, RpcBackend fallback, ElectrumX stub):
+    // there's nothing to subscribe to, and creating the engine just to learn
+    // there's nothing to do can cost 2+ seconds of blocked JS thread.
+    const supportsPush = typeof (backend as { setSubscribedAddresses?: unknown }).setSubscribedAddresses === 'function';
+    if (!supportsPush) return;
+
+    const cachedAddresses = Object.keys(this._addressStatus || {});
+    if (cachedAddresses.length > 0) {
+      this._notifyBackendAddresses(backend, cachedAddresses);
+      return;
+    }
+    // First-ever run for this wallet: pay the engine bootstrap cost here.
+    const engine = await this.ensureEngine();
+    this._notifyBackendAddresses(backend, engine.getAddresses());
   }
 
   /**
@@ -359,7 +378,6 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     const onAddressChanged = (this._backend as { onAddressChanged?: (cb: () => void) => () => void }).onAddressChanged;
     if (typeof onAddressChanged !== 'function') return;
     this._unsubscribeBackendPush = onAddressChanged.call(this._backend, () => {
-      console.log('[AbstractNeuraiWallet]', this.network, 'push received, inFlight=', this._pushFetchInFlight);
       if (this._pushFetchInFlight) {
         this._pushFetchPending = true;
         return;
@@ -371,6 +389,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
             this._pushFetchPending = false;
             await this.fetchBalance();
             await this.fetchTransactions();
+            console.log('[NeuraiWallet] push refresh done, balance=', this.balance, 'txs=', this._txCache.length);
             // Notify the React state layer so `wallets`-consuming screens
             // (WalletsList, etc.) re-render. Internal wallet mutations are
             // invisible to React otherwise — useStorage hands out the same
@@ -389,11 +408,25 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   // ---------- addresses ------------------------------------------------------------
 
   async getReceiveAddressAsync(): Promise<string> {
+    // Fast path for PQ wallets: the receive address is the only address
+    // (current PQ wallets always reuse). We have it in the persisted status
+    // cache, so we can answer without paying the engine bootstrap cost
+    // (~2s of ML-DSA key derivation) that would otherwise freeze the
+    // ReceiveDetails screen.
+    const cached = this._getCachedReceiveAddress();
+    if (cached) return cached;
     const engine = await this.ensureEngine();
     return engine.getReceiveAddress();
   }
 
   async getStaticReceiveAddress(): Promise<string> {
+    // Same fast path as getReceiveAddressAsync for PQ-with-reuse wallets:
+    // the address is in our persisted cache, no need to bootstrap the
+    // engine just to render a QR. The change-address side effect below
+    // is irrelevant for PQ-with-reuse (change collapses on the receive
+    // address by design); legacy HD wallets still go through the engine.
+    const cached = this._getCachedReceiveAddress();
+    if (cached) return cached;
     const engine = await this.ensureEngine();
     const addrs = engine.getAddresses();
     if (addrs.length === 0) throw new Error('Engine has no addresses');
@@ -404,18 +437,35 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     return addrs[0];
   }
 
+  /** Returns the wallet's cached receive address if we can answer without
+   * the engine. For PQ-with-reuse, the only address the wallet ever uses
+   * is the key in `_addressStatus` (populated from the previous session's
+   * subscribe.bulk). Returns null when the cache is empty or when the
+   * wallet has multiple subscribed addresses (HD: different indices may
+   * each be a valid receive). */
+  private _getCachedReceiveAddress(): string | null {
+    if (this.walletKind !== 'pq') return null;
+    const keys = Object.keys(this._addressStatus || {});
+    return keys.length === 1 ? keys[0] : null;
+  }
+
   // The Bitcoin pipeline (ReceiveDetails, deeplink router, push-notifications)
   // calls `getAddress()` synchronously and `getAddressAsync()` for the slow
   // path. Wire both to the engine so freshly-created Neurai wallets show a QR
   // and copyable address as soon as they're prewarmed.
   getAddress(): string | false | undefined {
-    if (!this._engine) return false;
-    try {
-      const addrs = this._engine.getAddresses();
-      return addrs[0] ?? false;
-    } catch {
-      return false;
+    if (this._engine) {
+      try {
+        const addrs = this._engine.getAddresses();
+        return addrs[0] ?? false;
+      } catch {
+        return false;
+      }
     }
+    // Engine not bootstrapped yet: serve from the persisted address cache so
+    // sync callers (ReceiveDetails QR, clipboard checks) don't return false
+    // and trip a 2s engine bootstrap on every entry to the wallet screen.
+    return this._getCachedReceiveAddress() ?? false;
   }
 
   async getAddressAsync(): Promise<string | false | undefined> {

@@ -5,6 +5,7 @@ import {
   Dimensions,
   findNodeHandle,
   FlatList,
+  InteractionManager,
   Platform,
   PixelRatio,
   ScrollView,
@@ -246,12 +247,22 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   useFocusEffect(
     useCallback(() => {
       if (isNeuraiWallet(wallet)) {
-        wallet.ensureBackendConnected().catch(err => {
-          console.debug('[WalletTransactions] ensureBackendConnected failed', err);
+        // Defer until the navigation animation has finished so the heavy
+        // engine bootstrap (PQ key derivation can block the JS thread for
+        // 1-2s on first use) doesn't freeze the Send/Receive buttons during
+        // the transition. The home screen has already subscribed this
+        // wallet's addresses for push events, so we only need to make sure
+        // the engine is warm; if the user got here without crossing the
+        // home (cold-start deep link), this still kicks off the subscribe.
+        const handle = InteractionManager.runAfterInteractions(() => {
+          wallet.ensureBackendConnected().catch(err => {
+            console.debug('[WalletTransactions] ensureBackendConnected failed', err);
+          });
         });
-      } else {
-        refreshTransactions(false).catch(console.error);
+        return () => handle.cancel();
       }
+      refreshTransactions(false).catch(console.error);
+      return undefined;
     }, [wallet, refreshTransactions]),
   );
 

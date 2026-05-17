@@ -171,14 +171,18 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
         }
       }
 
-      if (deliveredNotifications.length > 0) {
-        refreshAllWalletTransactions();
-      }
+      // Skipped: the global `refreshAllWalletTransactions()` call that used
+      // to run here drags the Bitcoin pipeline (BlueElectrum.waitTillConnected,
+      // sender payment codes, etc.) and blocks the JS thread for several
+      // seconds at cold start. In this app all wallets are Neurai variants
+      // and they refresh themselves via the WSS push handler, so we don't
+      // need a synchronous global refresh on every Firebase notification.
     } catch (error) {
       console.error('Failed to process push notifications:', error);
     }
     return false;
-  }, [shouldActivateListeners, wallets, fetchAndSaveWalletTransactions, navigation, refreshAllWalletTransactions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldActivateListeners, wallets, fetchAndSaveWalletTransactions, navigation]);
 
   useEffect(() => {
     if (!shouldActivateListeners) return;

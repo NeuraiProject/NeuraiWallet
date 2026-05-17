@@ -428,7 +428,7 @@ export const StorageProvider = ({ children }: { children: React.ReactNode }) => 
 
   const fetchAndSaveWalletTransactions = useCallback(
     async (walletID: string) => {
-      const index = wallets.findIndex(wallet => wallet.getID() === walletID);
+      const wallet = wallets.find(w => w.getID() === walletID);
       let noErr = true;
       try {
         if (Date.now() - (_lastTimeTriedToRefetchWallet[walletID] || 0) < 5000) {
@@ -437,18 +437,29 @@ export const StorageProvider = ({ children }: { children: React.ReactNode }) => 
         }
         _lastTimeTriedToRefetchWallet[walletID] = Date.now();
 
-        await BlueElectrum.waitTillConnected();
-        setWalletTransactionUpdateStatus(walletID);
+        if (wallet && isNeuraiWallet(wallet)) {
+          // Neurai wallets fetch through the Neurai backend (no BlueElectrum
+          // round-trip and no global pipeline). Drive their fetchers directly.
+          setWalletTransactionUpdateStatus(walletID);
+          const balanceStart = Date.now();
+          await wallet.fetchBalance();
+          console.debug('[fetchAndSaveWalletTransactions] (neurai) fetch balance took', (Date.now() - balanceStart) / 1000, 'sec');
+          const txStart = Date.now();
+          await wallet.fetchTransactions();
+          console.debug('[fetchAndSaveWalletTransactions] (neurai) fetch tx took', (Date.now() - txStart) / 1000, 'sec');
+        } else {
+          const index = wallets.findIndex(w => w.getID() === walletID);
+          await BlueElectrum.waitTillConnected();
+          setWalletTransactionUpdateStatus(walletID);
 
-        const balanceStart = Date.now();
-        await BlueApp.fetchWalletBalances(index);
-        const balanceEnd = Date.now();
-        console.debug('[fetchAndSaveWalletTransactions] fetch balance took', (balanceEnd - balanceStart) / 1000, 'sec');
+          const balanceStart = Date.now();
+          await BlueApp.fetchWalletBalances(index);
+          console.debug('[fetchAndSaveWalletTransactions] fetch balance took', (Date.now() - balanceStart) / 1000, 'sec');
 
-        const txStart = Date.now();
-        await BlueApp.fetchWalletTransactions(index);
-        const txEnd = Date.now();
-        console.debug('[fetchAndSaveWalletTransactions] fetch tx took', (txEnd - txStart) / 1000, 'sec');
+          const txStart = Date.now();
+          await BlueApp.fetchWalletTransactions(index);
+          console.debug('[fetchAndSaveWalletTransactions] fetch tx took', (Date.now() - txStart) / 1000, 'sec');
+        }
       } catch (err) {
         noErr = false;
         console.error('[fetchAndSaveWalletTransactions] Error:', err);

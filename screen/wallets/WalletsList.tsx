@@ -186,15 +186,22 @@ const WalletsList: React.FC = () => {
       // round-trip, not a full history refetch. The push handler in
       // AbstractNeuraiWallet runs the heavy refetch in the background, so
       // the UI stays responsive.
-      console.log('[WalletsList] focus, wallets=', wallets.length, 'neurai=', wallets.filter(w => isNeuraiWallet(w)).length);
-      for (const wallet of wallets) {
-        if (!isNeuraiWallet(wallet)) continue;
-        wallet.ensureBackendConnected().catch(err => {
-          console.debug('[WalletsList] ensureBackendConnected failed', err);
-        });
-      }
+      // Open the WSS connection and resubscribe addresses, but defer until
+      // after the home screen finished mounting and is fully interactive.
+      // Wallets whose backend has no push protocol (mainnet stub today) are
+      // short-circuited inside ensureBackendConnected so we never pay an
+      // engine bootstrap just to learn there's nothing to do.
+      const handle = InteractionManager.runAfterInteractions(() => {
+        for (const wallet of wallets) {
+          if (!isNeuraiWallet(wallet)) continue;
+          wallet.ensureBackendConnected().catch(err => {
+            console.debug('[WalletsList] ensureBackendConnected failed', err);
+          });
+        }
+      });
 
       return () => {
+        handle.cancel();
         console.log(`[WalletsList] Blurred - cleaning up handler for: ${screenKey}`);
         unregisterTransactionsHandler(screenKey);
       };

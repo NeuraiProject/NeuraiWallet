@@ -262,7 +262,6 @@ export class WssBackend implements NeuraiBackend {
         height: r.height,
         balance: r.balance,
       };
-      console.log('[WssBackend]', this.chain, 'firing diff to', this.addressChangedListeners.size, 'listeners for', r.address.slice(0, 12));
       for (const listener of this.addressChangedListeners) {
         try {
           listener(event);
@@ -271,7 +270,7 @@ export class WssBackend implements NeuraiBackend {
         }
       }
     }
-    console.log('[WssBackend]', this.chain, 'subscribe.bulk results=', results.length, 'diffs=', diffs);
+    if (diffs > 0) console.log('[WssBackend]', this.chain, 'subscribe.bulk diffs=', diffs, 'of', results.length);
   }
 
   async rpc<T = unknown>(method: string, params: unknown[]): Promise<T> {
@@ -491,7 +490,6 @@ export class WssBackend implements NeuraiBackend {
           .then(async hello => {
             clearTimeout(timer);
             if (typeof hello.tip_height === 'number') this.tipHeight = hello.tip_height;
-            console.log('[WssBackend]', this.chain, 'hello ok tip=', hello.tip_height, 'subs=', this.subscribedAddresses.size);
             // Re-subscribe to any addresses the wallet asked for in a previous
             // session. The server uses this to push address.changed events
             // back to us — no client-side polling. The response carries the
@@ -578,7 +576,6 @@ export class WssBackend implements NeuraiBackend {
     if (method === 'address.changed') {
       const event = params as AddressChangedEvent;
       if (!event || typeof event.address !== 'string') return;
-      console.log('[WssBackend]', this.chain, 'push address.changed', event.address.slice(0, 12), 'reason=', event.reason);
       if (typeof event.status === 'string') {
         const prev = this.knownStatuses.get(event.address);
         this.knownStatuses.set(event.address, event.status);
