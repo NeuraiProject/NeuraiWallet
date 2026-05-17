@@ -163,6 +163,12 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   /** Lazy engine + backend; created on first use, cleared on network change. */
   private _engine: NeuraiEngine | null;
   private _backend: NeuraiBackend | null;
+  /** Disposer for the backend's address.changed listener, if the active
+   * backend supports push (only WssBackend does today). */
+  private _unsubscribeBackendPush: (() => void) | null;
+  /** Coalesce burst pushes so a block touching many outputs runs one refetch. */
+  private _pushFetchInFlight: boolean;
+  private _pushFetchPending: boolean;
 
   abstract get walletKind(): WalletKind;
 
@@ -176,6 +182,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._txCache = [];
     this._engine = null;
     this._backend = null;
+    this._unsubscribeBackendPush = null;
+    this._pushFetchInFlight = false;
+    this._pushFetchPending = false;
 
     // Hide non-serializable runtime caches from JSON.stringify so they never
     // end up in persisted wallet JSON. `_historyItems` and `_txCache` are
@@ -184,6 +193,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     // on app launch, before the next refresh RPC completes.
     Object.defineProperty(this, '_engine', { writable: true, enumerable: false, value: null });
     Object.defineProperty(this, '_backend', { writable: true, enumerable: false, value: null });
+    Object.defineProperty(this, '_unsubscribeBackendPush', { writable: true, enumerable: false, value: null });
+    Object.defineProperty(this, '_pushFetchInFlight', { writable: true, enumerable: false, value: false });
+    Object.defineProperty(this, '_pushFetchPending', { writable: true, enumerable: false, value: false });
   }
 
   // ---------- network / passphrase ------------------------------------------------
@@ -192,6 +204,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     if (network === this.network) return;
     this._enforceChainKind(network);
     this.network = network;
+    if (this._unsubscribeBackendPush) {
+      this._unsubscribeBackendPush();
+      this._unsubscribeBackendPush = null;
+    }
     this._engine = null;
     this._backend = null;
     this.balance = 0;
@@ -262,13 +278,51 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       throw new Error(`Backend chain ${backend.chain} does not match wallet network ${this.network}`);
     }
     this._backend = backend;
+    this._wireBackendPushHandler();
   }
 
   getBackend(): NeuraiBackend {
     if (!this._backend) {
       this._backend = createDefaultBackend(this.getNeuraiNetwork(), this.walletKind);
+      this._wireBackendPushHandler();
     }
     return this._backend;
+  }
+
+  /**
+   * If the backend supports server-pushed address.changed events (WssBackend
+   * does), register a handler that re-fetches the wallet whenever the server
+   * tells us a subscribed address moved. Coalesces bursts so a block with
+   * many touched outputs collapses into a single refetch.
+   */
+  private _wireBackendPushHandler(): void {
+    if (!this._backend) return;
+    if (this._unsubscribeBackendPush) {
+      this._unsubscribeBackendPush();
+      this._unsubscribeBackendPush = null;
+    }
+    const onAddressChanged = (this._backend as { onAddressChanged?: (cb: () => void) => () => void }).onAddressChanged;
+    if (typeof onAddressChanged !== 'function') return;
+    this._unsubscribeBackendPush = onAddressChanged.call(this._backend, () => {
+      if (this._pushFetchInFlight) {
+        this._pushFetchPending = true;
+        return;
+      }
+      this._pushFetchInFlight = true;
+      (async () => {
+        try {
+          do {
+            this._pushFetchPending = false;
+            await this.fetchBalance();
+            await this.fetchTransactions();
+          } while (this._pushFetchPending);
+        } catch (err) {
+          console.debug('AbstractNeuraiWallet: push-triggered refetch failed', err);
+        } finally {
+          this._pushFetchInFlight = false;
+        }
+      })();
+    });
   }
 
   // ---------- addresses ------------------------------------------------------------
@@ -436,33 +490,61 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   async fetchBalance(): Promise<void> {
     const engine = await this.ensureEngine();
     const addresses = engine.getAddresses();
-    const xnaBalance = await this.getBackend().getBalance(addresses);
+    const backend = this.getBackend();
+    this._notifyBackendAddresses(backend, addresses);
+    const xnaBalance = await backend.getBalance(addresses);
     this.balance = Math.round(xnaBalance * ONE_FULL_COIN);
     this.unconfirmed_balance = 0;
     this._lastBalanceFetch = Date.now();
+  }
+
+  /** If the active backend supports server pushes, tell it which addresses
+   * to subscribe to so address.changed events flow back here. Best-effort —
+   * a missing or failing subscribe path must never break the fetch flow. */
+  private _notifyBackendAddresses(backend: NeuraiBackend, addresses: string[]): void {
+    const setSubscribed = (backend as { setSubscribedAddresses?: (addrs: string[]) => Promise<void> }).setSubscribedAddresses;
+    if (typeof setSubscribed !== 'function') return;
+    setSubscribed.call(backend, addresses).catch(err => {
+      console.debug('AbstractNeuraiWallet: setSubscribedAddresses failed', err);
+    });
   }
 
   async fetchTransactions(): Promise<void> {
     const engine = await this.ensureEngine();
     const addresses = engine.getAddresses();
     const backend = this.getBackend();
-    const [deltas, tipHeight] = await Promise.all([
-      backend.getAddressHistory(addresses) as Promise<IDelta[]>,
+    this._notifyBackendAddresses(backend, addresses);
+    const [rawDeltas, tipHeight] = await Promise.all([
+      backend.getAddressHistory(addresses),
       backend.getTipHeight().catch(() => 0),
     ]);
+    const deltas = rawDeltas as unknown as IDelta[];
     await yieldToEventLoop();
     const baseCurrency = engine.getBaseCurrency();
     const items = await getHistoryYielding(deltas, baseCurrency);
     await yieldToEventLoop();
-    const heights = Array.from(new Set(items.map(i => i.blockHeight).filter(h => h > 0)));
-    let blockTimes: Record<number, number> = {};
-    if (heights.length > 0) {
+
+    // Prefer per-delta block times (WSS backend embeds them in the history
+    // payload); fall back to a `getBlockTimes` round-trip only for heights
+    // not covered by the deltas, so the RPC backend keeps working.
+    const blockTimes: Record<number, number> = {};
+    for (const d of rawDeltas) {
+      if (typeof d.time === 'number' && d.height > 0 && blockTimes[d.height] === undefined) {
+        blockTimes[d.height] = d.time;
+      }
+    }
+    const missingHeights = Array.from(
+      new Set(items.map(i => i.blockHeight).filter(h => h > 0 && blockTimes[h] === undefined)),
+    );
+    if (missingHeights.length > 0) {
       try {
-        blockTimes = await backend.getBlockTimes(heights);
+        const fetched = await backend.getBlockTimes(missingHeights);
+        Object.assign(blockTimes, fetched);
       } catch (err) {
         console.debug('fetchTransactions: getBlockTimes failed', err);
       }
     }
+
     const txCache: Transaction[] = [];
     for (let i = 0; i < items.length; i += TX_CACHE_BATCH_SIZE) {
       txCache.push(...items.slice(i, i + TX_CACHE_BATCH_SIZE).map(item => this._historyItemToTransaction(item, deltas, blockTimes)));

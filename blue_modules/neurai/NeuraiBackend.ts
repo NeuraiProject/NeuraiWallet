@@ -40,6 +40,10 @@ export interface AddressDelta {
   satoshis: number;
   txid: string;
   prevtxid?: string;
+  /** Unix timestamp (seconds) of the block this delta was confirmed in.
+   * Optional because the RPC backend doesn't include it per-delta; callers
+   * fall back to `getBlockTimes()` when absent. */
+  time?: number;
 }
 
 /** UTXO in canonical Neurai shape. Mirrors `IUTXO`. */

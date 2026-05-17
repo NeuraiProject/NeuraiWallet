@@ -45,8 +45,6 @@ const buttonFontSize =
     ? 22
     : PixelRatio.roundToNearestPixel(Dimensions.get('window').width / 26);
 
-const BLOCK_POLL_INTERVAL_MS = 20_000;
-
 type RouteProps = RouteProp<DetailViewStackParamList, 'WalletTransactions'>;
 
 type WalletTransactionsProps = NativeStackScreenProps<DetailViewStackParamList, 'WalletTransactions'>;
@@ -238,29 +236,13 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
     [wallet, saveToDisk, pageSize, lastFetchTimestamp, fetchFailures],
   );
 
-  const refreshTransactionsIfNewBlock = useCallback(async () => {
-    if (refreshInProgressRef.current) return;
-    if (isNeuraiWallet(wallet)) {
-      const hasNewBlock = await wallet.shouldRefreshTransactionsForNewBlock().catch(error => {
-        console.debug('[WalletTransactions] block poll failed', error);
-        return false;
-      });
-      if (!hasNewBlock) return;
-    }
-    await refreshTransactions(false);
-  }, [refreshTransactions, wallet]);
-
-  // Poll only the chain tip while the screen is open. Fetching the tip is cheap;
-  // the heavier balance/history scan runs only after a new block appears.
+  // Catch-up on focus: do a single fetch and let the WSS backend stream
+  // address.changed pushes from there. No periodic polling while open — the
+  // server is the source of truth for "something happened on this address".
   useFocusEffect(
     useCallback(() => {
-      const id = setInterval(() => {
-        refreshTransactionsIfNewBlock().catch(console.error);
-      }, BLOCK_POLL_INTERVAL_MS);
-      return () => {
-        clearInterval(id);
-      };
-    }, [refreshTransactionsIfNewBlock]),
+      refreshTransactions(false).catch(console.error);
+    }, [refreshTransactions]),
   );
 
   const renderListFooterComponent = () => {
