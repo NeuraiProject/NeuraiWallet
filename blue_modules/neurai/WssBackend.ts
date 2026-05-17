@@ -145,6 +145,12 @@ export class WssBackend implements NeuraiBackend {
   /** Addresses the wallet wants the server to push events for. Mirrored to
    * the server via `address.subscribe.bulk` on every (re)connect. */
   private subscribedAddresses = new Set<string>();
+  /** Last status hash the server reported per address. Used to suppress
+   * spurious refetches on focus when nothing actually changed since the
+   * previous session. Seeded from persisted wallet state via
+   * `seedKnownStatuses` and updated on every subscribe.bulk response and
+   * address.changed push. */
+  private knownStatuses = new Map<string, string>();
   /** Listeners notified when the server pushes `address.changed`. The wallet
    * uses this to drive re-fetches without periodic client polling. */
   private addressChangedListeners = new Set<AddressChangedListener>();
@@ -161,6 +167,12 @@ export class WssBackend implements NeuraiBackend {
    * `subscribe.bulk` (and an `unsubscribe.bulk` for dropped addresses) on
    * the live socket if connected. On future reconnects the latest set is
    * resubscribed automatically.
+   *
+   * Also auto-connects: callers don't need to issue a separate request to
+   * establish the WebSocket; this method establishes it and runs the
+   * subscribe handshake. The promise resolves once the server has accepted
+   * the subscription (or rejects if the connection fails), so the wallet
+   * knows when push events will start flowing.
    */
   async setSubscribedAddresses(addresses: string[]): Promise<void> {
     const next = new Set(addresses.filter(a => typeof a === 'string' && a.length > 0));
@@ -169,13 +181,52 @@ export class WssBackend implements NeuraiBackend {
     for (const a of next) if (!this.subscribedAddresses.has(a)) toAdd.push(a);
     for (const a of this.subscribedAddresses) if (!next.has(a)) toRemove.push(a);
     this.subscribedAddresses = next;
-    if (!isOpen(this.ws)) return; // will resubscribe on next connect
+    // Establish the WS if needed. ensureConnected runs the full subscribe.bulk
+    // for all currently-subscribed addresses on first connect, so we only
+    // need to handle the diff path when the socket is already open.
+    if (!isOpen(this.ws)) {
+      if (next.size === 0) return;
+      try {
+        await this.ensureConnected();
+      } catch (err) {
+        console.debug('WssBackend.setSubscribedAddresses: connect failed', err);
+      }
+      return;
+    }
     try {
-      if (toRemove.length > 0) await this.sendRequest('address.unsubscribe.bulk', { addresses: toRemove });
-      if (toAdd.length > 0) await this.sendRequest('address.subscribe.bulk', { addresses: toAdd });
+      if (toRemove.length > 0) {
+        for (const a of toRemove) this.knownStatuses.delete(a);
+        await this.sendRequest('address.unsubscribe.bulk', { addresses: toRemove });
+      }
+      if (toAdd.length > 0) {
+        const result = await this.sendRequest<{ results?: Array<{ address: string; status?: string; balance?: WssBalance; height?: number }> }>(
+          'address.subscribe.bulk',
+          { addresses: toAdd },
+        );
+        this._processSubscribeResults(result?.results);
+      }
     } catch (err) {
       console.debug('WssBackend.setSubscribedAddresses: subscribe diff failed', err);
     }
+  }
+
+  /** Seed the per-address status cache from persisted wallet state so the
+   * first subscribe.bulk after app cold start can suppress refetches when
+   * nothing changed while the app was closed. */
+  seedKnownStatuses(statuses: Record<string, string>): void {
+    for (const [addr, status] of Object.entries(statuses || {})) {
+      if (typeof addr === 'string' && typeof status === 'string') {
+        this.knownStatuses.set(addr, status);
+      }
+    }
+  }
+
+  /** Snapshot of the current per-address status cache. The wallet persists
+   * this to disk so the next app launch can suppress redundant refetches. */
+  getKnownStatuses(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [addr, status] of this.knownStatuses) out[addr] = status;
+    return out;
   }
 
   /** Register a listener for server-pushed `address.changed` events. Returns
@@ -183,6 +234,40 @@ export class WssBackend implements NeuraiBackend {
   onAddressChanged(listener: AddressChangedListener): () => void {
     this.addressChangedListeners.add(listener);
     return () => this.addressChangedListeners.delete(listener);
+  }
+
+  /**
+   * Walk the `address.subscribe.bulk` response and, for every address whose
+   * `status` doesn't match what we have cached, synthesize an
+   * `address.changed` event so listeners refetch. Addresses whose status
+   * matches the cache are silently ignored — that's the whole point of the
+   * status-diff design: opening the wallet while nothing changed costs one
+   * subscribe round-trip, not a full history refetch.
+   */
+  private _processSubscribeResults(
+    results: Array<{ address: string; status?: string; balance?: WssBalance; height?: number }> | undefined,
+  ): void {
+    if (!Array.isArray(results)) return;
+    for (const r of results) {
+      if (!r || typeof r.address !== 'string' || typeof r.status !== 'string') continue;
+      const prev = this.knownStatuses.get(r.address);
+      this.knownStatuses.set(r.address, r.status);
+      if (prev === r.status) continue;
+      const event: AddressChangedEvent = {
+        address: r.address,
+        status: r.status,
+        reason: 'resync',
+        height: r.height,
+        balance: r.balance,
+      };
+      for (const listener of this.addressChangedListeners) {
+        try {
+          listener(event);
+        } catch (err) {
+          console.debug('WssBackend subscribe-diff listener threw', err);
+        }
+      }
+    }
   }
 
   async rpc<T = unknown>(method: string, params: unknown[]): Promise<T> {
@@ -402,18 +487,23 @@ export class WssBackend implements NeuraiBackend {
           .then(async hello => {
             clearTimeout(timer);
             if (typeof hello.tip_height === 'number') this.tipHeight = hello.tip_height;
-            console.log('[WssBackend] hello OK, tip=', hello.tip_height, 'pending subs=', this.subscribedAddresses.size);
             // Re-subscribe to any addresses the wallet asked for in a previous
             // session. The server uses this to push address.changed events
-            // back to us — no client-side polling.
+            // back to us — no client-side polling. The response carries the
+            // current per-address status hash; we compare with the cached
+            // value and fire synthetic address.changed events only for
+            // addresses where something actually changed while the app was
+            // closed, so opening the wallet is cheap when nothing happened.
             if (this.subscribedAddresses.size > 0) {
               try {
-                const result = await this.sendRequest('address.subscribe.bulk', {
+                const result = await this.sendRequest<{
+                  results?: Array<{ address: string; status?: string; balance?: WssBalance; height?: number }>;
+                }>('address.subscribe.bulk', {
                   addresses: Array.from(this.subscribedAddresses),
                 });
-                console.log('[WssBackend] subscribe.bulk OK', Array.from(this.subscribedAddresses).length, 'addrs; sample result:', JSON.stringify(result).slice(0, 200));
+                this._processSubscribeResults(result?.results);
               } catch (err) {
-                console.warn('[WssBackend] subscribe.bulk failed', err);
+                console.debug('[WssBackend] subscribe.bulk failed', err);
               }
             }
             resolve();
@@ -483,7 +573,11 @@ export class WssBackend implements NeuraiBackend {
     if (method === 'address.changed') {
       const event = params as AddressChangedEvent;
       if (!event || typeof event.address !== 'string') return;
-      console.log('[WssBackend] address.changed', event.address, 'reason=', event.reason, 'listeners=', this.addressChangedListeners.size);
+      if (typeof event.status === 'string') {
+        const prev = this.knownStatuses.get(event.address);
+        this.knownStatuses.set(event.address, event.status);
+        if (prev === event.status) return; // duplicate push, nothing to do
+      }
       // Fan out to listeners. They typically re-fetch the address's state
       // and update the wallet's persisted history/balance.
       for (const listener of this.addressChangedListeners) {

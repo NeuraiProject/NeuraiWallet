@@ -236,13 +236,23 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
     [wallet, saveToDisk, pageSize, lastFetchTimestamp, fetchFailures],
   );
 
-  // Catch-up on focus: do a single fetch and let the WSS backend stream
-  // address.changed pushes from there. No periodic polling while open — the
-  // server is the source of truth for "something happened on this address".
+  // Catch-up on focus: just open the WSS connection and subscribe this
+  // wallet's addresses. The backend compares the per-address `status` hash
+  // returned by the server against what we last persisted and only pushes a
+  // synthetic address.changed when something actually moved while we were
+  // closed; the push handler then runs the heavy refetch in the background.
+  // No periodic polling and no blocking fetch on the focus tick — the UI
+  // stays responsive while subscription is in flight.
   useFocusEffect(
     useCallback(() => {
-      refreshTransactions(false).catch(console.error);
-    }, [refreshTransactions]),
+      if (isNeuraiWallet(wallet)) {
+        wallet.ensureBackendConnected().catch(err => {
+          console.debug('[WalletTransactions] ensureBackendConnected failed', err);
+        });
+      } else {
+        refreshTransactions(false).catch(console.error);
+      }
+    }, [wallet, refreshTransactions]),
   );
 
   const renderListFooterComponent = () => {

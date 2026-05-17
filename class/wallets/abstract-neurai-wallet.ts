@@ -159,6 +159,12 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * disk so the wallet shows its known history before the next RPC fetch.
    * Replaced wholesale on each `fetchTransactions`. */
   protected _txCache: Transaction[];
+  /** Last `status` hash the server reported per subscribed address.
+   * Persisted to disk so the next app launch can call `subscribe.bulk` and
+   * skip the heavy refetch when nothing changed while the app was closed —
+   * the server compares the cached value against its current state and only
+   * pushes a synthetic address.changed for diffs. */
+  protected _addressStatus: Record<string, string>;
 
   /** Lazy engine + backend; created on first use, cleared on network change. */
   private _engine: NeuraiEngine | null;
@@ -180,6 +186,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._lastTxBlockHeight = 0;
     this._historyItems = [];
     this._txCache = [];
+    this._addressStatus = {};
     this._engine = null;
     this._backend = null;
     this._unsubscribeBackendPush = null;
@@ -278,15 +285,62 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       throw new Error(`Backend chain ${backend.chain} does not match wallet network ${this.network}`);
     }
     this._backend = backend;
+    this._seedBackendStatuses();
     this._wireBackendPushHandler();
   }
 
   getBackend(): NeuraiBackend {
     if (!this._backend) {
       this._backend = createDefaultBackend(this.getNeuraiNetwork(), this.walletKind);
+      this._seedBackendStatuses();
       this._wireBackendPushHandler();
     }
     return this._backend;
+  }
+
+  /**
+   * Seed the WSS backend's per-address status cache from disk so the first
+   * `subscribe.bulk` after app cold start can suppress refetches when
+   * nothing changed while the app was closed. No-op for backends that don't
+   * implement the push protocol (RPC, ElectrumX stub).
+   */
+  private _seedBackendStatuses(): void {
+    if (!this._backend) return;
+    const seed = (this._backend as { seedKnownStatuses?: (s: Record<string, string>) => void }).seedKnownStatuses;
+    if (typeof seed === 'function' && this._addressStatus) {
+      seed.call(this._backend, this._addressStatus);
+    }
+  }
+
+  /**
+   * Snapshot the backend's current per-address status cache back onto the
+   * wallet for persistence. Called after the wallet has just re-fetched
+   * (post-push or post-pull-to-refresh) so the next session can pick up
+   * where this one left off. Best-effort — silently no-op for non-WSS
+   * backends.
+   */
+  private _persistBackendStatuses(): void {
+    if (!this._backend) return;
+    const get = (this._backend as { getKnownStatuses?: () => Record<string, string> }).getKnownStatuses;
+    if (typeof get !== 'function') return;
+    const snapshot = get.call(this._backend);
+    if (snapshot && typeof snapshot === 'object') this._addressStatus = snapshot;
+  }
+
+  /**
+   * Lightweight "I am here" handshake for use on screen focus: connects to
+   * the WSS backend (if not already) and subscribes the wallet's addresses
+   * so the server starts pushing address.changed events. Does NOT trigger
+   * any balance/history fetch on its own — the subscribe.bulk response is
+   * compared against the persisted status cache by the backend, and a
+   * synthetic address.changed event is fired only when something actually
+   * changed. The UI stays responsive while this runs.
+   */
+  async ensureBackendConnected(): Promise<void> {
+    const engine = await this.ensureEngine();
+    const addresses = engine.getAddresses();
+    const backend = this.getBackend();
+    this._notifyBackendAddresses(backend, addresses);
   }
 
   /**
@@ -496,6 +550,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this.balance = Math.round(xnaBalance * ONE_FULL_COIN);
     this.unconfirmed_balance = 0;
     this._lastBalanceFetch = Date.now();
+    this._persistBackendStatuses();
   }
 
   /** If the active backend supports server pushes, tell it which addresses
@@ -510,7 +565,6 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     // wallets need every external/change address so a tx to any index
     // triggers a refresh.
     const target = this.walletKind === 'pq' && addresses.length > 0 ? [addresses[0]] : addresses;
-    console.log('[AbstractNeuraiWallet] notifying backend of', target.length, 'addresses for', this.network, 'kind=', this.walletKind);
     setSubscribed.call(backend, target).catch(err => {
       console.debug('AbstractNeuraiWallet: setSubscribedAddresses failed', err);
     });
@@ -563,6 +617,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._txCache = txCache;
     this._lastTxFetch = Date.now();
     this._lastTxBlockHeight = Math.max(tipHeight, this._lastTxBlockHeight, ...items.map(item => item.blockHeight));
+    this._persistBackendStatuses();
   }
 
   getTransactions(): Transaction[] {

@@ -13,6 +13,7 @@ import { useTheme } from '../../components/themes';
 import { TransactionListItem } from '../../components/TransactionListItem';
 import WalletsCarousel, { getWalletCarouselItemWidth } from '../../components/WalletsCarousel';
 import { useSizeClass, SizeClass } from '../../blue_modules/sizeClass';
+import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 import loc from '../../loc';
 import ActionSheet from '../ActionSheet';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -177,18 +178,27 @@ const WalletsList: React.FC = () => {
       connectionPoll?.pollConnection();
       const screenKey = route.name;
 
-      // Catch-up on focus: connect to the WSS backend, send our last known
-      // state via the subscribe handshake, and let the server stream
-      // address.changed / chain.tip pushes from there. No periodic polling
-      // while the app is open — the server drives updates.
-      refreshAllWalletTransactions(undefined, false).catch(console.error);
+      // Catch-up on focus: open the WSS connection and subscribe each Neurai
+      // wallet's addresses. The server compares the per-address `status`
+      // hash against what we last persisted and pushes a synthetic
+      // address.changed only for addresses that actually moved while we
+      // were closed — opening the wallet when nothing changed costs one
+      // round-trip, not a full history refetch. The push handler in
+      // AbstractNeuraiWallet runs the heavy refetch in the background, so
+      // the UI stays responsive.
+      for (const wallet of wallets) {
+        if (!isNeuraiWallet(wallet)) continue;
+        wallet.ensureBackendConnected().catch(err => {
+          console.debug('[WalletsList] ensureBackendConnected failed', err);
+        });
+      }
 
       return () => {
         console.log(`[WalletsList] Blurred - cleaning up handler for: ${screenKey}`);
         unregisterTransactionsHandler(screenKey);
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [connectionPoll, unregisterTransactionsHandler, refreshAllWalletTransactions]),
+    }, [connectionPoll, unregisterTransactionsHandler, wallets]),
   );
 
   useEffect(() => {
@@ -253,7 +263,10 @@ const WalletsList: React.FC = () => {
       if (currentWalletIndex.current !== index) {
         console.debug('onSnapToItem', wallets.length === index ? 'NewWallet/Importing card' : index);
         triggerHapticFeedback(HapticFeedbackTypes.Selection);
-        if (wallets[index] && (wallets[index].timeToRefreshBalance() || wallets[index].timeToRefreshTransaction())) {
+        const wallet = wallets[index];
+        if (wallet && !isNeuraiWallet(wallet) && (wallet.timeToRefreshBalance() || wallet.timeToRefreshTransaction())) {
+          // Neurai wallets get their updates via WSS push events; no need to
+          // fire a heavy refresh just because the user swiped to the card.
           refreshWallets(index, false, false);
         }
         currentWalletIndex.current = index;
