@@ -186,6 +186,7 @@ const WalletsList: React.FC = () => {
       // round-trip, not a full history refetch. The push handler in
       // AbstractNeuraiWallet runs the heavy refetch in the background, so
       // the UI stays responsive.
+      console.log('[WalletsList] focus, wallets=', wallets.length, 'neurai=', wallets.filter(w => isNeuraiWallet(w)).length);
       for (const wallet of wallets) {
         if (!isNeuraiWallet(wallet)) continue;
         wallet.ensureBackendConnected().catch(err => {
@@ -263,12 +264,9 @@ const WalletsList: React.FC = () => {
       if (currentWalletIndex.current !== index) {
         console.debug('onSnapToItem', wallets.length === index ? 'NewWallet/Importing card' : index);
         triggerHapticFeedback(HapticFeedbackTypes.Selection);
-        const wallet = wallets[index];
-        if (wallet && !isNeuraiWallet(wallet) && (wallet.timeToRefreshBalance() || wallet.timeToRefreshTransaction())) {
-          // Neurai wallets get their updates via WSS push events; no need to
-          // fire a heavy refresh just because the user swiped to the card.
-          refreshWallets(index, false, false);
-        }
+        // All wallets in this app are Neurai variants; they get their
+        // updates via the WSS push handler in AbstractNeuraiWallet, so no
+        // need to fire a refresh just because the user swiped to the card.
         currentWalletIndex.current = index;
       }
     },

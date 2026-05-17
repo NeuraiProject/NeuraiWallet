@@ -10,6 +10,7 @@ import { startAndDecrypt } from '../../blue_modules/start-and-decrypt';
 import { isNotificationsEnabled, majorTomToGroundControl, unsubscribe } from '../../blue_modules/notifications';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 import { isTestnetChain } from '../../blue_modules/neurai/networkConfig';
+import { onWalletChanged } from '../../blue_modules/neurai/eventBus';
 import { XnaUnit } from '../../models/xnaUnits';
 import { navigationRef } from '../../NavigationService';
 import { getScanWasBBQR } from '../../helpers/scan-qr.ts';
@@ -311,6 +312,22 @@ export const StorageProvider = ({ children }: { children: React.ReactNode }) => 
       counterpartyMetadata.current = BlueApp.counterparty_metadata;
       setWallets(BlueApp.getWallets());
     }
+  }, [walletsInitialized]);
+
+  // Re-render `wallets`-consuming screens when a Neurai wallet's cached
+  // state changed because of a WSS push (`address.changed`). The wallet
+  // mutates its own fields in place; without a fresh array identity React
+  // never repaints. Persist to disk in the same tick so the new state
+  // survives an app cold start.
+  useEffect(() => {
+    if (!walletsInitialized) return;
+    const unsubscribeBus = onWalletChanged(() => {
+      setWallets(BlueApp.getWallets().slice());
+      BlueApp.saveToDisk().catch(err => {
+        console.debug('[StorageProvider] saveToDisk after push failed', err);
+      });
+    });
+    return unsubscribeBus;
   }, [walletsInitialized]);
 
   // Add a refresh lock to prevent concurrent refreshes

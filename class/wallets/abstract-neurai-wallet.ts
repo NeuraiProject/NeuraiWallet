@@ -27,6 +27,7 @@ import {
   isPQChain,
   type NeuraiBackend,
 } from '../../blue_modules/neurai';
+import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
 import { AbstractWallet } from './abstract-wallet';
 import { Transaction, Utxo } from './types';
 
@@ -358,6 +359,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     const onAddressChanged = (this._backend as { onAddressChanged?: (cb: () => void) => () => void }).onAddressChanged;
     if (typeof onAddressChanged !== 'function') return;
     this._unsubscribeBackendPush = onAddressChanged.call(this._backend, () => {
+      console.log('[AbstractNeuraiWallet]', this.network, 'push received, inFlight=', this._pushFetchInFlight);
       if (this._pushFetchInFlight) {
         this._pushFetchPending = true;
         return;
@@ -369,9 +371,14 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
             this._pushFetchPending = false;
             await this.fetchBalance();
             await this.fetchTransactions();
+            // Notify the React state layer so `wallets`-consuming screens
+            // (WalletsList, etc.) re-render. Internal wallet mutations are
+            // invisible to React otherwise — useStorage hands out the same
+            // array identity until something calls setWallets.
+            emitWalletChanged(this.getID());
           } while (this._pushFetchPending);
         } catch (err) {
-          console.debug('AbstractNeuraiWallet: push-triggered refetch failed', err);
+          console.warn('AbstractNeuraiWallet: push-triggered refetch failed', err);
         } finally {
           this._pushFetchInFlight = false;
         }
