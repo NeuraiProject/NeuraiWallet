@@ -12,6 +12,7 @@
  * the persisted JSON.
  */
 
+import { InteractionManager } from 'react-native';
 import NeuraiJsWallet from '@neuraiproject/neurai-jswallet';
 import NeuraiKey from '@neuraiproject/neurai-key';
 import { type IDelta, type IHistoryItem } from '@neuraiproject/neurai-history-list';
@@ -27,6 +28,7 @@ import {
   isPQChain,
   type NeuraiBackend,
 } from '../../blue_modules/neurai';
+import type { AddressChangedEvent } from '../../blue_modules/neurai/WssBackend';
 import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
 import { AbstractWallet } from './abstract-wallet';
 import { Transaction, Utxo } from './types';
@@ -375,19 +377,50 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       this._unsubscribeBackendPush();
       this._unsubscribeBackendPush = null;
     }
-    const onAddressChanged = (this._backend as { onAddressChanged?: (cb: () => void) => () => void }).onAddressChanged;
+    const onAddressChanged = (this._backend as { onAddressChanged?: (cb: (event: AddressChangedEvent) => void) => () => void })
+      .onAddressChanged;
     if (typeof onAddressChanged !== 'function') return;
-    this._unsubscribeBackendPush = onAddressChanged.call(this._backend, () => {
+    this._unsubscribeBackendPush = onAddressChanged.call(this._backend, (event: AddressChangedEvent) => {
+      // Apply whatever the server gave us synchronously and cheaply: balance
+      // is in the payload for PQ-with-reuse (single subscribed address ==
+      // wallet total). Doing this before yielding means the UI shows fresh
+      // numbers immediately, even if the historical refetch is deferred or
+      // never runs (e.g. when no new txids landed).
+      this._applyPushEvent(event);
+
+      // Decide whether a history refetch is actually needed. Pure status
+      // bumps (confirmed_txids / removed_txids / touched_assets only) don't
+      // add anything to the tx list — the existing entries already cover
+      // those txids. Only new txids force a re-pull.
+      const delta = event.delta;
+      const hasNewTxids = !!delta?.added_txids && delta.added_txids.length > 0;
+      const noDeltaInfo = !delta;
+      if (!hasNewTxids && !noDeltaInfo) {
+        // Balance was already applied above and nothing else needs fetching.
+        emitWalletChanged(this.getID());
+        return;
+      }
+
       if (this._pushFetchInFlight) {
         this._pushFetchPending = true;
         return;
       }
       this._pushFetchInFlight = true;
-      (async () => {
+      // Defer the heavy refetch until any current UI interaction (screen
+      // transitions, taps, FlatList batches) settles. Without this the
+      // synchronous tx-parse chunks compete with the user's first tap on
+      // Send/Receive and the JS thread block makes the buttons feel dead.
+      InteractionManager.runAfterInteractions(async () => {
         try {
           do {
             this._pushFetchPending = false;
-            await this.fetchBalance();
+            // Skip fetchBalance: `_applyPushEvent` above already updated
+            // `this.balance` from the server's pushed payload for the wallet
+            // kinds where that's safe; for HD wallets we still need the
+            // multi-address sum, so we keep fetching there.
+            if (this.walletKind !== 'pq') {
+              await this.fetchBalance();
+            }
             await this.fetchTransactions();
             console.log('[NeuraiWallet] push refresh done, balance=', this.balance, 'txs=', this._txCache.length);
             // Notify the React state layer so `wallets`-consuming screens
@@ -401,8 +434,27 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
         } finally {
           this._pushFetchInFlight = false;
         }
-      })();
+      });
     });
+  }
+
+  /**
+   * Apply the cheap, server-pushed fields from an `address.changed` event
+   * directly to wallet state — no network round-trip, no engine touch. Only
+   * the bits we can trust without re-summing across addresses are taken:
+   *  - `balance`: safe only when one address represents the whole wallet
+   *    (PQ-with-reuse). For HD we'd need to sum across the subscription set,
+   *    so the deferred `fetchBalance` still owns that case.
+   * Returning quickly lets the UI render the new number before the deferred
+   * `fetchTransactions` runs (or in cases where no fetch is needed at all).
+   */
+  private _applyPushEvent(event: AddressChangedEvent): void {
+    if (this.walletKind === 'pq' && event.balance && typeof event.balance.confirmed === 'number') {
+      // The push payload's `confirmed` is already in satoshis (1e8 / coin).
+      this.balance = event.balance.confirmed;
+      this.unconfirmed_balance = typeof event.balance.unconfirmed === 'number' ? event.balance.unconfirmed : 0;
+      this._lastBalanceFetch = Date.now();
+    }
   }
 
   // ---------- addresses ------------------------------------------------------------
@@ -632,10 +684,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     const addresses = engine.getAddresses();
     const backend = this.getBackend();
     this._notifyBackendAddresses(backend, addresses);
-    const [rawDeltas, tipHeight] = await Promise.all([
-      backend.getAddressHistory(addresses),
-      backend.getTipHeight().catch(() => 0),
-    ]);
+    const [rawDeltas, tipHeight] = await Promise.all([backend.getAddressHistory(addresses), backend.getTipHeight().catch(() => 0)]);
     const deltas = rawDeltas as unknown as IDelta[];
     await yieldToEventLoop();
     const baseCurrency = engine.getBaseCurrency();
@@ -651,9 +700,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
         blockTimes[d.height] = d.time;
       }
     }
-    const missingHeights = Array.from(
-      new Set(items.map(i => i.blockHeight).filter(h => h > 0 && blockTimes[h] === undefined)),
-    );
+    const missingHeights = Array.from(new Set(items.map(i => i.blockHeight).filter(h => h > 0 && blockTimes[h] === undefined)));
     if (missingHeights.length > 0) {
       try {
         const fetched = await backend.getBlockTimes(missingHeights);

@@ -247,13 +247,10 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   useFocusEffect(
     useCallback(() => {
       if (isNeuraiWallet(wallet)) {
-        // Defer until the navigation animation has finished so the heavy
-        // engine bootstrap (PQ key derivation can block the JS thread for
-        // 1-2s on first use) doesn't freeze the Send/Receive buttons during
-        // the transition. The home screen has already subscribed this
-        // wallet's addresses for push events, so we only need to make sure
-        // the engine is warm; if the user got here without crossing the
-        // home (cold-start deep link), this still kicks off the subscribe.
+        // Open the WSS connection and refresh the per-address subscription
+        // diff so server pushes flow back here. `setSubscribedAddresses` is a
+        // no-op when the home screen has already established the connection
+        // for this wallet, so re-entering a wallet is essentially free.
         const handle = InteractionManager.runAfterInteractions(() => {
           wallet.ensureBackendConnected().catch(err => {
             console.debug('[WalletTransactions] ensureBackendConnected failed', err);

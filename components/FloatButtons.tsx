@@ -42,6 +42,13 @@ const useFloatButtonAnimation = (initialHeight: number) => {
       toValue: 0,
       friction: 7,
       tension: 40,
+      // Without this the spring overshoots and oscillates for ~1-2s as it
+      // settles. Because the slide uses the native driver, the button's
+      // hitbox tracks the wobble — taps land on `onPressIn` but the finger
+      // drifts off the moving button before `onPress` can fire, so the user
+      // has to tap 2–3 times before one cuajas. Clamping the overshoot
+      // freezes the button at its target as soon as the slide arrives.
+      overshootClamping: true,
       useNativeDriver: true,
     }).start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
