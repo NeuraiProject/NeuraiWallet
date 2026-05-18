@@ -67,11 +67,11 @@ const TransactionDetails = () => {
   const { navigate } = useExtendedNavigation<NavigationProps>();
   const { hash, walletID } = useRoute<RouteProps>().params;
   const { saveToDisk, txMetadata, counterpartyMetadata, wallets, getTransactions } = useStorage();
-  const { selectedBlockExplorer } = useSettings();
+  const { selectedBlockExplorer, selectedTestnetBlockExplorer } = useSettings();
   const explorerUrl = useMemo(() => {
     const w = wallets.find(x => x.getID() === walletID);
-    return getBlockExplorerUrlForWallet(w as any, selectedBlockExplorer.url);
-  }, [wallets, walletID, selectedBlockExplorer]);
+    return getBlockExplorerUrlForWallet(w as any, selectedBlockExplorer.url, selectedTestnetBlockExplorer.url);
+  }, [wallets, walletID, selectedBlockExplorer, selectedTestnetBlockExplorer]);
   const [from, setFrom] = useState<string[]>([]);
   const [to, setTo] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);

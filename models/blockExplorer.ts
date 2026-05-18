@@ -47,6 +47,7 @@ export const getDomain = (url: string): string => {
 };
 
 const BLOCK_EXPLORER_STORAGE_KEY = 'blockExplorer';
+const BLOCK_EXPLORER_TESTNET_STORAGE_KEY = 'blockExplorerTestnet';
 
 export const saveBlockExplorer = async (url: string): Promise<boolean> => {
   try {
@@ -78,19 +79,40 @@ export const getBlockExplorerUrl = async (): Promise<string> => {
   }
 };
 
+export const saveTestnetBlockExplorer = async (url: string): Promise<boolean> => {
+  try {
+    await DefaultPreference.set(BLOCK_EXPLORER_TESTNET_STORAGE_KEY, url);
+    return true;
+  } catch (error) {
+    console.error('Error saving testnet block explorer:', error);
+    return false;
+  }
+};
+
+export const getTestnetBlockExplorerUrl = async (): Promise<string> => {
+  try {
+    const url = (await DefaultPreference.get(BLOCK_EXPLORER_TESTNET_STORAGE_KEY)) as string | null;
+    return url ?? BLOCK_EXPLORERS.testnet.url;
+  } catch (error) {
+    console.error('Error getting testnet block explorer:', error);
+    return BLOCK_EXPLORERS.testnet.url;
+  }
+};
+
 /**
- * Pick the right explorer for a given wallet. Testnet wallets always go to
- * the testnet explorer regardless of the user's chosen mainnet explorer,
- * because mainnet explorers won't resolve testnet txids/addresses.
+ * Pick the right explorer for a given wallet. Testnet wallets use the testnet
+ * preference (separate from the mainnet one) because mainnet explorers won't
+ * resolve testnet txids/addresses.
  */
 export const getBlockExplorerUrlForWallet = (
   wallet: { type?: string; network?: string } | null | undefined,
-  defaultUrl: string,
+  mainnetUrl: string,
+  testnetUrl: string = BLOCK_EXPLORERS.testnet.url,
 ): string => {
-  if (!wallet) return defaultUrl;
+  if (!wallet) return mainnetUrl;
   const network = (wallet as { network?: string }).network;
   if (network === 'xna-test' || network === 'xna-pq-test') {
-    return BLOCK_EXPLORERS.testnet.url;
+    return testnetUrl;
   }
-  return defaultUrl;
+  return mainnetUrl;
 };

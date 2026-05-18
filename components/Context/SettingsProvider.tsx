@@ -14,7 +14,15 @@ import { getIsHandOffUseEnabled, setIsHandOffUseEnabled } from '../HandOffCompon
 import { useStorage } from '../../hooks/context/useStorage';
 import { XnaUnit } from '../../models/xnaUnits';
 import { TotalWalletsBalanceKey, TotalWalletsBalancePreferredUnit } from '../TotalWalletsBalance';
-import { BLOCK_EXPLORERS, getBlockExplorerUrl, saveBlockExplorer, BlockExplorer, normalizeUrl } from '../../models/blockExplorer';
+import {
+  BLOCK_EXPLORERS,
+  BlockExplorer,
+  getBlockExplorerUrl,
+  getTestnetBlockExplorerUrl,
+  normalizeUrl,
+  saveBlockExplorer,
+  saveTestnetBlockExplorer,
+} from '../../models/blockExplorer';
 import * as BlueElectrum from '../../blue_modules/BlueElectrum';
 import { isBalanceDisplayAllowed, setBalanceDisplayAllowed } from '../../hooks/useWidgetCommunication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -119,6 +127,8 @@ interface SettingsContextType {
   setTotalBalancePreferredUnitStorage: (unit: XnaUnit) => Promise<void>;
   selectedBlockExplorer: BlockExplorer;
   setBlockExplorerStorage: (explorer: BlockExplorer) => Promise<boolean>;
+  selectedTestnetBlockExplorer: BlockExplorer;
+  setTestnetBlockExplorerStorage: (explorer: BlockExplorer) => Promise<boolean>;
   isElectrumDisabled: boolean;
   setIsElectrumDisabled: (value: boolean) => void;
   isPQAddressReuseEnabled: boolean;
@@ -150,6 +160,8 @@ const defaultSettingsContext: SettingsContextType = {
   setTotalBalancePreferredUnitStorage: async () => {},
   selectedBlockExplorer: BLOCK_EXPLORERS.default,
   setBlockExplorerStorage: async () => false,
+  selectedTestnetBlockExplorer: BLOCK_EXPLORERS.testnet,
+  setTestnetBlockExplorerStorage: async () => false,
   isElectrumDisabled: false,
   setIsElectrumDisabled: () => {},
   isPQAddressReuseEnabled: true,
@@ -171,6 +183,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
   const [isTotalBalanceEnabled, setIsTotalBalanceEnabled] = useState<boolean>(true);
   const [totalBalancePreferredUnit, setTotalBalancePreferredUnit] = useState<XnaUnit>(XnaUnit.XNA);
   const [selectedBlockExplorer, setSelectedBlockExplorer] = useState<BlockExplorer>(BLOCK_EXPLORERS.default);
+  const [selectedTestnetBlockExplorer, setSelectedTestnetBlockExplorer] = useState<BlockExplorer>(BLOCK_EXPLORERS.testnet);
   const [isElectrumDisabled, setIsElectrumDisabled] = useState<boolean>(true);
   const [isPQAddressReuseEnabled, setIsPQAddressReuseEnabled] = useState<boolean>(true);
 
@@ -220,6 +233,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
         getBlockExplorerUrl().then(url => {
           const predefinedExplorer = Object.values(BLOCK_EXPLORERS).find(explorer => normalizeUrl(explorer.url) === normalizeUrl(url));
           setSelectedBlockExplorer(predefinedExplorer ?? ({ key: 'custom', name: 'Custom', url } as BlockExplorer));
+        }),
+        getTestnetBlockExplorerUrl().then(url => {
+          const predefinedExplorer = Object.values(BLOCK_EXPLORERS).find(explorer => normalizeUrl(explorer.url) === normalizeUrl(url));
+          setSelectedTestnetBlockExplorer(predefinedExplorer ?? BLOCK_EXPLORERS.testnet);
         }),
         getIsPQAddressReuseEnabled().then(enabled => {
           setIsPQAddressReuseEnabled(enabled);
@@ -380,6 +397,19 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
     }
   }, []);
 
+  const setTestnetBlockExplorerStorage = useCallback(async (explorer: BlockExplorer): Promise<boolean> => {
+    try {
+      const success = await saveTestnetBlockExplorer(explorer.url);
+      if (success) {
+        setSelectedTestnetBlockExplorer(explorer);
+      }
+      return success;
+    } catch (e) {
+      console.error('Error setting testnet BlockExplorer:', e);
+      return false;
+    }
+  }, []);
+
   const value = useMemo(
     () => ({
       preferredFiatCurrency,
@@ -406,6 +436,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
       setTotalBalancePreferredUnitStorage,
       selectedBlockExplorer,
       setBlockExplorerStorage,
+      selectedTestnetBlockExplorer,
+      setTestnetBlockExplorerStorage,
       isElectrumDisabled,
       setIsElectrumDisabled,
       isPQAddressReuseEnabled,
@@ -436,6 +468,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
       setTotalBalancePreferredUnitStorage,
       selectedBlockExplorer,
       setBlockExplorerStorage,
+      selectedTestnetBlockExplorer,
+      setTestnetBlockExplorerStorage,
       isElectrumDisabled,
       isPQAddressReuseEnabled,
       setIsPQAddressReuseEnabledStorage,

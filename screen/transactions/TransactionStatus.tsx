@@ -22,7 +22,7 @@ import { useStorage } from '../../hooks/context/useStorage';
 import loc from '../../loc';
 import type { DetailViewStackParamList } from '../../navigation/DetailViewStackParamList';
 import type { Transaction } from '../../class/wallets/types';
-import { getBlockExplorerUrl, getBlockExplorerUrlForWallet } from '../../models/blockExplorer';
+import { getBlockExplorerUrl, getBlockExplorerUrlForWallet, getTestnetBlockExplorerUrl } from '../../models/blockExplorer';
 
 type RouteProps = RouteProp<DetailViewStackParamList, 'TransactionStatus'>;
 
@@ -36,8 +36,8 @@ const TransactionStatus: React.FC = () => {
 
   useEffect(() => {
     const wallet = params.walletID ? wallets.find(w => w.getID() === params.walletID) : undefined;
-    getBlockExplorerUrl()
-      .then(url => setExplorerUrl(getBlockExplorerUrlForWallet(wallet as any, url)))
+    Promise.all([getBlockExplorerUrl(), getTestnetBlockExplorerUrl()])
+      .then(([mainnetUrl, testnetUrl]) => setExplorerUrl(getBlockExplorerUrlForWallet(wallet as any, mainnetUrl, testnetUrl)))
       .catch(() => setExplorerUrl(''));
   }, [params.walletID, wallets]);
 

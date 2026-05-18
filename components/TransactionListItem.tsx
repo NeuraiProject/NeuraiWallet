@@ -125,11 +125,11 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
     const { colors } = useTheme();
     const { navigate } = useExtendedNavigation<NavigationProps>();
     const { txMetadata, wallets } = useStorage();
-    const { language, selectedBlockExplorer } = useSettings();
+    const { language, selectedBlockExplorer, selectedTestnetBlockExplorer } = useSettings();
     const explorerUrl = useMemo(() => {
       const w = wallets.find(x => x.getID() === walletID);
-      return getBlockExplorerUrlForWallet(w as any, selectedBlockExplorer.url);
-    }, [wallets, walletID, selectedBlockExplorer]);
+      return getBlockExplorerUrlForWallet(w as any, selectedBlockExplorer.url, selectedTestnetBlockExplorer.url);
+    }, [wallets, walletID, selectedBlockExplorer, selectedTestnetBlockExplorer]);
     const insets = useSafeAreaInsets();
     const containerStyle = useMemo(
       () => ({

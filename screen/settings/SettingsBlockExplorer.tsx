@@ -16,14 +16,18 @@ import { useSettings } from '../../hooks/context/useSettings';
 import SettingsBlockExplorerCustomUrlItem from '../../components/SettingsBlockExplorerCustomUrlListItem';
 
 const SettingsBlockExplorer: React.FC = () => {
-  const { selectedBlockExplorer, setBlockExplorerStorage } = useSettings();
+  const { selectedBlockExplorer, setBlockExplorerStorage, selectedTestnetBlockExplorer, setTestnetBlockExplorerStorage } = useSettings();
   const customUrlInputRef = useRef<TextInput>(null);
   const [customUrl, setCustomUrl] = useState<string>(selectedBlockExplorer.key === 'custom' ? selectedBlockExplorer.url : '');
   const [isCustomEnabled, setIsCustomEnabled] = useState<boolean>(selectedBlockExplorer.key === 'custom');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const predefinedExplorers = getBlockExplorersList().filter(explorer => explorer.key !== 'custom');
+  // Mainnet and testnet keep independent preferences (see SettingsProvider).
+  // Custom URL only applies to the mainnet preference today.
+  const mainnetExplorers = predefinedExplorers.filter(e => e.key !== 'testnet');
+  const testnetExplorers = predefinedExplorers.filter(e => e.key === 'testnet');
 
-  const handleExplorerPress = useCallback(
+  const handleMainnetExplorerPress = useCallback(
     async (explorer: BlockExplorer) => {
       const success = await setBlockExplorerStorage(explorer);
       if (success) {
@@ -37,6 +41,21 @@ const SettingsBlockExplorer: React.FC = () => {
       }
     },
     [setBlockExplorerStorage],
+  );
+
+  const handleTestnetExplorerPress = useCallback(
+    async (explorer: BlockExplorer) => {
+      const success = await setTestnetBlockExplorerStorage(explorer);
+      if (success) {
+        triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
+      } else {
+        triggerHapticFeedback(HapticFeedbackTypes.NotificationError);
+        presentAlert({
+          message: loc.settings.block_explorer_error_saving_custom,
+        });
+      }
+    },
+    [setTestnetBlockExplorerStorage],
   );
 
   const handleCustomUrlChange = useCallback((url: string) => {
@@ -118,26 +137,44 @@ const SettingsBlockExplorer: React.FC = () => {
     };
   }, [customUrl, isCustomEnabled, setBlockExplorerStorage]);
 
+  const renderExplorerRow = (
+    explorer: BlockExplorer,
+    index: number,
+    total: number,
+    selected: BlockExplorer,
+    onPress: (e: BlockExplorer) => void,
+    rowDisabled: boolean,
+  ) => {
+    const isSelected = !rowDisabled && normalizeUrl(selected.url || '') === normalizeUrl(explorer.url || '');
+    const isFirst = index === 0;
+    const isLast = index === total - 1;
+    return (
+      <SettingsListItem
+        key={explorer.key}
+        title={explorer.name}
+        subtitle={explorer.url}
+        onPress={() => onPress(explorer)}
+        checkmark={isSelected}
+        disabled={rowDisabled}
+        position={isFirst && isLast ? 'single' : isFirst ? 'first' : isLast ? 'last' : 'middle'}
+      />
+    );
+  };
+
   return (
     <SettingsScrollView>
-      <SettingsSectionHeader title={loc._.suggested} />
+      <SettingsSectionHeader title={loc.wallets.neurai_network_mainnet} />
       <SettingsSection horizontalInset={false}>
-        {predefinedExplorers.map((explorer, index) => {
-          const isSelected = !isCustomEnabled && normalizeUrl(selectedBlockExplorer.url || '') === normalizeUrl(explorer.url || '');
-          const isFirst = index === 0;
-          const isLast = index === predefinedExplorers.length - 1;
+        {mainnetExplorers.map((explorer, index) =>
+          renderExplorerRow(explorer, index, mainnetExplorers.length, selectedBlockExplorer, handleMainnetExplorerPress, isCustomEnabled),
+        )}
+      </SettingsSection>
 
-          return (
-            <SettingsListItem
-              key={explorer.key}
-              title={explorer.name}
-              onPress={() => handleExplorerPress(explorer)}
-              checkmark={isSelected}
-              disabled={isCustomEnabled}
-              position={isFirst && isLast ? 'single' : isFirst ? 'first' : isLast ? 'last' : 'middle'}
-            />
-          );
-        })}
+      <SettingsSectionHeader title={loc.wallets.neurai_network_testnet} />
+      <SettingsSection horizontalInset={false}>
+        {testnetExplorers.map((explorer, index) =>
+          renderExplorerRow(explorer, index, testnetExplorers.length, selectedTestnetBlockExplorer, handleTestnetExplorerPress, false),
+        )}
       </SettingsSection>
 
       <SettingsSectionHeader title={loc.wallets.details_advanced} />
