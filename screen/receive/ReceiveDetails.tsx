@@ -187,7 +187,7 @@ const ReceiveDetails = () => {
   const route = useRoute<RouteProps>();
   const { walletID, address } = route.params;
   const { wallets, saveToDisk, sleep, fetchAndSaveWalletTransactions } = useStorage();
-  const { isElectrumDisabled, isPQAddressReuseEnabled } = useSettings();
+  const { isPQAddressReuseEnabled } = useSettings();
   const { colors, closeImage } = useTheme();
   const isDarkTheme = useColorScheme() === 'dark';
   const [customLabel, setCustomLabel] = useState('');
@@ -297,8 +297,13 @@ const ReceiveDetails = () => {
         console.warn('PQ static address fetch failed:', error);
       }
     } else {
+      // Legacy/HD path: derive a fresh receive address. The `isElectrumDisabled`
+      // gate that used to wrap this was a BlueWallet leftover — Neurai does not
+      // use Electrum, and with the gate on (the default) HD wallets fell through
+      // to the sync `getAddress()` below, which returns false before the engine
+      // is bootstrapped and trips `address_not_found`.
       try {
-        if (!isElectrumDisabled) newAddress = await Promise.race([wallet.getAddressAsync(), sleep(1000)]);
+        newAddress = await Promise.race([wallet.getAddressAsync(), sleep(1000)]);
       } catch (error) {
         console.warn('Error fetching wallet address:', error);
       }
@@ -322,7 +327,7 @@ const ReceiveDetails = () => {
     } catch (error) {
       console.error('Error obtaining notifications permissions:', error);
     }
-  }, [wallet, saveToDisk, address, setAddressBIP21Encoded, isElectrumDisabled, isPQAddressReuseEnabled, sleep]);
+  }, [wallet, saveToDisk, address, setAddressBIP21Encoded, isPQAddressReuseEnabled, sleep]);
 
   const onEnablePaymentsCodeSwitchValue = useCallback(() => {
     // BIP47 is Bitcoin-only; left as a no-op so the existing handler wiring
