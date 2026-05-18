@@ -3,6 +3,9 @@ import { StyleSheet, TextInput, View } from 'react-native';
 import { useTheme } from './themes';
 import loc from '../loc';
 import { SettingsCard, SettingsListItem, isAndroid } from './platform';
+import SegmentedControl from './SegmentedControl';
+
+export type CustomBlockExplorerTarget = 'mainnet' | 'testnet';
 
 interface SettingsBlockExplorerCustomUrlItemProps {
   isCustomEnabled: boolean;
@@ -11,7 +14,11 @@ interface SettingsBlockExplorerCustomUrlItemProps {
   onCustomUrlChange: (url: string) => void;
   onSubmitCustomUrl: () => void;
   inputRef?: React.RefObject<TextInput | null>;
+  target: CustomBlockExplorerTarget;
+  onTargetChange: (target: CustomBlockExplorerTarget) => void;
 }
+
+const TARGETS: CustomBlockExplorerTarget[] = ['mainnet', 'testnet'];
 
 const SettingsBlockExplorerCustomUrlItem: React.FC<SettingsBlockExplorerCustomUrlItemProps> = ({
   isCustomEnabled,
@@ -20,6 +27,8 @@ const SettingsBlockExplorerCustomUrlItem: React.FC<SettingsBlockExplorerCustomUr
   onCustomUrlChange,
   onSubmitCustomUrl,
   inputRef,
+  target,
+  onTargetChange,
 }) => {
   const { colors } = useTheme();
   const horizontalPadding = isAndroid ? 20 : 16;
@@ -39,6 +48,13 @@ const SettingsBlockExplorerCustomUrlItem: React.FC<SettingsBlockExplorerCustomUr
       {isCustomEnabled && (
         <View style={[styles.inputCardWrapper, { paddingHorizontal: horizontalPadding }]}>
           <SettingsCard compact>
+            <View style={styles.segmentedWrapper}>
+              <SegmentedControl
+                values={[loc.wallets.neurai_network_mainnet, loc.wallets.neurai_network_testnet]}
+                selectedIndex={TARGETS.indexOf(target)}
+                onChange={idx => onTargetChange(TARGETS[idx])}
+              />
+            </View>
             <View style={[styles.uriContainer, { borderColor: colors.formBorder, backgroundColor: colors.inputBackgroundColor }]}>
               <TextInput
                 ref={inputRef}
@@ -68,6 +84,10 @@ export default SettingsBlockExplorerCustomUrlItem;
 
 const styles = StyleSheet.create({
   inputCardWrapper: {
+    marginTop: isAndroid ? 12 : 10,
+  },
+  segmentedWrapper: {
+    marginHorizontal: isAndroid ? 12 : 10,
     marginTop: isAndroid ? 12 : 10,
   },
   uriContainer: {

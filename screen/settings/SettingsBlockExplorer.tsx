@@ -9,38 +9,57 @@ import {
   normalizeUrl,
   BLOCK_EXPLORERS,
   removeBlockExplorer,
+  removeTestnetBlockExplorer,
 } from '../../models/blockExplorer';
 import presentAlert from '../../components/Alert';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { useSettings } from '../../hooks/context/useSettings';
-import SettingsBlockExplorerCustomUrlItem from '../../components/SettingsBlockExplorerCustomUrlListItem';
+import SettingsBlockExplorerCustomUrlItem, { CustomBlockExplorerTarget } from '../../components/SettingsBlockExplorerCustomUrlListItem';
+
+const inferInitialCustomTarget = (mainnet: BlockExplorer, testnet: BlockExplorer): CustomBlockExplorerTarget => {
+  if (mainnet.key === 'custom') return 'mainnet';
+  if (testnet.key === 'custom') return 'testnet';
+  return 'mainnet';
+};
 
 const SettingsBlockExplorer: React.FC = () => {
   const { selectedBlockExplorer, setBlockExplorerStorage, selectedTestnetBlockExplorer, setTestnetBlockExplorerStorage } = useSettings();
   const customUrlInputRef = useRef<TextInput>(null);
-  const [customUrl, setCustomUrl] = useState<string>(selectedBlockExplorer.key === 'custom' ? selectedBlockExplorer.url : '');
-  const [isCustomEnabled, setIsCustomEnabled] = useState<boolean>(selectedBlockExplorer.key === 'custom');
+
+  const [customTarget, setCustomTarget] = useState<CustomBlockExplorerTarget>(() =>
+    inferInitialCustomTarget(selectedBlockExplorer, selectedTestnetBlockExplorer),
+  );
+  const [customUrl, setCustomUrl] = useState<string>(() =>
+    selectedBlockExplorer.key === 'custom'
+      ? selectedBlockExplorer.url
+      : selectedTestnetBlockExplorer.key === 'custom'
+        ? selectedTestnetBlockExplorer.url
+        : '',
+  );
+  const [isCustomEnabled, setIsCustomEnabled] = useState<boolean>(
+    () => selectedBlockExplorer.key === 'custom' || selectedTestnetBlockExplorer.key === 'custom',
+  );
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
   const predefinedExplorers = getBlockExplorersList().filter(explorer => explorer.key !== 'custom');
-  // Mainnet and testnet keep independent preferences (see SettingsProvider).
-  // Custom URL only applies to the mainnet preference today.
   const mainnetExplorers = predefinedExplorers.filter(e => e.key !== 'testnet');
   const testnetExplorers = predefinedExplorers.filter(e => e.key === 'testnet');
+
+  const isMainnetCustomActive = isCustomEnabled && customTarget === 'mainnet';
+  const isTestnetCustomActive = isCustomEnabled && customTarget === 'testnet';
 
   const handleMainnetExplorerPress = useCallback(
     async (explorer: BlockExplorer) => {
       const success = await setBlockExplorerStorage(explorer);
       if (success) {
         triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
-        setIsCustomEnabled(false);
+        if (customTarget === 'mainnet') setIsCustomEnabled(false);
       } else {
         triggerHapticFeedback(HapticFeedbackTypes.NotificationError);
-        presentAlert({
-          message: loc.settings.block_explorer_error_saving_custom,
-        });
+        presentAlert({ message: loc.settings.block_explorer_error_saving_custom });
       }
     },
-    [setBlockExplorerStorage],
+    [setBlockExplorerStorage, customTarget],
   );
 
   const handleTestnetExplorerPress = useCallback(
@@ -48,14 +67,13 @@ const SettingsBlockExplorer: React.FC = () => {
       const success = await setTestnetBlockExplorerStorage(explorer);
       if (success) {
         triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
+        if (customTarget === 'testnet') setIsCustomEnabled(false);
       } else {
         triggerHapticFeedback(HapticFeedbackTypes.NotificationError);
-        presentAlert({
-          message: loc.settings.block_explorer_error_saving_custom,
-        });
+        presentAlert({ message: loc.settings.block_explorer_error_saving_custom });
       }
     },
-    [setTestnetBlockExplorerStorage],
+    [setTestnetBlockExplorerStorage, customTarget],
   );
 
   const handleCustomUrlChange = useCallback((url: string) => {
@@ -74,48 +92,63 @@ const SettingsBlockExplorer: React.FC = () => {
       return;
     }
 
-    const customExplorer: BlockExplorer = {
-      key: 'custom',
-      name: 'Custom',
-      url: customUrlNormalized,
-    };
-
-    const success = await setBlockExplorerStorage(customExplorer);
+    const customExplorer: BlockExplorer = { key: 'custom', name: 'Custom', url: customUrlNormalized };
+    const setter = customTarget === 'mainnet' ? setBlockExplorerStorage : setTestnetBlockExplorerStorage;
+    const success = await setter(customExplorer);
 
     if (success) {
       triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
     } else {
       triggerHapticFeedback(HapticFeedbackTypes.NotificationError);
-      presentAlert({
-        message: loc.settings.block_explorer_error_saving_custom,
-      });
+      presentAlert({ message: loc.settings.block_explorer_error_saving_custom });
     }
     setIsSubmitting(false);
-  }, [customUrl, setBlockExplorerStorage, isSubmitting]);
+  }, [customUrl, customTarget, setBlockExplorerStorage, setTestnetBlockExplorerStorage, isSubmitting]);
+
+  const restoreTargetDefault = useCallback(
+    async (target: CustomBlockExplorerTarget) => {
+      if (target === 'mainnet') {
+        await removeBlockExplorer();
+        return setBlockExplorerStorage(BLOCK_EXPLORERS.default);
+      }
+      await removeTestnetBlockExplorer();
+      return setTestnetBlockExplorerStorage(BLOCK_EXPLORERS.testnet);
+    },
+    [setBlockExplorerStorage, setTestnetBlockExplorerStorage],
+  );
 
   const handleCustomSwitchToggle = useCallback(
     async (value: boolean) => {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setIsCustomEnabled(value);
       if (value) {
-        await removeBlockExplorer();
         customUrlInputRef.current?.focus();
       } else {
-        const defaultExplorer = BLOCK_EXPLORERS.default;
-        const success = await setBlockExplorerStorage(defaultExplorer);
+        const success = await restoreTargetDefault(customTarget);
         if (success) {
           triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
         } else {
           triggerHapticFeedback(HapticFeedbackTypes.NotificationError);
           if (!isSubmitting) {
-            presentAlert({
-              message: loc.settings.block_explorer_error_saving_custom,
-            });
+            presentAlert({ message: loc.settings.block_explorer_error_saving_custom });
           }
         }
       }
     },
-    [setBlockExplorerStorage, isSubmitting],
+    [restoreTargetDefault, customTarget, isSubmitting],
+  );
+
+  const handleTargetChange = useCallback(
+    async (next: CustomBlockExplorerTarget) => {
+      if (next === customTarget) return;
+      const previous = customTarget;
+      setCustomTarget(next);
+      // If the previous target had a custom URL active, restore its default so
+      // we don't leave a stale custom preference on a network the user is no
+      // longer pointing at.
+      if (isCustomEnabled) await restoreTargetDefault(previous);
+    },
+    [customTarget, isCustomEnabled, restoreTargetDefault],
   );
 
   useEffect(() => {
@@ -124,18 +157,16 @@ const SettingsBlockExplorer: React.FC = () => {
         const customUrlNormalized = normalizeUrl(customUrl);
         if (!isValidUrl(customUrlNormalized)) {
           (async () => {
-            const success = await setBlockExplorerStorage(BLOCK_EXPLORERS.default);
+            const success = await restoreTargetDefault(customTarget);
             if (!success) {
               triggerHapticFeedback(HapticFeedbackTypes.NotificationError);
-              presentAlert({
-                message: loc.settings.block_explorer_error_saving_custom,
-              });
+              presentAlert({ message: loc.settings.block_explorer_error_saving_custom });
             }
           })();
         }
       }
     };
-  }, [customUrl, isCustomEnabled, setBlockExplorerStorage]);
+  }, [customUrl, isCustomEnabled, customTarget, restoreTargetDefault]);
 
   const renderExplorerRow = (
     explorer: BlockExplorer,
@@ -166,14 +197,14 @@ const SettingsBlockExplorer: React.FC = () => {
       <SettingsSectionHeader title={loc.wallets.neurai_network_mainnet} />
       <SettingsSection horizontalInset={false}>
         {mainnetExplorers.map((explorer, index) =>
-          renderExplorerRow(explorer, index, mainnetExplorers.length, selectedBlockExplorer, handleMainnetExplorerPress, isCustomEnabled),
+          renderExplorerRow(explorer, index, mainnetExplorers.length, selectedBlockExplorer, handleMainnetExplorerPress, isMainnetCustomActive),
         )}
       </SettingsSection>
 
       <SettingsSectionHeader title={loc.wallets.neurai_network_testnet} />
       <SettingsSection horizontalInset={false}>
         {testnetExplorers.map((explorer, index) =>
-          renderExplorerRow(explorer, index, testnetExplorers.length, selectedTestnetBlockExplorer, handleTestnetExplorerPress, false),
+          renderExplorerRow(explorer, index, testnetExplorers.length, selectedTestnetBlockExplorer, handleTestnetExplorerPress, isTestnetCustomActive),
         )}
       </SettingsSection>
 
@@ -186,6 +217,8 @@ const SettingsBlockExplorer: React.FC = () => {
           onCustomUrlChange={handleCustomUrlChange}
           onSubmitCustomUrl={handleSubmitCustomUrl}
           inputRef={customUrlInputRef}
+          target={customTarget}
+          onTargetChange={handleTargetChange}
         />
       </SettingsSection>
     </SettingsScrollView>

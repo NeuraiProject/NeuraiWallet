@@ -69,6 +69,16 @@ export const removeBlockExplorer = async (): Promise<boolean> => {
   }
 };
 
+export const removeTestnetBlockExplorer = async (): Promise<boolean> => {
+  try {
+    await DefaultPreference.clear(BLOCK_EXPLORER_TESTNET_STORAGE_KEY);
+    return true;
+  } catch (error) {
+    console.error('Error removing testnet block explorer:', error);
+    return false;
+  }
+};
+
 export const getBlockExplorerUrl = async (): Promise<string> => {
   try {
     const url = (await DefaultPreference.get(BLOCK_EXPLORER_STORAGE_KEY)) as string | null;
