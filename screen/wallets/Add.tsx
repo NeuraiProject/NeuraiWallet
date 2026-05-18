@@ -73,6 +73,14 @@ const WalletsAdd: React.FC = () => {
   );
   const selectedNetworkIndex = NETWORK_OPTIONS.indexOf(network);
 
+  const onNetworkChange = useCallback((idx: number) => {
+    const next = NETWORK_OPTIONS[idx];
+    setNetwork(next);
+    // PQ is not available on mainnet yet — bounce the kind back to legacy
+    // if the user had it selected.
+    if (next === 'mainnet') setWalletKind('legacy');
+  }, []);
+
   return (
     <Animated.View layout={Layout.springify().damping(16).stiffness(180)} style={styles.flex1}>
       <SafeAreaScrollView style={stylesHook.root} testID="ScrollView" automaticallyAdjustKeyboardInsets>
@@ -104,6 +112,7 @@ const WalletsAdd: React.FC = () => {
             buttonType="NeuraiPQ"
             testID="ActivateNeuraiPQButton"
             active={walletKind === 'pq'}
+            disabled={network === 'mainnet'}
             onPress={() => setWalletKind('pq')}
             size={styles.button}
           />
@@ -114,7 +123,7 @@ const WalletsAdd: React.FC = () => {
           <SegmentedControl
             values={networkSegmentValues}
             selectedIndex={selectedNetworkIndex}
-            onChange={idx => setNetwork(NETWORK_OPTIONS[idx])}
+            onChange={onNetworkChange}
           />
         </View>
 

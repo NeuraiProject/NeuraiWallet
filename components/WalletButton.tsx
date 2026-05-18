@@ -21,6 +21,7 @@ interface WalletButtonProps {
     height: DimensionValue | undefined;
   };
   active: boolean;
+  disabled?: boolean;
 }
 
 const buttonDetails: Record<string, ButtonDetails> = {
@@ -38,11 +39,11 @@ const buttonDetails: Record<string, ButtonDetails> = {
   },
 };
 
-const WalletButton: React.FC<WalletButtonProps> = ({ buttonType, testID, onPress, size, active }) => {
+const WalletButton: React.FC<WalletButtonProps> = ({ buttonType, testID, onPress, size, active, disabled = false }) => {
   const details = buttonDetails[buttonType];
   const { colors } = useTheme();
   const { direction } = useLocale();
-  const borderColor = active ? colors[details.borderColorActive] : colors.buttonDisabledBackgroundColor;
+  const borderColor = active && !disabled ? colors[details.borderColorActive] : colors.buttonDisabledBackgroundColor;
   const stylesHook = StyleSheet.create({
     buttonContainer: {
       borderColor: borderColor as ColorValue,
@@ -68,9 +69,11 @@ const WalletButton: React.FC<WalletButtonProps> = ({ buttonType, testID, onPress
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityState={{ disabled }}
       testID={testID}
       onPress={onPress}
-      style={({ pressed }) => [pressed && styles.pressed, styles.touchable]}
+      disabled={disabled}
+      style={({ pressed }) => [pressed && !disabled && styles.pressed, disabled && styles.disabled, styles.touchable]}
     >
       <View style={[styles.container, stylesHook.buttonContainer]}>
         <View style={styles.content}>
@@ -110,6 +113,9 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.6,
+  },
+  disabled: {
+    opacity: 0.4,
   },
 });
 
