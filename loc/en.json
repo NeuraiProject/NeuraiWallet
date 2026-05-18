@@ -125,7 +125,6 @@
     "run_performance_test": "Test performance",
     "about_selftest": "Run self-test",
     "block_explorer_invalid_custom_url": "The URL provided is invalid. Please enter a valid URL starting with http:// or https://.",
-    "about_selftest_electrum_disabled": "Self-testing is not available with Electrum Offline Mode. Please disable offline mode and try again.",
     "about_sm_github": "GitHub",
     "about_sm_telegram": "Telegram channel",
     "about_sm_website": "Website",

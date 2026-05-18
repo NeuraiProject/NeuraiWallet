@@ -90,7 +90,7 @@ android {
         // convention: the About screen renders `new Date(versionCode * 1000)`).
         // Bump this on each release to keep the timeline correct.
         versionCode 1778371200
-        versionName "8.0.0"
+        versionName "1.0.0"
         testBuildType System.getProperty('testBuildType', 'debug')
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         // Keep compatibility across react-native-capture-protection flavor changes.
@@ -114,6 +114,15 @@ android {
         // generate a proper upload keystore (and keep it off git) when the
         // release pipeline goes live.
         release {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+        // Override AGP's default ~/.android/debug.keystore so debug builds
+        // share a signature with the sideloaded release APK and can update
+        // it in place without uninstall.
+        debug {
             storeFile file('debug.keystore')
             storePassword 'android'
             keyAlias 'androiddebugkey'

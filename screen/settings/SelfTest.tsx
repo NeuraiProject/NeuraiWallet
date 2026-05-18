@@ -1,12 +1,11 @@
 /**
  * Diagnostic screen.
  *
- * The original NeuraiWallet self-test exercised every Bitcoin wallet class
- * (legacy, segwit, multisig, taproot, aezeed, slip39, payjoin, BIP38) plus
- * BlueElectrum end-to-end. None of that ships in NeuraiWallet, so this screen
- * is a placeholder while we decide which Neurai-side checks make sense
- * (e.g. RPC reachability, address derivation against the lib's known
- * vectors, mnemonic round-trip).
+ * Runs a small battery of checks:
+ *   1. Offline: HD and PQ testnet address derivation against a known mnemonic.
+ *   2. Online: WSS reachability against the testnet wallet-services backend
+ *      (mainnet WSS is gated by `MAINNET_BACKEND_DISABLED` so we exercise the
+ *      live one).
  */
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
@@ -18,54 +17,125 @@ import { SettingsCard, SettingsScrollView } from '../../components/platform';
 import loc from '../../loc';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
+import { createDefaultWssBackend } from '../../blue_modules/neurai';
 
 const KNOWN_MNEMONIC = 'result pact model attract result puzzle final boss private educate luggage era';
 
-type State = 'idle' | 'running' | 'ok' | 'fail';
+type StepStatus = 'pending' | 'running' | 'ok' | 'fail';
+interface Step {
+  label: string;
+  status: StepStatus;
+  detail?: string;
+}
+
+const initialSteps: Step[] = [
+  { label: 'HD testnet address derivation', status: 'pending' },
+  { label: 'PQ testnet address derivation', status: 'pending' },
+  { label: 'WSS reachability (testnet, legacy)', status: 'pending' },
+  { label: 'WSS reachability (testnet, pq)', status: 'pending' },
+  { label: 'WSS tip height (testnet, legacy)', status: 'pending' },
+];
 
 const SelfTest: React.FC = () => {
-  const [state, setState] = useState<State>('idle');
-  const [error, setError] = useState<string | null>(null);
+  const [steps, setSteps] = useState<Step[]>(initialSteps);
+  const [running, setRunning] = useState(false);
 
   const run = useCallback(async () => {
-    setState('running');
-    setError(null);
-    try {
-      // Legacy HD on testnet
+    setRunning(true);
+    const next: Step[] = initialSteps.map(s => ({ ...s }));
+    setSteps(next);
+
+    const update = (i: number, status: StepStatus, detail?: string) => {
+      next[i] = { ...next[i], status, detail };
+      setSteps([...next]);
+    };
+
+    const runStep = async (i: number, fn: () => Promise<string | void>) => {
+      update(i, 'running');
+      try {
+        const detail = await fn();
+        update(i, 'ok', detail || undefined);
+      } catch (e: any) {
+        update(i, 'fail', e?.message ?? String(e));
+      }
+    };
+
+    await runStep(0, async () => {
       const hd = NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC);
-      const hdAddr = await hd.getReceiveAddressAsync();
-      if (!hdAddr.startsWith('t')) throw new Error(`HD testnet address should start with 't', got '${hdAddr}'`);
+      const addr = await hd.getReceiveAddressAsync();
+      if (!addr.startsWith('t')) throw new Error(`expected 't' prefix, got '${addr}'`);
+      return addr;
+    });
 
-      // PQ wallet on testnet
+    await runStep(1, async () => {
       const pq = NeuraiPQWallet.forNetwork('testnet', KNOWN_MNEMONIC);
-      const pqAddr = await pq.getReceiveAddressAsync();
-      if (!pqAddr.startsWith('tnq1')) throw new Error(`PQ testnet address should start with 'tnq1', got '${pqAddr}'`);
+      const addr = await pq.getReceiveAddressAsync();
+      if (!addr.startsWith('tnq1')) throw new Error(`expected 'tnq1' prefix, got '${addr}'`);
+      return addr;
+    });
 
-      setState('ok');
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-      setState('fail');
-    }
+    await runStep(2, async () => {
+      const backend = createDefaultWssBackend('testnet', 'legacy');
+      const ok = await backend.ping();
+      if (!ok) throw new Error('ping returned false');
+      return 'ok';
+    });
+
+    await runStep(3, async () => {
+      const backend = createDefaultWssBackend('testnet', 'pq');
+      const ok = await backend.ping();
+      if (!ok) throw new Error('ping returned false');
+      return 'ok';
+    });
+
+    await runStep(4, async () => {
+      const backend = createDefaultWssBackend('testnet', 'legacy');
+      const height = await backend.getTipHeight();
+      if (!Number.isFinite(height) || height <= 0) throw new Error(`bad tip height: ${height}`);
+      return `height ${height}`;
+    });
+
+    setRunning(false);
   }, []);
 
   return (
     <SettingsScrollView>
       <SettingsCard>
         <View style={styles.card}>
-          <BlueText>Runs a small set of assertions against the Neurai libraries.</BlueText>
+          <BlueText>Runs offline assertions and live WSS checks against testnet wallet-services.</BlueText>
           <BlueSpacing20 />
-          {state === 'running' ? <ActivityIndicator /> : <Button title={loc.settings.selfTest} onPress={run} />}
+          {running ? <ActivityIndicator /> : <Button title={loc.settings.selfTest} onPress={run} />}
           <BlueSpacing20 />
-          {state === 'ok' && <BlueText>OK</BlueText>}
-          {state === 'fail' && <BlueText>FAIL: {error}</BlueText>}
+          {steps.map((s, i) => (
+            <View key={i} style={styles.row}>
+              <BlueText>
+                {symbolFor(s.status)} {s.label}
+                {s.detail ? `  —  ${s.detail}` : ''}
+              </BlueText>
+            </View>
+          ))}
         </View>
       </SettingsCard>
     </SettingsScrollView>
   );
 };
 
+function symbolFor(status: StepStatus): string {
+  switch (status) {
+    case 'pending':
+      return '·';
+    case 'running':
+      return '…';
+    case 'ok':
+      return '✓';
+    case 'fail':
+      return '✗';
+  }
+}
+
 const styles = StyleSheet.create({
   card: { padding: 16 },
+  row: { paddingVertical: 4 },
 });
 
 export default SelfTest;

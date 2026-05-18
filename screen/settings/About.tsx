@@ -7,7 +7,6 @@ import Icon from '@react-native-vector-icons/fontawesome6';
 import A from '../../blue_modules/analytics';
 import { BlueTextCentered } from '../../BlueComponents';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
-import presentAlert from '../../components/Alert';
 import { BlueSpacing20 } from '../../components/BlueSpacing';
 import {
   SettingsCard,
@@ -18,7 +17,6 @@ import {
   SettingsSectionHeader,
 } from '../../components/platform';
 import { useTheme } from '../../components/themes';
-import { useSettings } from '../../hooks/context/useSettings';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc, { formatStringAddTwoWhiteSpaces } from '../../loc';
 
@@ -32,7 +30,6 @@ interface AboutItem extends SettingsListItemProps {
 
 const About: React.FC = () => {
   const { navigate } = useExtendedNavigation();
-  const { isElectrumDisabled } = useSettings();
   const { colors } = useTheme();
 
   const handleOnReleaseNotesPress = useCallback(() => {
@@ -40,12 +37,8 @@ const About: React.FC = () => {
   }, [navigate]);
 
   const handleOnSelfTestPress = useCallback(() => {
-    if (isElectrumDisabled) {
-      presentAlert({ message: loc.settings.about_selftest_electrum_disabled });
-    } else {
-      navigate('SelfTest');
-    }
-  }, [isElectrumDisabled, navigate]);
+    navigate('SelfTest');
+  }, [navigate]);
 
   const handleOnLicensingPress = useCallback(() => {
     navigate('Licensing');
