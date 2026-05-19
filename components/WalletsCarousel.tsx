@@ -207,9 +207,8 @@ const iStyles = StyleSheet.create({
     lineHeight: 34,
   },
   // Decimal portion smaller than the integer so long balances like
-  // 1045.892327832 XNA still fit without truncation. Bumped a notch because
-  // `adjustsFontSizeToFit` proportionally shrinks nested Text — the parent's
-  // `minimumFontScale` floors the shrink at 0.7 so this stays legible.
+  // 1045.892327832 XNA still fit. Fixed pixel size — see the balance Text:
+  // auto-shrink is disabled so decimals don't jiggle as the value changes.
   balanceDecimal: {
     fontSize: 25,
   },
@@ -521,8 +520,7 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
                           return (
                             <Animated.Text
                               numberOfLines={1}
-                              adjustsFontSizeToFit
-                              minimumFontScale={0.7}
+                              ellipsizeMode="tail"
                               key={`${balance}`} // force component recreation on balance change. To fix right-to-left languages, like Farsi
                               style={[
                                 iStyles.balance,

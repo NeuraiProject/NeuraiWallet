@@ -43,7 +43,6 @@ const TotalWalletsBalance: React.FC = React.memo(() => {
             text: loc.formatString(loc.total_balance_view.display_in_fiat, { currency: preferredFiatCurrency.endPointKey }),
             hidden: totalBalancePreferredUnit === XnaUnit.LOCAL_CURRENCY,
           },
-          { ...CommonToolTipActions.ViewInSats, hidden: totalBalancePreferredUnit === XnaUnit.SATS },
           { ...CommonToolTipActions.ViewInBitcoin, hidden: totalBalancePreferredUnit === XnaUnit.XNA },
         ],
       },
@@ -81,12 +80,10 @@ const TotalWalletsBalance: React.FC = React.memo(() => {
 
   const handleBalanceOnPress = useCallback(async () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    const nextUnit =
-      totalBalancePreferredUnit === XnaUnit.XNA
-        ? XnaUnit.SATS
-        : totalBalancePreferredUnit === XnaUnit.SATS
-          ? XnaUnit.LOCAL_CURRENCY
-          : XnaUnit.XNA;
+    // Neurai has a large coin supply, so SATS produces unwieldy numbers in the
+    // total view. Toggle is XNA <-> fiat only; if a previous build stored SATS,
+    // normalise to XNA.
+    const nextUnit = totalBalancePreferredUnit === XnaUnit.XNA ? XnaUnit.LOCAL_CURRENCY : XnaUnit.XNA;
     await setTotalBalancePreferredUnitStorage(nextUnit);
   }, [totalBalancePreferredUnit, setTotalBalancePreferredUnitStorage]);
 

@@ -200,8 +200,7 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
                         key={`wallet-balance-text-${wallet.getID?.() ?? ''}-${String(balance)}`} // force recreation on balance change for RTL correctness
                         testID="WalletBalance"
                         numberOfLines={1}
-                        minimumFontScale={0.5}
-                        adjustsFontSizeToFit
+                        ellipsizeMode="tail"
                         style={[styles.walletBalanceText, animatedBalanceTextStyle]}
                       >
                         {intPart}
