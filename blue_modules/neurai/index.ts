@@ -24,7 +24,7 @@ export { ElectrumXBackend } from './ElectrumXBackend';
  * otherwise every balance/history refresh throws and pollutes the UI.
  * Flip to `false` once `wallet-main-wss.neurai.org` is up.
  */
-const MAINNET_BACKEND_DISABLED = true;
+const MAINNET_BACKEND_DISABLED = false;
 
 /** Inert backend: returns empty data, no network calls, no errors. Used to
  * neuter mainnet wallets while the mainnet WSS service is not yet deployed. */
