@@ -28,6 +28,7 @@ import GeneralSettings from '../screen/settings/GeneralSettings';
 import PlausibleDeniability from '../screen/PlausibleDeniability';
 import Licensing from '../screen/settings/Licensing';
 import NetworkSettings from '../screen/settings/NetworkSettings';
+import NeuraiBackendEdit from '../screen/settings/NeuraiBackendEdit';
 import SettingsBlockExplorer from '../screen/settings/SettingsBlockExplorer';
 import About from '../screen/settings/About';
 // import DefaultView from '../screen/settings/DefaultView'; // Commented out - not accessible from UI
@@ -334,6 +335,11 @@ const DetailViewStackScreensStack = () => {
           name="NetworkSettings"
           component={NetworkSettings}
           options={navigationStyle(getSettingsHeaderOptions(loc.settings.network))(theme)}
+        />
+        <DetailViewStack.Screen
+          name="NeuraiBackendEdit"
+          component={NeuraiBackendEdit}
+          options={navigationStyle(getSettingsHeaderOptions(loc.settings.neurai_backend_edit_title))(theme)}
         />
         <DetailViewStack.Screen
           name="SettingsBlockExplorer"

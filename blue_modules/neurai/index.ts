@@ -11,12 +11,14 @@ import { CHAIN_PARAMS, NeuraiChainType, NeuraiNetwork, WalletKind, chainFor } fr
 import { ElectrumXBackend } from './ElectrumXBackend';
 import { RpcBackend } from './RpcBackend';
 import { WssBackend } from './WssBackend';
+import { getWssUrlOverride } from './backendOverrides';
 
 export * from './networkConfig';
 export * from './NeuraiBackend';
 export { WssBackend } from './WssBackend';
 export { RpcBackend } from './RpcBackend';
 export { ElectrumXBackend } from './ElectrumXBackend';
+export { loadOverrides, getWssUrlOverride, setWssUrlOverride, isOverridesLoaded } from './backendOverrides';
 
 /**
  * Temporary kill-switch: while the Neurai mainnet wallet-services WSS
@@ -92,7 +94,7 @@ export function createDefaultBackend(network: NeuraiNetwork, kind: WalletKind): 
   return createBackend({
     kind: 'wss',
     chain,
-    url: params.defaultWssUrl,
+    url: getWssUrlOverride(network) ?? params.defaultWssUrl,
     authToken: params.defaultWssAuthToken,
   });
 }

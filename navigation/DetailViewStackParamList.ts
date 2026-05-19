@@ -2,6 +2,7 @@ import { Transaction, TWallet } from '../class/wallets/types';
 import { XnaUnit, Chain } from '../models/xnaUnits';
 import { PromptPasswordConfirmationParams } from '../screen/PromptPasswordConfirmationSheet.types';
 import { ElectrumServerItem } from '../screen/settings/ElectrumSettings';
+import type { NeuraiNetwork } from '../blue_modules/neurai';
 
 export type ScanQRCodeParamList = {
   cameraStatusGranted?: boolean;
@@ -59,6 +60,7 @@ export type DetailViewStackParamList = {
   GeneralSettings: undefined;
   Licensing: undefined;
   NetworkSettings: undefined;
+  NeuraiBackendEdit: { network: NeuraiNetwork };
   About: undefined;
   ElectrumSettings: { server?: ElectrumServerItem; onBarScanned?: string };
   SettingsBlockExplorer: undefined;

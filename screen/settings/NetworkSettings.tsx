@@ -1,12 +1,26 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc from '../../loc';
-import { SettingsScrollView, SettingsSection, SettingsListItem } from '../../components/platform';
+import {
+  SettingsScrollView,
+  SettingsSection,
+  SettingsSectionHeader,
+  SettingsListItem,
+} from '../../components/platform';
 import { useTheme } from '../../components/themes';
-import { createDefaultBackend } from '../../blue_modules/neurai';
+import {
+  CHAIN_PARAMS,
+  NeuraiNetwork,
+  createDefaultBackend,
+  getWssUrlOverride,
+  loadOverrides,
+} from '../../blue_modules/neurai';
 
 type PingState = { status: 'idle' | 'pinging' | 'ok' | 'fail'; detail?: string };
+
+const stripPort = (url: string): string => url.replace(/:\d+(?=\/|$)/, '');
 
 const NetworkSettings: React.FC = () => {
   const navigation = useExtendedNavigation();
@@ -15,6 +29,14 @@ const NetworkSettings: React.FC = () => {
 
   const [mainnet, setMainnet] = useState<PingState>({ status: 'idle' });
   const [testnet, setTestnet] = useState<PingState>({ status: 'idle' });
+  const [mainnetUrl, setMainnetUrl] = useState<string>(CHAIN_PARAMS.xna.defaultWssUrl);
+  const [testnetUrl, setTestnetUrl] = useState<string>(CHAIN_PARAMS['xna-test'].defaultWssUrl);
+
+  const refreshUrls = useCallback(async () => {
+    await loadOverrides();
+    setMainnetUrl(getWssUrlOverride('mainnet') ?? CHAIN_PARAMS.xna.defaultWssUrl);
+    setTestnetUrl(getWssUrlOverride('testnet') ?? CHAIN_PARAMS['xna-test'].defaultWssUrl);
+  }, []);
 
   const runPing = useCallback(async () => {
     setMainnet({ status: 'pinging' });
@@ -45,12 +67,22 @@ const NetworkSettings: React.FC = () => {
     runPing();
   }, [runPing]);
 
+  useFocusEffect(
+    useCallback(() => {
+      refreshUrls();
+    }, [refreshUrls]),
+  );
+
   const navigateToBlockExplorerSettings = () => {
     navigation.navigate('SettingsBlockExplorer');
   };
 
   const navigateToNotificationSettings = () => {
     navigation.navigate('NotificationSettings');
+  };
+
+  const navigateToBackendEdit = (network: NeuraiNetwork) => {
+    navigation.navigate('NeuraiBackendEdit', { network });
   };
 
   const renderPingRow = (label: string, state: PingState) => {
@@ -86,14 +118,6 @@ const NetworkSettings: React.FC = () => {
           position="first"
         />
 
-        <SettingsListItem
-          title={loc.settings.network_backend}
-          subtitle={loc.settings.network_backend_description}
-          iconName="electrum"
-          testID="NeuraiBackendInfo"
-          position={isNotificationsCapable ? 'middle' : 'last'}
-        />
-
         {isNotificationsCapable && (
           <SettingsListItem
             title={loc.settings.notifications}
@@ -104,6 +128,28 @@ const NetworkSettings: React.FC = () => {
             position="last"
           />
         )}
+      </SettingsSection>
+
+      <SettingsSectionHeader title={loc.settings.network_backend} />
+      <SettingsSection horizontalInset={false}>
+        <SettingsListItem
+          title={loc.wallets.neurai_network_mainnet}
+          subtitle={stripPort(mainnetUrl)}
+          iconName="electrum"
+          onPress={() => navigateToBackendEdit('mainnet')}
+          testID="NeuraiBackendMainnet"
+          chevron
+          position="first"
+        />
+        <SettingsListItem
+          title={loc.wallets.neurai_network_testnet}
+          subtitle={stripPort(testnetUrl)}
+          iconName="electrum"
+          onPress={() => navigateToBackendEdit('testnet')}
+          testID="NeuraiBackendTestnet"
+          chevron
+          position="last"
+        />
       </SettingsSection>
 
       <SettingsSection horizontalInset={false}>
