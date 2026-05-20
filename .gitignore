@@ -109,3 +109,6 @@ android/app/src/main/res/raw/node_modules_*
 # Firebase per-developer config (push notifications). Each developer drops their
 # own google-services.json into android/app/ to enable FCM; do not commit it.
 android/app/google-services.json
+
+# Play Store / app store publishing assets (not part of the app source).
+store/
