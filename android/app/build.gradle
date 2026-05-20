@@ -2,6 +2,14 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+// Load the upload-keystore credentials when present. The real file is gitignored;
+// see android/keystore.properties.example for the schema.
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 /**
  * This is the configuration block to customize your React Native Android app.
  * By default you don't need to apply any configuration, just uncomment the lines you need.
@@ -110,14 +118,22 @@ android {
     }
 
     signingConfigs {
-        // Self-signed key for sideloaded release builds. NOT for Play Store —
-        // generate a proper upload keystore (and keep it off git) when the
-        // release pipeline goes live.
+        // Play Store / production releases. Reads credentials from
+        // android/keystore.properties when present; falls back to the
+        // debug keystore so CI and local builds keep working without
+        // access to the real upload key.
         release {
-            storeFile file('debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
+            if (keystoreProperties['NEURAI_UPLOAD_STORE_FILE']) {
+                storeFile file(keystoreProperties['NEURAI_UPLOAD_STORE_FILE'])
+                storePassword keystoreProperties['NEURAI_UPLOAD_STORE_PASSWORD']
+                keyAlias keystoreProperties['NEURAI_UPLOAD_KEY_ALIAS']
+                keyPassword keystoreProperties['NEURAI_UPLOAD_KEY_PASSWORD']
+            } else {
+                storeFile file('debug.keystore')
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
         }
         // Override AGP's default ~/.android/debug.keystore so debug builds
         // share a signature with the sideloaded release APK and can update

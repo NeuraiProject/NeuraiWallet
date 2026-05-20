@@ -112,3 +112,7 @@ android/app/google-services.json
 
 # Play Store / app store publishing assets (not part of the app source).
 store/
+
+# Upload keystore credentials (the `.example` file is committed, the real one
+# with passwords is not). The `.keystore` itself is already ignored above.
+android/keystore.properties
