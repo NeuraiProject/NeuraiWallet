@@ -1,4 +1,4 @@
-package org.neurai.wallet.components.segmentedcontrol
+package org.neurai.neuraiwallet.components.segmentedcontrol
 
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule

@@ -1,4 +1,4 @@
-package org.neurai.wallet
+package org.neurai.neuraiwallet
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -7,7 +7,7 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.Promise
 import com.facebook.react.module.annotations.ReactModule
-import org.neurai.wallet.NativeSettingsModuleSpec
+import org.neurai.neuraiwallet.NativeSettingsModuleSpec
 
 @ReactModule(name = SettingsModule.NAME)
 class SettingsModule(reactContext: ReactApplicationContext) : NativeSettingsModuleSpec(reactContext) {

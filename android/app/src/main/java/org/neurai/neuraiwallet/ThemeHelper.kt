@@ -1,4 +1,4 @@
-package org.neurai.wallet
+package org.neurai.neuraiwallet
 
 import android.content.Context
 import android.content.res.Configuration

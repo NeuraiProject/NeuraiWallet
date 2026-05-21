@@ -1,4 +1,4 @@
-package org.neurai.wallet
+package org.neurai.neuraiwallet
 
 import android.os.Bundle
 import android.util.Log

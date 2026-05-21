@@ -1,4 +1,4 @@
-package org.neurai.wallet.components.segmentedcontrol
+package org.neurai.neuraiwallet.components.segmentedcontrol
 
 import android.content.Context
 import android.content.res.ColorStateList
@@ -13,7 +13,7 @@ import com.facebook.react.uimanager.UIManagerHelper
 import com.facebook.react.uimanager.events.Event
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
-import org.neurai.wallet.R
+import org.neurai.neuraiwallet.R
 
 class SegmentedControl @JvmOverloads constructor(
     context: Context,

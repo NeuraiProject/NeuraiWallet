@@ -11,7 +11,7 @@
     "type": "all",
     "jsSrcsDir": "./codegen",
     "android": {
-      "javaPackageName": "org.neurai.wallet"
+      "javaPackageName": "org.neurai.neuraiwallet"
     }
   },
   "devDependencies": {
@@ -64,11 +64,11 @@
     "branch2json": "./scripts/current-branch.sh > current-branch.json",
     "start": "react-native start",
     "android": "react-native run-android",
-    "android:relaunch": "adb shell am force-stop org.neurai.wallet; adb shell monkey -p org.neurai.wallet -c android.intent.category.LAUNCHER 1",
-    "android:uninstall": "adb uninstall org.neurai.wallet",
+    "android:relaunch": "adb shell am force-stop org.neurai.neuraiwallet; adb shell monkey -p org.neurai.neuraiwallet -c android.intent.category.LAUNCHER 1",
+    "android:uninstall": "adb uninstall org.neurai.neuraiwallet",
     "adb": "adb reverse tcp:8081 tcp:8081",
     "android:clean": "cd android;  ./gradlew clean ; cd .. ; rm -r -f android/app/.cxx; npm run android",
-    "android:restart": "adb shell am force-stop org.neurai.wallet; adb shell monkey -p org.neurai.wallet -c android.intent.category.LAUNCHER 1",
+    "android:restart": "adb shell am force-stop org.neurai.neuraiwallet; adb shell monkey -p org.neurai.neuraiwallet -c android.intent.category.LAUNCHER 1",
     "ios": "react-native run-ios",
     "postinstall": "npm run releasenotes2json; npm run branch2json; npm run patches",
     "patches": "npx patch-package",

@@ -89,9 +89,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdkVersion rootProject.ext.compileSdkVersion
 
-    namespace "org.neurai.wallet"
+    namespace "org.neurai.neuraiwallet"
     defaultConfig {
-        applicationId "org.neurai.wallet"
+        applicationId "org.neurai.neuraiwallet"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // versionCode is the Unix timestamp of the build (NeuraiWallet legacy

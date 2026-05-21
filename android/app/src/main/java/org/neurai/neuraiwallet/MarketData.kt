@@ -1,4 +1,4 @@
-package org.neurai.wallet
+package org.neurai.neuraiwallet
 
 import android.util.Log
 import java.text.NumberFormat

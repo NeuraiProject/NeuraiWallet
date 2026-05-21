@@ -26,7 +26,7 @@ const NEURAI_ADAPTATION_NOTES: string[] = [
   'Receive screen polls the Neurai backend every 5 seconds for incoming payments and switches to a success view as soon as funds land.',
   'Wallet list and transaction history auto-refresh every 10 seconds; pull-to-refresh remains for manual sync.',
   'Bitcoin / Lightning / Multisig / Watch-only / BIP47 flows removed; navigation, types and storage trimmed accordingly.',
-  'Bundle ID and Android namespace changed to org.neurai.wallet; launcher icons regenerated from the Neurai logo.',
+  'Bundle ID and Android namespace changed to org.neurai.neuraiwallet; launcher icons regenerated from the Neurai logo.',
   'BlueElectrum, GroundControl push notifications, NeuraiWallet Bugsnag and Firebase Cloud Messaging dependencies removed.',
   'Hermes runtime polyfills added (Uint8Array.prototype.equals, Buffer.prototype.subarray) so the post-quantum signer works on React Native.',
   'Settings > Tools restored with two NeuraiWallet-native tools: raw transaction broadcaster and BIP39 final-word completer.',

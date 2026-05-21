@@ -1,4 +1,4 @@
-package org.neurai.wallet
+package org.neurai.neuraiwallet
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
@@ -13,7 +13,7 @@ import androidx.work.WorkManager
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
-import org.neurai.wallet.ElectrumClient.ElectrumServer
+import org.neurai.neuraiwallet.ElectrumClient.ElectrumServer
 
 class MarketWidget : AppWidgetProvider() {
 

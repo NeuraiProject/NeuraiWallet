@@ -35,12 +35,12 @@ android_library(
 
 android_build_config(
     name = "build_config",
-    package = "org.neurai.wallet",
+    package = "org.neurai.neuraiwallet",
 )
 
 android_resource(
     name = "res",
-    package = "org.neurai.wallet",
+    package = "org.neurai.neuraiwallet",
     res = "src/main/res",
 )
 

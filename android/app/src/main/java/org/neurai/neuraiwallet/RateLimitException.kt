@@ -1,4 +1,4 @@
-package org.neurai.wallet
+package org.neurai.neuraiwallet
 
 /**
  * Exception thrown when an API rate limit is encountered

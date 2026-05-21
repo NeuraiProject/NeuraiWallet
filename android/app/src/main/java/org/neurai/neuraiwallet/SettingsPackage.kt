@@ -1,4 +1,4 @@
-package org.neurai.wallet
+package org.neurai.neuraiwallet
 
 import com.facebook.react.TurboReactPackage
 import com.facebook.react.bridge.NativeModule
