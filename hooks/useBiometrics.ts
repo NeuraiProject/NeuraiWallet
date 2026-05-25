@@ -16,9 +16,15 @@ const Biometrics = 'Biometrics';
 
 const clearKeychain = async () => {
   try {
+    const emptyStorage = JSON.stringify({
+      wallets: [],
+      tx_metadata: {},
+      counterparty_metadata: {},
+    });
+
     console.debug('Wiping keychain');
     console.debug('Wiping key: data');
-    await RNSecureKeyStore.set('data', JSON.stringify({ data: { wallets: [] } }), {
+    await RNSecureKeyStore.set('data', emptyStorage, {
       accessible: ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
     });
     console.debug('Wiped key: data');

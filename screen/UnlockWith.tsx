@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useReducer, useRef } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Alert,
   Dimensions,
   Easing,
   Image,
@@ -12,7 +13,7 @@ import {
   View,
 } from 'react-native';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../blue_modules/hapticFeedback';
-import { BlueTextCentered } from '../BlueComponents';
+import { BlueButtonLink, BlueTextCentered } from '../BlueComponents';
 import Button from '../components/Button';
 import SafeArea from '../components/SafeArea';
 import { BiometricType, unlockWithBiometrics, useBiometrics } from '../hooks/useBiometrics';
@@ -86,7 +87,7 @@ const UnlockWith: React.FC = () => {
   const passwordInputRef = useRef<PasswordInputHandle>(null);
   const passwordResolveRef = useRef<((password: string | undefined) => void) | null>(null);
   const { setWalletsInitialized, isStorageEncrypted, startAndDecrypt } = useStorage();
-  const { deviceBiometricType, isBiometricUseCapableAndEnabled, isBiometricUseEnabled } = useBiometrics();
+  const { deviceBiometricType, isBiometricUseCapableAndEnabled, isBiometricUseEnabled, clearKeychain } = useBiometrics();
 
   useEffect(() => {
     setWalletsInitialized(false);
@@ -237,6 +238,25 @@ const UnlockWith: React.FC = () => {
     }
   };
 
+  const confirmStartFresh = useCallback(() => {
+    Alert.alert(
+      loc.settings.reset_storage_title,
+      loc.settings.reset_storage_message,
+      [
+        { text: loc._.cancel, style: 'cancel' },
+        {
+          text: loc.settings.reset_storage_confirm,
+          style: 'destructive',
+          onPress: async () => {
+            await clearKeychain();
+            successfullyAuthenticated();
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  }, [clearKeychain, successfullyAuthenticated]);
+
   const renderUnlockOptions = () => {
     if (state.isAuthenticating && !state.showPasswordInput) {
       return <ActivityIndicator />;
@@ -265,6 +285,8 @@ const UnlockWith: React.FC = () => {
                 title={loc._.unlock}
                 disabled={state.password.length === 0}
               />
+              <View style={styles.linkSpacing} />
+              <BlueButtonLink testID="StartFreshButton" title={loc.settings.reset_storage_button} onPress={confirmStartFresh} />
             </>
           )}
         </View>
@@ -334,6 +356,9 @@ const styles = StyleSheet.create({
   },
   buttonSpacing: {
     height: 16,
+  },
+  linkSpacing: {
+    height: 10,
   },
 });
 
