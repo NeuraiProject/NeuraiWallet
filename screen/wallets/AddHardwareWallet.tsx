@@ -11,6 +11,7 @@ import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/h
 import { useStorage } from '../../hooks/context/useStorage';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
+import { deriveLegacyAddress } from '../../blue_modules/neurai-hw/xpubDerivation';
 import { useNeuraiHwDevice } from '../../blue_modules/neurai-hw/useNeuraiHwDevice';
 import loc from '../../loc';
 
@@ -49,16 +50,33 @@ const AddHardwareWallet: React.FC = () => {
       if (!device) throw new Error(error || loc.errors.error);
 
       const info = await device.getInfo();
-      if ((info.key_type ?? 'legacy') !== 'pq') {
-        throw new Error(loc.wallets.hardware_only_pq);
+      const isPQ = (info.key_type ?? 'legacy') === 'pq';
+      const wallet = new NeuraiHardwareWallet();
+
+      if (isPQ) {
+        // PQ: a single address. `get_address` carries the pubkey + commitment.
+        const addr = await device.getAddress(); // user confirms on the device
+        wallet.setFromDeviceInfo(info, addr);
+      } else {
+        // Legacy: import the account xpub and manage addresses with HD derivation.
+        const bip32 = await device.getBip32Pubkey(); // user confirms on the device
+        const addr = {
+          status: 'success',
+          type: 'legacy' as const,
+          address: info.address,
+          pubkey: info.pubkey,
+          path: info.path,
+        };
+        wallet.setFromDeviceInfo(info, addr, bip32);
+        // Validate the whole derivation pipeline against the device: the address
+        // derived from the xpub at 0/0 must equal the device's own address.
+        const check = deriveLegacyAddress(wallet.xpub, wallet.network, 0, 0);
+        if (check.address !== info.address) {
+          throw new Error(loc.wallets.hardware_derivation_mismatch);
+        }
       }
-      // Requires the user to confirm on the device; returns the PQ address,
-      // pubkey, commitment, witnessScript and authType.
-      const addr = await device.getAddress();
       await disconnect().catch(() => {});
 
-      const wallet = new NeuraiHardwareWallet();
-      wallet.setFromDeviceInfo(info, addr);
       if (!wallet.address) throw new Error(loc.wallets.hardware_no_address);
 
       // Stage the wallet for review; it is only persisted when the user taps Add.
@@ -118,7 +136,7 @@ const AddHardwareWallet: React.FC = () => {
           <BlueFormLabel>{loc.wallets.hardware_review_title}</BlueFormLabel>
           <View style={[styles.card, stylesHook.card]}>
             {renderField(loc.wallets.hardware_field_network, networkLabel(pending.network))}
-            {renderField(loc.wallets.hardware_field_type, 'Post-Quantum (ML-DSA-44)')}
+            {renderField(loc.wallets.hardware_field_type, pending.keyType === 'pq' ? 'Post-Quantum (ML-DSA-44)' : 'Legacy (ECDSA P2PKH)')}
             {renderField(loc.wallets.hardware_field_address, pending.address)}
             {renderField(loc.wallets.hardware_field_path, pending.hwPath)}
             {renderField(loc.wallets.hardware_field_fingerprint, pending.hwFingerprint)}
