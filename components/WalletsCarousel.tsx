@@ -23,6 +23,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import LinearGradient from 'react-native-linear-gradient';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import WalletGradient from '../class/wallet-gradient';
 import { useSizeClass, SizeClass } from '../blue_modules/sizeClass';
 import loc, { formatBalance, transactionTimeToReadable } from '../loc';
@@ -263,6 +264,27 @@ const iStyles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.5,
   },
+  kindBadgeColor: {
+    backgroundColor: '#dc2626',
+  },
+  hwBadge: {
+    position: 'absolute',
+    bottom: 10,
+    right: 12,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
+  hwBadgeCompact: {
+    bottom: 8,
+    right: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
   latestTx: {
     backgroundColor: 'transparent',
     fontSize: 13,
@@ -474,14 +496,13 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
                 </View>
               )}
               {isNeuraiWallet(item) && !isPlaceHolder && (
-                <View
-                  style={[
-                    iStyles.kindBadge,
-                    isCompact && iStyles.kindBadgeCompact,
-                    { backgroundColor: '#dc2626' },
-                  ]}
-                >
+                <View style={[iStyles.kindBadge, iStyles.kindBadgeColor, isCompact && iStyles.kindBadgeCompact]}>
                   <Text style={iStyles.kindBadgeText}>{item.walletKind === 'pq' ? 'PQ' : 'HD'}</Text>
+                </View>
+              )}
+              {isNeuraiWallet(item) && !isPlaceHolder && item.use_with_hardware_wallet && (
+                <View style={[iStyles.hwBadge, isCompact && iStyles.hwBadgeCompact]}>
+                  <MaterialIcons name="memory" size={isCompact ? 16 : 20} color="rgba(255, 255, 255, 0.92)" />
                 </View>
               )}
               <View style={[iStyles.gradContent, isCompact && iStyles.gradContentCompact]}>
