@@ -212,10 +212,14 @@ const GeneralSettings: React.FC = () => {
         title: loc.settings.pq_address_reuse,
         subtitle: <SettingsSubtitle>{loc.settings.pq_address_reuse_explanation}</SettingsSubtitle>,
         // PQ address reuse is mandatory for now: always on and not editable.
+        // Shown ON with a muted/greyish green so it reads as locked-on, distinct
+        // from the regular (vivid) active switches.
         switch: {
           value: true,
           onValueChange: () => {},
           disabled: true,
+          trackColor: { false: '#8aab8a', true: '#8aab8a' },
+          thumbColor: '#ececec',
         },
         testID: 'PQAddressReuseSwitch',
         Component: View,
