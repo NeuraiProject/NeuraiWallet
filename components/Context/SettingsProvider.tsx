@@ -102,6 +102,30 @@ export const setIsPQAddressReuseEnabledStorageFunc = async (value: boolean): Pro
   }
 };
 
+export type ThemeMode = 'system' | 'light' | 'dark';
+
+const THEME_MODE_KEY = 'THEME_MODE';
+
+export const getThemeMode = async (): Promise<ThemeMode> => {
+  try {
+    await DefaultPreference.setName(GROUP_IO_BLUEWALLET);
+    const value = await DefaultPreference.get(THEME_MODE_KEY);
+    return value === 'light' || value === 'dark' ? value : 'system';
+  } catch (e) {
+    console.error('Error getting ThemeMode:', e);
+    return 'system';
+  }
+};
+
+export const setThemeModeStorageFunc = async (value: ThemeMode): Promise<void> => {
+  try {
+    await DefaultPreference.setName(GROUP_IO_BLUEWALLET);
+    await DefaultPreference.set(THEME_MODE_KEY, value);
+  } catch (e) {
+    console.error('Error setting ThemeMode:', e);
+  }
+};
+
 interface SettingsContextType {
   preferredFiatCurrency: TFiatUnit;
   setPreferredFiatCurrencyStorage: (currency: TFiatUnit) => Promise<void>;
@@ -133,6 +157,8 @@ interface SettingsContextType {
   setIsElectrumDisabled: (value: boolean) => void;
   isPQAddressReuseEnabled: boolean;
   setIsPQAddressReuseEnabledStorage: (value: boolean) => Promise<void>;
+  themeMode: ThemeMode;
+  setThemeModeStorage: (value: ThemeMode) => Promise<void>;
 }
 
 const defaultSettingsContext: SettingsContextType = {
@@ -166,6 +192,8 @@ const defaultSettingsContext: SettingsContextType = {
   setIsElectrumDisabled: () => {},
   isPQAddressReuseEnabled: true,
   setIsPQAddressReuseEnabledStorage: async () => {},
+  themeMode: 'system',
+  setThemeModeStorage: async () => {},
 };
 
 export const SettingsContext = createContext<SettingsContextType>(defaultSettingsContext);
@@ -186,6 +214,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
   const [selectedTestnetBlockExplorer, setSelectedTestnetBlockExplorer] = useState<BlockExplorer>(BLOCK_EXPLORERS.testnet);
   const [isElectrumDisabled, setIsElectrumDisabled] = useState<boolean>(true);
   const [isPQAddressReuseEnabled, setIsPQAddressReuseEnabled] = useState<boolean>(true);
+  const [themeMode, setThemeMode] = useState<ThemeMode>('system');
 
   const { walletsInitialized } = useStorage();
 
@@ -238,8 +267,13 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
           const predefinedExplorer = Object.values(BLOCK_EXPLORERS).find(explorer => normalizeUrl(explorer.url) === normalizeUrl(url));
           setSelectedTestnetBlockExplorer(predefinedExplorer ?? BLOCK_EXPLORERS.testnet);
         }),
-        getIsPQAddressReuseEnabled().then(enabled => {
-          setIsPQAddressReuseEnabled(enabled);
+        getIsPQAddressReuseEnabled().then(() => {
+          // PQ address reuse is mandatory for now: always on regardless of any
+          // previously stored value, and not user-editable (see GeneralSettings).
+          setIsPQAddressReuseEnabled(true);
+        }),
+        getThemeMode().then(mode => {
+          setThemeMode(mode);
         }),
       ];
 
@@ -384,6 +418,15 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
     }
   }, []);
 
+  const setThemeModeStorage = useCallback(async (value: ThemeMode): Promise<void> => {
+    try {
+      await setThemeModeStorageFunc(value);
+      setThemeMode(value);
+    } catch (e) {
+      console.error('Error setting themeMode:', e);
+    }
+  }, []);
+
   const setBlockExplorerStorage = useCallback(async (explorer: BlockExplorer): Promise<boolean> => {
     try {
       const success = await saveBlockExplorer(explorer.url);
@@ -442,6 +485,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
       setIsElectrumDisabled,
       isPQAddressReuseEnabled,
       setIsPQAddressReuseEnabledStorage,
+      themeMode,
+      setThemeModeStorage,
     }),
     [
       preferredFiatCurrency,
@@ -473,6 +518,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
       isElectrumDisabled,
       isPQAddressReuseEnabled,
       setIsPQAddressReuseEnabledStorage,
+      themeMode,
+      setThemeModeStorage,
     ],
   );
 

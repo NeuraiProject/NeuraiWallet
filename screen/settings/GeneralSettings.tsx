@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Platform, View, ListRenderItem } from 'react-native';
 import { openSettings } from 'react-native-permissions';
 import loc from '../../loc';
+import presentAlert from '../../components/Alert';
 import { useStorage } from '../../hooks/context/useStorage';
 import { useSettings } from '../../hooks/context/useSettings';
 import { isDesktop } from '../../blue_modules/environment';
@@ -45,8 +46,8 @@ const GeneralSettings: React.FC = () => {
     setIsTotalBalanceEnabledStorage,
     isHandOffUseEnabled,
     setIsHandOffUseEnabledAsyncStorage,
-    isPQAddressReuseEnabled,
-    setIsPQAddressReuseEnabledStorage,
+    themeMode,
+    setThemeModeStorage,
   } = useSettings();
   const [isLoading, setIsLoading] = useState<number>(SettingsPrivacySection.All);
   const [storageIsEncrypted, setStorageIsEncrypted] = useState<boolean>(true);
@@ -121,8 +122,40 @@ const GeneralSettings: React.FC = () => {
     [setIsHandOffUseEnabledAsyncStorage],
   );
 
+  const onThemePress = useCallback(() => {
+    presentAlert({
+      title: loc.settings.theme,
+      message: loc.settings.theme_explanation,
+      buttons: [
+        { text: loc.settings.theme_system, onPress: () => setThemeModeStorage('system') },
+        { text: loc.settings.theme_light, onPress: () => setThemeModeStorage('light') },
+        { text: loc.settings.theme_dark, onPress: () => setThemeModeStorage('dark') },
+        { text: loc._.cancel, style: 'cancel', onPress: () => {} },
+      ],
+    });
+  }, [setThemeModeStorage]);
+
+  const themeLabel =
+    themeMode === 'dark' ? loc.settings.theme_dark : themeMode === 'light' ? loc.settings.theme_light : loc.settings.theme_system;
+
   const settingsItems = useCallback(() => {
     const items: SettingItem[] = [
+      {
+        id: 'appearanceSectionHeader',
+        title: '',
+        subtitle: '',
+        section: loc.settings.appearance,
+        showItem: true,
+      },
+      {
+        id: 'themeMode',
+        title: loc.settings.theme,
+        subtitle: <SettingsSubtitle>{themeLabel}</SettingsSubtitle>,
+        onPress: onThemePress,
+        chevron: true,
+        testID: 'ThemeModeSetting',
+        showItem: true,
+      },
       {
         id: 'privacySectionHeader',
         title: '',
@@ -178,10 +211,11 @@ const GeneralSettings: React.FC = () => {
         id: 'pqAddressReuse',
         title: loc.settings.pq_address_reuse,
         subtitle: <SettingsSubtitle>{loc.settings.pq_address_reuse_explanation}</SettingsSubtitle>,
+        // PQ address reuse is mandatory for now: always on and not editable.
         switch: {
-          value: isPQAddressReuseEnabled,
-          onValueChange: setIsPQAddressReuseEnabledStorage,
-          disabled: isLoading === SettingsPrivacySection.All,
+          value: true,
+          onValueChange: () => {},
+          disabled: true,
         },
         testID: 'PQAddressReuseSwitch',
         Component: View,
@@ -281,8 +315,8 @@ const GeneralSettings: React.FC = () => {
     openApplicationSettings,
     isHandOffUseEnabled,
     onHandOffUseEnabledChange,
-    isPQAddressReuseEnabled,
-    setIsPQAddressReuseEnabledStorage,
+    themeLabel,
+    onThemePress,
   ]);
 
   const renderItem: ListRenderItem<SettingItem> = useCallback(
