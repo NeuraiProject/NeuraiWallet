@@ -535,6 +535,24 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   }
 
   /**
+   * The set of addresses this wallet watches for balance/history/UTXO. Default
+   * is the engine's derived address window. Subclasses that have no engine
+   * (e.g. an external-signing hardware wallet that only knows its own address)
+   * override this to provide their address(es) without bootstrapping an engine.
+   */
+  protected async _walletAddresses(): Promise<string[]> {
+    const engine = await this.ensureEngine();
+    return engine.getAddresses();
+  }
+
+  /** Base currency code used to interpret history deltas. Defaults to the
+   * engine's; engine-less subclasses override it. */
+  protected async _walletBaseCurrency(): Promise<string> {
+    const engine = await this.ensureEngine();
+    return engine.getBaseCurrency();
+  }
+
+  /**
    * Initialise the engine without waiting for any blocking operation.
    * Safe to call right after `generate()`/`setSecret()` so callers that need
    * synchronous address access (carousels, QR display) can read the cached
@@ -583,8 +601,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   // `_utxo` (inherited from AbstractWallet) so existing consumers keep working.
 
   async fetchUtxo(): Promise<void> {
-    const engine = await this.ensureEngine();
-    const utxos = await this.getBackend().getUtxos(engine.getAddresses());
+    const utxos = await this.getBackend().getUtxos(await this._walletAddresses());
     this._utxo = utxos.map(u => ({
       height: u.height ?? 0,
       address: u.address,
@@ -651,8 +668,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   // ---------- balance / history ----------------------------------------------------
 
   async fetchBalance(): Promise<void> {
-    const engine = await this.ensureEngine();
-    const addresses = engine.getAddresses();
+    const addresses = await this._walletAddresses();
     const backend = this.getBackend();
     this._notifyBackendAddresses(backend, addresses);
     const xnaBalance = await backend.getBalance(addresses);
@@ -680,14 +696,13 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   }
 
   async fetchTransactions(): Promise<void> {
-    const engine = await this.ensureEngine();
-    const addresses = engine.getAddresses();
+    const addresses = await this._walletAddresses();
     const backend = this.getBackend();
     this._notifyBackendAddresses(backend, addresses);
     const [rawDeltas, tipHeight] = await Promise.all([backend.getAddressHistory(addresses), backend.getTipHeight().catch(() => 0)]);
     const deltas = rawDeltas as unknown as IDelta[];
     await yieldToEventLoop();
-    const baseCurrency = engine.getBaseCurrency();
+    const baseCurrency = await this._walletBaseCurrency();
     const items = await getHistoryYielding(deltas, baseCurrency);
     await yieldToEventLoop();
 

@@ -1,0 +1,44 @@
+diff --git a/node_modules/react-native-usb-serialport-for-android/android/src/main/java/com/bastengao/usbserialport/UsbSerialportForAndroidModule.java b/node_modules/react-native-usb-serialport-for-android/android/src/main/java/com/bastengao/usbserialport/UsbSerialportForAndroidModule.java
+index 7e20282..181b760 100644
+--- a/node_modules/react-native-usb-serialport-for-android/android/src/main/java/com/bastengao/usbserialport/UsbSerialportForAndroidModule.java
++++ b/node_modules/react-native-usb-serialport-for-android/android/src/main/java/com/bastengao/usbserialport/UsbSerialportForAndroidModule.java
+@@ -18,6 +18,8 @@ import com.facebook.react.bridge.WritableArray;
+ import com.facebook.react.bridge.WritableMap;
+ import com.facebook.react.module.annotations.ReactModule;
+ import com.facebook.react.modules.core.DeviceEventManagerModule;
++import com.hoho.android.usbserial.driver.CdcAcmSerialDriver;
++import com.hoho.android.usbserial.driver.ProbeTable;
+ import com.hoho.android.usbserial.driver.UsbSerialDriver;
+ import com.hoho.android.usbserial.driver.UsbSerialPort;
+ import com.hoho.android.usbserial.driver.UsbSerialProber;
+@@ -130,6 +132,15 @@ public class UsbSerialportForAndroidModule extends ReactContextBaseJavaModule im
+         }
+ 
+         UsbSerialDriver driver = UsbSerialProber.getDefaultProber().probeDevice(device);
++        if (driver == null) {
++            // The default probe table does not recognise some native-USB-CDC
++            // devices such as the ESP32-S3 (Espressif VID 0x303a, used by the
++            // LilyGo T-Display-S3 / NeuraiHW). Fall back to the generic CDC ACM
++            // driver for this specific device.
++            ProbeTable customTable = new ProbeTable();
++            customTable.addProduct(device.getVendorId(), device.getProductId(), CdcAcmSerialDriver.class);
++            driver = new UsbSerialProber(customTable).probeDevice(device);
++        }
+         if (driver == null) {
+             promise.reject(CODE_DRIVER_NOT_FOND, "no driver for device");
+             return;
+@@ -153,6 +164,14 @@ public class UsbSerialportForAndroidModule extends ReactContextBaseJavaModule im
+         try {
+             port.open(connection);
+             port.setParameters(baudRate, dataBits, stopBits, parity);
++            // The ESP32-S3 native USB CDC only transmits while the host asserts
++            // DTR (its USBCDC treats DTR as "host connected" and drops TX bytes
++            // otherwise). Assert DTR/RTS so the device's responses reach us.
++            // Drivers without modem-control lines throw/ignore harmlessly.
++            try {
++                port.setDTR(true);
++                port.setRTS(true);
++            } catch (Exception ignored) {}
+         } catch (IOException e) {
+             try {
+                  port.close();

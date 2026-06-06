@@ -30,6 +30,8 @@ import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import { useTheme } from '../../components/themes';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
+import { NeuraiHardwareWallet, type NeuraiHwUnsignedSend } from '../../class/wallets/neurai-hardware-wallet';
+import { useNeuraiHwDevice } from '../../blue_modules/neurai-hw/useNeuraiHwDevice';
 import { useSettings } from '../../hooks/context/useSettings';
 import { useStorage } from '../../hooks/context/useStorage';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
@@ -70,12 +72,35 @@ const SendNeurai: React.FC = () => {
   const { params } = useRoute<RouteProps>();
   const found = wallets.find(w => w.getID() === params.walletID);
   const wallet = isNeuraiWallet(found) ? found : null;
+  const hwWallet = wallet && wallet.type === NeuraiHardwareWallet.type ? (wallet as NeuraiHardwareWallet) : null;
+  const hw = useNeuraiHwDevice();
 
   const [address, setAddress] = useState(params.address ?? '');
   const [amount, setAmount] = useState(params.amount ? String(params.amount) : '');
   const [draft, setDraft] = useState<NeuraiBuildTransactionResult | null>(null);
+  const [hwDraft, setHwDraft] = useState<NeuraiHwUnsignedSend | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isBroadcasting, setIsBroadcasting] = useState(false);
+
+  const resetDrafts = useCallback(() => {
+    setDraft(null);
+    setHwDraft(null);
+  }, []);
+
+  const onChangeAddress = useCallback(
+    (v: string) => {
+      setAddress(v);
+      resetDrafts();
+    },
+    [resetDrafts],
+  );
+  const onChangeAmount = useCallback(
+    (v: string) => {
+      setAmount(v);
+      resetDrafts();
+    },
+    [resetDrafts],
+  );
 
   // Available balance is stored in sats on the wallet; convert to whole XNA
   // for display next to the amount field so the user knows the cap without
@@ -87,12 +112,15 @@ const SendNeurai: React.FC = () => {
   // the popTo path: SendNeurai lives inside the nested DetailViewScreensStack
   // while ScanQRCode is registered at the top-level DetailViewStack, so
   // popTo('SendNeurai') from the modal can't find it across navigators.
-  const handleScanned = useCallback((data: string) => {
-    const parsed = parseScannedPayload(data);
-    if (parsed.address) setAddress(parsed.address);
-    if (parsed.amount) setAmount(parsed.amount);
-    setDraft(null);
-  }, []);
+  const handleScanned = useCallback(
+    (data: string) => {
+      const parsed = parseScannedPayload(data);
+      if (parsed.address) setAddress(parsed.address);
+      if (parsed.amount) setAmount(parsed.amount);
+      resetDrafts();
+    },
+    [resetDrafts],
+  );
 
   const openScanner = useCallback(() => {
     navigate('ScanQRCode', { onBarScanned: handleScanned, showFileImportButton: false });
@@ -111,7 +139,7 @@ const SendNeurai: React.FC = () => {
   const buildDraft = useCallback(async () => {
     if (!wallet) return;
     Keyboard.dismiss();
-    setDraft(null);
+    resetDrafts();
     if (!address.trim()) {
       presentAlert({ message: loc.send.details_address_field_is_not_valid });
       return;
@@ -125,6 +153,22 @@ const SendNeurai: React.FC = () => {
       presentAlert({ message: loc.send.details_amount_field_is_not_valid });
       return;
     }
+
+    // Hardware wallet: build the unsigned PQ transaction now (no device needed);
+    // signing happens on the device in the next step.
+    if (hwWallet) {
+      setIsBuilding(true);
+      try {
+        const unsigned = await hwWallet.buildUnsignedSend(address.trim(), Math.round(xna * 1e8));
+        setHwDraft(unsigned);
+      } catch (err: any) {
+        presentAlert({ message: err?.message ?? String(err) });
+      } finally {
+        setIsBuilding(false);
+      }
+      return;
+    }
+
     const targets: NeuraiTransactionTarget[] = [{ address: address.trim(), amount: xna }];
     setIsBuilding(true);
     try {
@@ -144,7 +188,7 @@ const SendNeurai: React.FC = () => {
     } finally {
       setIsBuilding(false);
     }
-  }, [wallet, address, amount, isPQAddressReuseEnabled]);
+  }, [wallet, hwWallet, address, amount, isPQAddressReuseEnabled, resetDrafts]);
 
   const broadcast = useCallback(async () => {
     if (!draft || !wallet) return;
@@ -156,9 +200,7 @@ const SendNeurai: React.FC = () => {
       // Pull mempool + balance straight away so the wallet list reflects the
       // pending tx by the time we land on it. Failures here are non-fatal —
       // the WalletTransactions auto-poller will catch up within 10 s.
-      Promise.all([wallet.fetchTransactions(), wallet.fetchBalance()]).catch(err =>
-        console.debug('post-broadcast refresh failed:', err),
-      );
+      Promise.all([wallet.fetchTransactions(), wallet.fetchBalance()]).catch(err => console.debug('post-broadcast refresh failed:', err));
       navigate('WalletTransactions', { walletID: wallet.getID(), walletType: wallet.type });
     } catch (err: any) {
       presentAlert({ message: err?.message ?? String(err) });
@@ -166,6 +208,29 @@ const SendNeurai: React.FC = () => {
       setIsBroadcasting(false);
     }
   }, [draft, wallet, navigate]);
+
+  const hwSignAndBroadcast = useCallback(async () => {
+    if (!hwWallet || !hwDraft) return;
+    setIsBroadcasting(true);
+    try {
+      const device = await hw.connect();
+      if (!device) throw new Error(hw.error || 'Could not connect to the hardware device');
+      const { signedHex } = await hwWallet.signWithDevice(device, hwDraft);
+      const txid = await hwWallet.broadcastTx(signedHex);
+      await hw.disconnect().catch(() => {});
+      triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
+      presentAlert({ message: `${loc.send.broadcastSuccess}: ${txid}` });
+      Promise.all([hwWallet.fetchTransactions(), hwWallet.fetchBalance()]).catch(err =>
+        console.debug('post-broadcast refresh failed:', err),
+      );
+      navigate('WalletTransactions', { walletID: hwWallet.getID(), walletType: hwWallet.type });
+    } catch (err: any) {
+      await hw.disconnect().catch(() => {});
+      presentAlert({ message: err?.message ?? String(err) });
+    } finally {
+      setIsBroadcasting(false);
+    }
+  }, [hwWallet, hwDraft, hw, navigate]);
 
   if (!wallet) {
     return (
@@ -185,7 +250,7 @@ const SendNeurai: React.FC = () => {
           value={address}
           placeholderTextColor="#81868e"
           placeholder={loc.send.details_address}
-          onChangeText={setAddress}
+          onChangeText={onChangeAddress}
           autoCapitalize="none"
           autoCorrect={false}
           editable={!isBuilding && !isBroadcasting}
@@ -212,7 +277,7 @@ const SendNeurai: React.FC = () => {
           placeholderTextColor="#81868e"
           placeholder="0.00000000"
           keyboardType="decimal-pad"
-          onChangeText={setAmount}
+          onChangeText={onChangeAmount}
           editable={!isBuilding && !isBroadcasting}
           style={styles.textInput}
           underlineColorAndroid="transparent"
@@ -230,17 +295,26 @@ const SendNeurai: React.FC = () => {
         </Text>
       </Pressable>
 
-      {draft && (
+      {(draft || hwDraft) && (
         <View style={[styles.feeBox, stylesHook.feeBox]}>
           <Text style={styles.feeLabel}>{loc.send.create_fee}</Text>
-          <Text style={styles.feeValue}>{draft.fee} XNA</Text>
+          <Text style={styles.feeValue}>{draft ? draft.fee : (hwDraft!.feeSats / 1e8).toFixed(8)} XNA</Text>
         </View>
       )}
 
       <View style={styles.actions}>
         <BlueSpacing20 />
         {isBuilding || isBroadcasting ? (
-          <ActivityIndicator />
+          <>
+            <ActivityIndicator />
+            {hwWallet && isBroadcasting ? (
+              <Text style={[styles.feeLabel, styles.hwHint]}>
+                {hw.status === 'connecting' ? 'Connect the device and confirm on it…' : 'Signing on device…'}
+              </Text>
+            ) : null}
+          </>
+        ) : hwWallet && hwDraft ? (
+          <Button testID="SendNeuraiHwSign" title="Sign on device & broadcast" onPress={hwSignAndBroadcast} />
         ) : draft ? (
           <Button testID="SendNeuraiBroadcast" title={loc.send.broadcastButton} onPress={broadcast} />
         ) : (
@@ -285,6 +359,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   feeLabel: { fontSize: 12, opacity: 0.6, marginBottom: 4 },
+  hwHint: { textAlign: 'center', marginTop: 8 },
   feeValue: { fontSize: 16, fontWeight: '600' },
   actions: { marginHorizontal: 20 },
 });

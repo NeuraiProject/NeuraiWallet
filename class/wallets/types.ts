@@ -1,6 +1,7 @@
 import { XnaUnit } from '../../models/xnaUnits';
 import { NeuraiHDWallet } from './neurai-hd-wallet';
 import { NeuraiPQWallet } from './neurai-pq-wallet';
+import { NeuraiHardwareWallet } from './neurai-hardware-wallet';
 
 /**
  * Minimal UTXO shape consumed by the legacy abstract-wallet code paths and
@@ -76,4 +77,4 @@ export type ExtendedTransaction = Transaction & {
  * see [class/wallets/abstract-neurai-wallet.ts](abstract-neurai-wallet.ts) for
  * the shared base.
  */
-export type TWallet = NeuraiHDWallet | NeuraiPQWallet;
+export type TWallet = NeuraiHDWallet | NeuraiPQWallet | NeuraiHardwareWallet;

@@ -10,8 +10,11 @@
  */
 import { NeuraiHDWallet } from './neurai-hd-wallet';
 import { NeuraiPQWallet } from './neurai-pq-wallet';
+import { NeuraiHardwareWallet } from './neurai-hardware-wallet';
 
-export function isNeuraiWallet(wallet: { type?: string } | undefined | null): wallet is NeuraiHDWallet | NeuraiPQWallet {
+export function isNeuraiWallet(
+  wallet: { type?: string } | undefined | null,
+): wallet is NeuraiHDWallet | NeuraiPQWallet | NeuraiHardwareWallet {
   if (!wallet) return false;
-  return wallet.type === NeuraiHDWallet.type || wallet.type === NeuraiPQWallet.type;
+  return wallet.type === NeuraiHDWallet.type || wallet.type === NeuraiPQWallet.type || wallet.type === NeuraiHardwareWallet.type;
 }

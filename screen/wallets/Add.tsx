@@ -67,6 +67,7 @@ const WalletsAdd: React.FC = () => {
   }, [walletKind, network, label, addWallet, saveToDisk, navigate]);
 
   const navigateToImportWallet = useCallback(() => navigate('ImportNeurai' as never), [navigate]);
+  const navigateToHardwareWallet = useCallback(() => navigate('NeuraiHwTest' as never), [navigate]);
 
   const networkSegmentValues = NETWORK_OPTIONS.map(n =>
     n === 'mainnet' ? loc.wallets.neurai_network_mainnet : loc.wallets.neurai_network_testnet,
@@ -137,6 +138,12 @@ const WalletsAdd: React.FC = () => {
                 style={styles.import}
                 title={loc.wallets.add_import_wallet}
                 onPress={navigateToImportWallet}
+              />
+              <BlueButtonLink
+                testID="ConnectHardwareWallet"
+                style={styles.import}
+                title="Connect hardware wallet (USB)"
+                onPress={navigateToHardwareWallet}
               />
               <BlueSpacing40 />
             </>

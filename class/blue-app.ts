@@ -11,6 +11,7 @@ import presentAlert from '../components/Alert';
 import { randomBytes } from './rng';
 import { NeuraiHDWallet } from './wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from './wallets/neurai-pq-wallet';
+import { NeuraiHardwareWallet } from './wallets/neurai-hardware-wallet';
 import { ExtendedTransaction, Transaction, TWallet } from './wallets/types';
 import { hexToUint8Array, uint8ArrayToHex } from '../blue_modules/uint8array-extras';
 
@@ -368,6 +369,9 @@ export class BlueApp {
             break;
           case NeuraiPQWallet.type:
             unserializedWallet = NeuraiPQWallet.fromJson(key) as unknown as NeuraiPQWallet;
+            break;
+          case NeuraiHardwareWallet.type:
+            unserializedWallet = NeuraiHardwareWallet.fromJson(key) as unknown as NeuraiHardwareWallet;
             break;
           default:
             // Unknown wallet type — likely a leftover Bitcoin / LN wallet from

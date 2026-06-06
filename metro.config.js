@@ -4,6 +4,13 @@ const path = require('path');
 const resolveAliases = {
   '@arkade-os/sdk/adapters/expo': path.join(__dirname, 'node_modules/@arkade-os/sdk/dist/cjs/adapters/expo.js'),
   'expo/fetch': path.join(__dirname, 'util/expo-fetch.js'),
+  // Metro only matches the "react-native" export condition; the library's
+  // "./react-native" subpath declares only "import", so point Metro straight at
+  // the built file to avoid an unresolved-module error at bundle time.
+  '@neuraiproject/neurai-sign-esp32/react-native': path.join(
+    __dirname,
+    'node_modules/@neuraiproject/neurai-sign-esp32/dist/react-native.js',
+  ),
 };
 
 /**
