@@ -7,20 +7,23 @@ interface SegmentedControlProps {
   selectedIndex: number;
   onChange: (index: number) => void;
   testID?: string;
+  /** When true the whole control is greyed out and non-interactive. */
+  disabled?: boolean;
 }
 
 interface SegmentedControlEvent {
   selectedIndex: number;
 }
 
-const SegmentedControl: React.FC<SegmentedControlProps> = ({ values, selectedIndex, onChange, testID }) => {
+const SegmentedControl: React.FC<SegmentedControlProps> = ({ values, selectedIndex, onChange, testID, disabled = false }) => {
   const handleChange = useCallback(
     (event: NativeSyntheticEvent<SegmentedControlEvent>) => {
+      if (disabled) return;
       if (event?.nativeEvent?.selectedIndex !== undefined) {
         onChange(event.nativeEvent.selectedIndex);
       }
     },
-    [onChange],
+    [onChange, disabled],
   );
 
   if (!Array.isArray(values) || values.length === 0) {
@@ -28,11 +31,11 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({ values, selectedInd
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, disabled && styles.disabled]}>
       <NativeSegmentedControl
         values={values}
         selectedIndex={selectedIndex}
-        enabled
+        enabled={!disabled}
         backgroundColor="transparent"
         momentary={false}
         style={styles.segmentedControl}
@@ -52,6 +55,9 @@ const styles = StyleSheet.create({
   },
   segmentedControl: {
     height: 40,
+  },
+  disabled: {
+    opacity: 0.4,
   },
 });
 

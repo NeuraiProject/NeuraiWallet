@@ -34,7 +34,7 @@ const NETWORK_OPTIONS: NeuraiNetwork[] = ['testnet', 'mainnet'];
 const ImportNeurai: React.FC = () => {
   const { colors } = useTheme();
   const { addWallet, saveToDisk } = useStorage();
-  const { navigate } = useExtendedNavigation();
+  const navigation = useExtendedNavigation();
 
   const [mnemonic, setMnemonic] = useState('');
   const [passphrase, setPassphrase] = useState('');
@@ -74,13 +74,26 @@ const ImportNeurai: React.FC = () => {
       addWallet(wallet);
       await saveToDisk();
       triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
-      navigate('WalletsList', undefined as never);
+      presentAlert({
+        message: loc.wallets.import_success,
+        buttons: [{ text: loc._.ok, style: 'default', onPress: () => navigation.getParent()?.goBack() }],
+        // Keep the dialog up until the user taps OK so the success is noticed.
+        options: { cancelable: false },
+      });
     } catch (err: any) {
       presentAlert({ message: err?.message ?? String(err) });
     } finally {
       setIsImporting(false);
     }
-  }, [mnemonic, passphrase, kind, network, addWallet, saveToDisk, navigate]);
+  }, [mnemonic, passphrase, kind, network, addWallet, saveToDisk, navigation]);
+
+  // PQ wallets exist on testnet only for now: selecting PQ forces Testnet and
+  // greys out the (mainnet-capable) network selector.
+  const onKindChange = useCallback((idx: number) => {
+    const next = KIND_OPTIONS[idx];
+    setKind(next);
+    if (next === 'pq') setNetwork('testnet');
+  }, []);
 
   const kindValues = KIND_OPTIONS.map(k => (k === 'pq' ? 'PQ' : 'Legacy'));
   const networkValues = NETWORK_OPTIONS.map(n =>
@@ -126,7 +139,7 @@ const ImportNeurai: React.FC = () => {
 
       <BlueFormLabel>{loc.wallets.add_wallet_type}</BlueFormLabel>
       <View style={styles.segment}>
-        <SegmentedControl values={kindValues} selectedIndex={KIND_OPTIONS.indexOf(kind)} onChange={idx => setKind(KIND_OPTIONS[idx])} />
+        <SegmentedControl values={kindValues} selectedIndex={KIND_OPTIONS.indexOf(kind)} onChange={onKindChange} />
       </View>
 
       <BlueFormLabel>{loc.wallets.neurai_network_label}</BlueFormLabel>
@@ -135,6 +148,7 @@ const ImportNeurai: React.FC = () => {
           values={networkValues}
           selectedIndex={NETWORK_OPTIONS.indexOf(network)}
           onChange={idx => setNetwork(NETWORK_OPTIONS[idx])}
+          disabled={kind === 'pq'}
         />
       </View>
 
