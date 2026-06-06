@@ -33,7 +33,7 @@ const NETWORK_OPTIONS: NeuraiNetwork[] = ['testnet', 'mainnet'];
 
 const ImportNeurai: React.FC = () => {
   const { colors } = useTheme();
-  const { addWallet, saveToDisk } = useStorage();
+  const { wallets, addWallet, saveToDisk } = useStorage();
   const navigation = useExtendedNavigation();
 
   const [mnemonic, setMnemonic] = useState('');
@@ -59,11 +59,31 @@ const ImportNeurai: React.FC = () => {
       return;
     }
     setIsImporting(true);
+    // Yield a frame so the loading spinner actually paints before the CPU-heavy
+    // key derivation (PQ ML-DSA is ~2s and synchronous) blocks the JS thread —
+    // otherwise the screen looks frozen with no feedback.
+    await new Promise<void>(resolve => setTimeout(resolve, 50));
     try {
       const wallet = kind === 'pq' ? new NeuraiPQWallet() : new NeuraiHDWallet();
       wallet.setNetwork(chainFor(network, kind));
       wallet.setSecret(mnemonicTrimmed);
       if (passphrase) wallet.setPassphrase(passphrase);
+
+      // Refuse to import the same wallet twice. Identity = type + network +
+      // mnemonic + passphrase (same seed on the same chain/kind = same wallet).
+      const normalizedSecret = mnemonicTrimmed.toLowerCase();
+      const alreadyLoaded = wallets.some(
+        w =>
+          w.type === wallet.type &&
+          w.network === wallet.network &&
+          (w.secret || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedSecret &&
+          (w.passphrase || '') === (passphrase || ''),
+      );
+      if (alreadyLoaded) {
+        presentAlert({ message: loc.wallets.import_already_loaded });
+        return;
+      }
+
       // Derive at least one address eagerly so subsequent screens have data.
       try {
         await wallet.getReceiveAddressAsync();
@@ -85,7 +105,7 @@ const ImportNeurai: React.FC = () => {
     } finally {
       setIsImporting(false);
     }
-  }, [mnemonic, passphrase, kind, network, addWallet, saveToDisk, navigation]);
+  }, [mnemonic, passphrase, kind, network, wallets, addWallet, saveToDisk, navigation]);
 
   // PQ wallets exist on testnet only for now: selecting PQ forces Testnet and
   // greys out the (mainnet-capable) network selector.

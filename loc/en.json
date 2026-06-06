@@ -345,6 +345,7 @@
     "import_imported": "Imported",
     "import_scan_qr": "Scan or import a file",
     "import_success": "Your wallet has been successfully imported.",
+    "import_already_loaded": "This wallet is already loaded.",
     "import_search_accounts": "Search accounts",
     "import_title": "Import",
     "list_create_a_button": "Add now",
