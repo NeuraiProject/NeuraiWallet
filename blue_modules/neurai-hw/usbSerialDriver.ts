@@ -57,15 +57,31 @@ export async function listNeuraiHwDevices(): Promise<Device[]> {
   return matches;
 }
 
+const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
 /**
  * Ensure the app has USB permission for the device. The native call shows the
- * Android permission dialog on first use and resolves to `false` until the user
- * grants it, so callers typically retry after the user accepts.
+ * Android permission dialog and resolves to `false` immediately (before the
+ * user taps), so we then poll `hasPermission` until the user grants it (or the
+ * timeout elapses). This makes the first connect succeed without an error on
+ * the initial attempt.
  */
-export async function ensureUsbPermission(deviceId: number): Promise<boolean> {
+export async function ensureUsbPermission(deviceId: number, timeoutMs = 30000): Promise<boolean> {
   if (!isUsbSupported()) return false;
   if (await UsbSerialManager.hasPermission(deviceId)) return true;
-  return UsbSerialManager.tryRequestPermission(deviceId);
+
+  try {
+    if (await UsbSerialManager.tryRequestPermission(deviceId)) return true;
+  } catch {
+    // fall through to polling — the dialog may still have been shown
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    await delay(400);
+    if (await UsbSerialManager.hasPermission(deviceId)) return true;
+  }
+  return false;
 }
 
 /**

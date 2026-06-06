@@ -13,7 +13,7 @@ export type AddWalletStackParamList = {
     walletID: string;
   };
   ImportNeurai: undefined;
-  NeuraiHwTest: undefined;
+  AddHardwareWallet: undefined;
   ScanQRCode: ScanQRCodeParamList;
 };
 
@@ -22,13 +22,13 @@ const Stack = createNativeStackNavigator<AddWalletStackParamList>();
 const WalletsAdd = lazy(() => import('../screen/wallets/Add'));
 const PleaseBackup = lazy(() => import('../screen/wallets/PleaseBackup'));
 const ImportNeurai = lazy(() => import('../screen/wallets/ImportNeurai'));
-const NeuraiHwTest = lazy(() => import('../screen/wallets/NeuraiHwTest'));
+const AddHardwareWallet = lazy(() => import('../screen/wallets/AddHardwareWallet'));
 const ScanQRCode = lazy(() => import('../screen/send/ScanQRCode'));
 
 const AddComponent = withLazySuspense(WalletsAdd);
 const PleaseBackupComponent = withLazySuspense(PleaseBackup);
 const ImportNeuraiComponent = withLazySuspense(ImportNeurai);
-const NeuraiHwTestComponent = withLazySuspense(NeuraiHwTest);
+const AddHardwareWalletComponent = withLazySuspense(AddHardwareWallet);
 const ScanQRCodeComponent = withLazySuspense(ScanQRCode);
 
 const AddWalletStack = () => {
@@ -58,9 +58,9 @@ const AddWalletStack = () => {
         options={navigationStyle({ title: loc.wallets.import_title })(theme)}
       />
       <Stack.Screen
-        name="NeuraiHwTest"
-        component={NeuraiHwTestComponent}
-        options={navigationStyle({ title: 'Hardware wallet (USB)' })(theme)}
+        name="AddHardwareWallet"
+        component={AddHardwareWalletComponent}
+        options={navigationStyle({ title: loc.wallets.hardware_connect_title })(theme)}
       />
       <Stack.Screen
         name="ScanQRCode"

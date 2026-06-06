@@ -37,6 +37,12 @@ const buttonDetails: Record<string, ButtonDetails> = {
     explain: loc.wallets.add_neurai_pq_explain,
     borderColorActive: 'foregroundColor',
   },
+  NeuraiHardware: {
+    image: require('../img/addWallet/neurai.png'),
+    title: loc.wallets.add_neurai_hardware,
+    explain: loc.wallets.add_neurai_hardware_explain,
+    borderColorActive: 'newBlue',
+  },
 };
 
 const WalletButton: React.FC<WalletButtonProps> = ({ buttonType, testID, onPress, size, active, disabled = false }) => {

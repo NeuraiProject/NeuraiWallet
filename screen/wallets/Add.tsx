@@ -67,7 +67,7 @@ const WalletsAdd: React.FC = () => {
   }, [walletKind, network, label, addWallet, saveToDisk, navigate]);
 
   const navigateToImportWallet = useCallback(() => navigate('ImportNeurai' as never), [navigate]);
-  const navigateToHardwareWallet = useCallback(() => navigate('NeuraiHwTest' as never), [navigate]);
+  const navigateToHardwareWallet = useCallback(() => navigate('AddHardwareWallet' as never), [navigate]);
 
   const networkSegmentValues = NETWORK_OPTIONS.map(n =>
     n === 'mainnet' ? loc.wallets.neurai_network_mainnet : loc.wallets.neurai_network_testnet,
@@ -121,11 +121,7 @@ const WalletsAdd: React.FC = () => {
 
         <BlueFormLabel>{loc.wallets.neurai_network_label}</BlueFormLabel>
         <View style={styles.networkRow}>
-          <SegmentedControl
-            values={networkSegmentValues}
-            selectedIndex={selectedNetworkIndex}
-            onChange={onNetworkChange}
-          />
+          <SegmentedControl values={networkSegmentValues} selectedIndex={selectedNetworkIndex} onChange={onNetworkChange} />
         </View>
 
         <View style={styles.advanced}>
@@ -133,17 +129,19 @@ const WalletsAdd: React.FC = () => {
           {!isLoading ? (
             <>
               <Button testID="Create" title={loc.wallets.add_create} onPress={createWallet} />
+              <BlueSpacing20 />
+              <WalletButton
+                buttonType="NeuraiHardware"
+                testID="ConnectHardwareWallet"
+                active={false}
+                onPress={navigateToHardwareWallet}
+                size={styles.button}
+              />
               <BlueButtonLink
                 testID="ImportWallet"
                 style={styles.import}
                 title={loc.wallets.add_import_wallet}
                 onPress={navigateToImportWallet}
-              />
-              <BlueButtonLink
-                testID="ConnectHardwareWallet"
-                style={styles.import}
-                title="Connect hardware wallet (USB)"
-                onPress={navigateToHardwareWallet}
               />
               <BlueSpacing40 />
             </>
