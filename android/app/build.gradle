@@ -97,8 +97,8 @@ android {
         // versionCode is the Unix timestamp of the build (NeuraiWallet legacy
         // convention: the About screen renders `new Date(versionCode * 1000)`).
         // Bump this on each release to keep the timeline correct.
-        versionCode 1779702640
-        versionName "1.0.0"
+        versionCode 1780744417
+        versionName "1.0.1"
         testBuildType System.getProperty('testBuildType', 'debug')
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         // Keep compatibility across react-native-capture-protection flavor changes.
@@ -152,6 +152,12 @@ android {
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             proguardFile "${rootProject.projectDir}/../node_modules/detox/android/detox/proguard-rules-app.pro"
+            // Include native debug symbols in the AAB so Play Console can
+            // symbolicate native (.so) crashes — e.g. the libjsi
+            // valueFromDynamic report. Does not affect the user's download size.
+            ndk {
+                debugSymbolLevel 'FULL'
+            }
         }
     }
 
