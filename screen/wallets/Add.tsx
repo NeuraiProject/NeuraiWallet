@@ -23,7 +23,7 @@ import { BlueSpacing20, BlueSpacing40 } from '../../components/BlueSpacing';
 type WalletKind = 'legacy' | 'pq';
 type NavigationProps = NativeStackNavigationProp<AddWalletStackParamList, 'AddWallet'>;
 
-const NETWORK_OPTIONS: NeuraiNetwork[] = ['testnet', 'mainnet'];
+const NETWORK_OPTIONS: NeuraiNetwork[] = ['mainnet', 'testnet'];
 
 const WalletsAdd: React.FC = () => {
   const { colors } = useTheme();
@@ -32,7 +32,7 @@ const WalletsAdd: React.FC = () => {
 
   const [label, setLabel] = useState('');
   const [walletKind, setWalletKind] = useState<WalletKind>('legacy');
-  const [network, setNetwork] = useState<NeuraiNetwork>('testnet');
+  const [network, setNetwork] = useState<NeuraiNetwork>('mainnet');
   const [isLoading, setIsLoading] = useState(false);
 
   const stylesHook = {
