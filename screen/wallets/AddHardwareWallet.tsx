@@ -50,6 +50,11 @@ const AddHardwareWallet: React.FC = () => {
       if (!device) throw new Error(error || loc.errors.error);
 
       const info = await device.getInfo();
+      // Only accept genuine NeuraiHW firmware (the USB chooser can match any
+      // ESP32-S3, but the device name uniquely identifies our firmware).
+      if (info.device !== 'NeuraiHW') {
+        throw new Error(loc.wallets.hardware_not_neuraihw);
+      }
       const isPQ = (info.key_type ?? 'legacy') === 'pq';
       const wallet = new NeuraiHardwareWallet();
 

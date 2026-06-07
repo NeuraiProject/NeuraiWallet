@@ -407,6 +407,9 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
 
   async signWithDevice(device: NeuraiESP32, unsigned: NeuraiHwUnsignedSend): Promise<{ signedHex: string; txId: string }> {
     const info = await device.getInfo();
+    if (info.device !== 'NeuraiHW') {
+      throw new Error('Connected device is not a NeuraiHW hardware wallet');
+    }
     if (!this.matchesDevice(info)) {
       throw new Error('Connected device does not match this wallet (identity mismatch)');
     }

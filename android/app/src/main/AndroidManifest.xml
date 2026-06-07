@@ -134,6 +134,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Offer NeuraiWallet when a NeuraiHW (ESP32) device is plugged in.
+                 Android shows an "Open with" dialog and auto-grants USB permission
+                 to the app launched this way. Matched VIDs are in res/xml/usb_device_filter. -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_device_filter" />
+
             <!-- Intent filter for opening the app only when .psbt files are selected -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

@@ -299,6 +299,7 @@
     "hardware_only_android": "Hardware wallet is only available on Android.",
     "hardware_no_address": "The device did not return an address.",
     "hardware_already_added": "This hardware wallet is already added.",
+    "hardware_not_neuraihw": "This device is not a NeuraiHW hardware wallet.",
     "hardware_derivation_mismatch": "Address derivation check failed: the account xpub does not match the device address.",
     "hardware_review_title": "Review the wallet on the device",
     "hardware_field_network": "Network",
