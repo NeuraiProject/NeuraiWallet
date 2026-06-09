@@ -49,12 +49,17 @@ const AddHardwareWallet: React.FC = () => {
       const device = await connect();
       if (!device) throw new Error(error || loc.errors.error);
 
-      const info = await device.getInfo();
-      // Only accept genuine NeuraiHW firmware (the USB chooser can match any
-      // ESP32-S3, but the device name uniquely identifies our firmware).
-      if (info.device !== 'NeuraiHW') {
+      // Verify it's genuine NeuraiHW firmware first. `ping` needs no on-device
+      // confirmation, so a non-NeuraiHW ESP32 (the USB chooser can match any
+      // ESP32-S3) is rejected without bothering the owner with the wallet-info
+      // approval prompt.
+      const probe = await device.ping();
+      if (probe.device !== 'NeuraiHW') {
         throw new Error(loc.wallets.hardware_not_neuraihw);
       }
+
+      // Reading the wallet info now requires explicit on-device approval.
+      const info = await device.getInfo();
       const isPQ = (info.key_type ?? 'legacy') === 'pq';
       const wallet = new NeuraiHardwareWallet();
 

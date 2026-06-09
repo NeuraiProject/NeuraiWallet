@@ -301,16 +301,6 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     this._addressStatus = { [this.address]: '' };
   }
 
-  /** True if a freshly-read device identity matches the stored one. */
-  matchesDevice(info: IDeviceInfo, addr?: IAddressResponse): boolean {
-    if (this.hwFingerprint && info.master_fingerprint && info.master_fingerprint !== this.hwFingerprint) {
-      return false;
-    }
-    const devicePubkey = addr?.pubkey || info.pubkey;
-    if (this.pubkey && devicePubkey && devicePubkey !== this.pubkey) return false;
-    return true;
-  }
-
   // ---------- device-signed spending ----------------------------------------------
 
   async buildUnsignedSend(toAddress: string, amountSats: number, feeRate?: number): Promise<NeuraiHwUnsignedSend> {
@@ -406,12 +396,15 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
   }
 
   async signWithDevice(device: NeuraiESP32, unsigned: NeuraiHwUnsignedSend): Promise<{ signedHex: string; txId: string }> {
-    const info = await device.getInfo();
-    if (info.device !== 'NeuraiHW') {
+    // Verify the connected device is genuine NeuraiHW firmware. `ping` needs no
+    // on-device confirmation, so signing stays a single approval (the sign
+    // prompt) rather than an extra "wallet info" consent. We do NOT pre-check
+    // the device identity here: signing is WYSIWYS and bound to the device's own
+    // keys, so a wrong/mismatched device would simply produce a signature that
+    // is invalid for this wallet's UTXOs.
+    const probe = await device.ping();
+    if (probe.device !== 'NeuraiHW') {
       throw new Error('Connected device is not a NeuraiHW hardware wallet');
-    }
-    if (!this.matchesDevice(info)) {
-      throw new Error('Connected device does not match this wallet (identity mismatch)');
     }
 
     if (unsigned.keyType === 'pq') {
