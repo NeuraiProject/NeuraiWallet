@@ -7,6 +7,7 @@ import MaterialIcons from '@react-native-vector-icons/material-icons';
 import WalletGradient from '../class/wallet-gradient';
 import { TWallet } from '../class/wallets/types';
 import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
+import { isTestnetChain } from '../blue_modules/neurai/networkConfig';
 import loc, { formatBalance, formatBalanceWithoutSuffix } from '../loc';
 import { XnaUnit } from '../models/xnaUnits';
 import { FiatUnit } from '../models/fiatUnit';
@@ -222,6 +223,12 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
           </TouchableOpacity>
         </Animated.View>
       </View>
+      {/* Network badge mirroring the wallet card cover: tells mainnet from testnet at a glance. */}
+      {isNeuraiWallet(wallet) && (
+        <View style={styles.chainBadge}>
+          <Text style={styles.chainBadgeText}>{isTestnetChain(wallet.network) ? 'TESTNET' : 'MAINNET'}</Text>
+        </View>
+      )}
       {/* Chip badge mirroring the wallet card cover: marks a hardware-backed wallet. */}
       {isNeuraiWallet(wallet) && wallet.use_with_hardware_wallet && (
         <View style={styles.hwBadge}>
@@ -256,6 +263,8 @@ const styles = StyleSheet.create({
     fontSize: 19,
     color: '#fff',
     marginBottom: 10,
+    // Reserve room so a long label never slides under the top-right network badge.
+    paddingRight: 84,
   },
   walletBalance: {
     flexShrink: 1,
@@ -288,6 +297,22 @@ const styles = StyleSheet.create({
   walletPreferredUnitText: {
     color: '#fff',
     fontWeight: '600',
+  },
+  // Network (MAINNET/TESTNET) badge, mirroring the wallet card cover (chainBadge).
+  chainBadge: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
+  chainBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   // Hardware-wallet chip badge, mirroring the wallet card cover (hwBadge).
   hwBadge: {
