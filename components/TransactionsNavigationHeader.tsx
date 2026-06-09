@@ -3,8 +3,10 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { ImageBackground, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import LinearGradient from 'react-native-linear-gradient';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import WalletGradient from '../class/wallet-gradient';
 import { TWallet } from '../class/wallets/types';
+import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
 import loc, { formatBalance, formatBalanceWithoutSuffix } from '../loc';
 import { XnaUnit } from '../models/xnaUnits';
 import { FiatUnit } from '../models/fiatUnit';
@@ -220,6 +222,12 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
           </TouchableOpacity>
         </Animated.View>
       </View>
+      {/* Chip badge mirroring the wallet card cover: marks a hardware-backed wallet. */}
+      {isNeuraiWallet(wallet) && wallet.use_with_hardware_wallet && (
+        <View style={styles.hwBadge}>
+          <MaterialIcons name="memory" size={20} color="rgba(255, 255, 255, 0.92)" />
+        </View>
+      )}
     </LinearGradient>
   );
 };
@@ -280,6 +288,18 @@ const styles = StyleSheet.create({
   walletPreferredUnitText: {
     color: '#fff',
     fontWeight: '600',
+  },
+  // Hardware-wallet chip badge, mirroring the wallet card cover (hwBadge).
+  hwBadge: {
+    position: 'absolute',
+    bottom: 10,
+    right: 12,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
   },
 });
 
