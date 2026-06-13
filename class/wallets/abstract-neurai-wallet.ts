@@ -16,6 +16,8 @@ import { InteractionManager } from 'react-native';
 import NeuraiJsWallet from '@neuraiproject/neurai-jswallet';
 import NeuraiKey from '@neuraiproject/neurai-key';
 import { type IDelta, type IHistoryItem } from '@neuraiproject/neurai-history-list';
+import { createPaymentTransaction } from '@neuraiproject/neurai-create-transaction';
+import { sign as signNeuraiTransaction } from '@neuraiproject/neurai-sign-transaction';
 
 import {
   CHAIN_PARAMS,
@@ -30,6 +32,7 @@ import {
 } from '../../blue_modules/neurai';
 import type { AddressChangedEvent } from '../../blue_modules/neurai/WssBackend';
 import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
+import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
 import { AbstractWallet } from './abstract-wallet';
 import { Transaction, Utxo } from './types';
 
@@ -37,6 +40,10 @@ type NeuraiEngine = Awaited<ReturnType<typeof NeuraiJsWallet.createInstance>>;
 
 const ONE_FULL_COIN = 1e8;
 const FEE_TARGET_BLOCKS = 6;
+/** A locally-tracked pending send times out after this long if it never
+ * confirms (e.g. dropped or replaced in the mempool) so it stops subtracting
+ * from the displayed balance forever. */
+const PENDING_TX_TTL_MS = 24 * 60 * 60 * 1000;
 const HISTORY_DELTA_BATCH_SIZE = 250;
 const HISTORY_ITEM_BATCH_SIZE = 100;
 const TX_CACHE_BATCH_SIZE = 100;
@@ -141,6 +148,10 @@ export interface NeuraiBuildTransactionResult {
   unsignedHex: string;
   /** Total fee in XNA full units. */
   fee: number;
+  /** Amount sent to the recipient, in satoshis (for display). */
+  sentAmountSats: number;
+  /** Net amount leaving the wallet, in satoshis (amount sent + fee). */
+  netDebitSats: number;
   /** Engine-level debug payload (inputs, outputs, change, etc.). */
   debug: unknown;
 }
@@ -162,6 +173,12 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * disk so the wallet shows its known history before the next RPC fetch.
    * Replaced wholesale on each `fetchTransactions`. */
   protected _txCache: Transaction[];
+  /** Just-broadcast outgoing sends, shown optimistically as 0-conf "pending"
+   * entries and subtracted from the balance until the backend surfaces them
+   * confirmed. Persisted (enumerable) like `_txCache` so a pending send
+   * survives an app restart; reconciled away in `fetchTransactions` once the
+   * real tx confirms, or after {@link PENDING_TX_TTL_MS}. */
+  protected _pendingTxs: Transaction[];
   /** Last `status` hash the server reported per subscribed address.
    * Persisted to disk so the next app launch can call `subscribe.bulk` and
    * skip the heavy refetch when nothing changed while the app was closed —
@@ -189,6 +206,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._lastTxBlockHeight = 0;
     this._historyItems = [];
     this._txCache = [];
+    this._pendingTxs = [];
     this._addressStatus = {};
     this._engine = null;
     this._backend = null;
@@ -226,6 +244,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._lastTxBlockHeight = 0;
     this._historyItems = [];
     this._txCache = [];
+    this._pendingTxs = [];
   }
 
   getNetwork(): NeuraiChainType {
@@ -734,13 +753,80 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     }
     this._historyItems = items;
     this._txCache = txCache;
+    // Reconcile optimistic pending sends against the fresh history: drop any
+    // that have now confirmed (or aged out).
+    this._prunePendingTxs();
     this._lastTxFetch = Date.now();
     this._lastTxBlockHeight = Math.max(tipHeight, this._lastTxBlockHeight, ...items.map(item => item.blockHeight));
     this._persistBackendStatuses();
   }
 
   getTransactions(): Transaction[] {
-    return this._txCache;
+    this._prunePendingTxs();
+    if (this._pendingTxs.length === 0) return this._txCache;
+    // Hide a pending entry once the backend surfaces the same txid (0-conf or
+    // confirmed) so the list never shows a duplicate row for one transaction.
+    const cached = new Set(this._txCache.map(t => t.txid));
+    const stillPending = this._pendingTxs.filter(t => !cached.has(t.txid));
+    if (stillPending.length === 0) return this._txCache;
+    return [...stillPending, ...this._txCache];
+  }
+
+  getUnconfirmedBalance(): number {
+    this._prunePendingTxs();
+    // Pending sends keep subtracting from the balance until they CONFIRM: the
+    // backend's confirmed balance does not drop until the tx is mined, so the
+    // deduction must persist through the mempool / 0-conf window.
+    const pendingDelta = this._pendingTxs.filter(t => !this._isConfirmedInCache(t.txid)).reduce((sum, t) => sum + (t.value ?? 0), 0);
+    if (pendingDelta < 0) {
+      // Take the most-negative of the local delta and any server-reported
+      // unconfirmed value so the same spend is never counted twice (the PQ
+      // push path may already reflect it in `unconfirmed_balance`).
+      return Math.min(this.unconfirmed_balance, pendingDelta);
+    }
+    return this.unconfirmed_balance;
+  }
+
+  /**
+   * Record a just-broadcast outgoing transaction so it shows immediately as a
+   * 0-conf "pending" entry and its value is subtracted from the balance,
+   * without waiting for the backend to index the mempool. Reconciled away in
+   * `fetchTransactions` once the real tx confirms (or after a TTL).
+   * @param txid       broadcast transaction id
+   * @param valueSats  net wallet debit in sats; negative (amount sent + fee)
+   */
+  addPendingTx(txid: string, valueSats: number): void {
+    if (!txid || this._pendingTxs.some(t => t.txid === txid)) return;
+    const nowSec = Math.floor(Date.now() / 1000);
+    this._pendingTxs.unshift({
+      txid,
+      hash: txid,
+      version: 0,
+      size: 0,
+      vsize: 0,
+      weight: 0,
+      locktime: 0,
+      inputs: [],
+      outputs: [],
+      blockhash: '',
+      confirmations: 0,
+      time: nowSec,
+      blocktime: nowSec,
+      timestamp: nowSec,
+      value: valueSats,
+    });
+    emitWalletChanged(this.getID());
+  }
+
+  private _isConfirmedInCache(txid: string): boolean {
+    return this._txCache.some(t => t.txid === txid && t.confirmations > 0);
+  }
+
+  /** Drop pending entries that have CONFIRMED in the cache or aged out (TTL). */
+  private _prunePendingTxs(): void {
+    if (this._pendingTxs.length === 0) return;
+    const cutoffSec = Math.floor((Date.now() - PENDING_TX_TTL_MS) / 1000);
+    this._pendingTxs = this._pendingTxs.filter(t => !this._isConfirmedInCache(t.txid) && t.timestamp >= cutoffSec);
   }
 
   /** Raw history items as returned by `@neuraiproject/neurai-history-list`. */
@@ -770,6 +856,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
         signedHex: result.debug.signedTransaction ?? '',
         unsignedHex: result.debug.rawUnsignedTransaction ?? '',
         fee: result.debug.fee,
+        sentAmountSats: Math.round(result.debug.amount * ONE_FULL_COIN),
+        netDebitSats: Math.round(result.debug.xnaAmount * ONE_FULL_COIN),
         debug: result.debug,
       };
     }
@@ -781,7 +869,73 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       signedHex: result.debug.signedTransaction ?? '',
       unsignedHex: result.debug.rawUnsignedTransaction ?? '',
       fee: result.debug.fee,
+      sentAmountSats: Math.round(result.debug.amount * ONE_FULL_COIN),
+      netDebitSats: Math.round(result.debug.xnaAmount * ONE_FULL_COIN),
       debug: result.debug,
+    };
+  }
+
+  /**
+   * Build a signed "send everything" transaction: spend ALL spendable XNA UTXOs
+   * into a single output to `toAddress`, with the fee deducted from the amount
+   * so the recipient receives `totalInputs − fee` and there is no change.
+   *
+   * The engine's `createTransaction` cannot express this: it always appends a
+   * change output (a zero-value one would be rejected by the node) and its
+   * greedy coin selection is amount-driven, so it would not reliably pull in
+   * every UTXO. We therefore assemble the raw tx with `createPaymentTransaction`
+   * (which emits exactly the outputs given) and sign it with the engine's own
+   * key material via `neurai-sign-transaction`. The fee mirrors the engine's
+   * size math (see {@link estimateNeuraiFeeSats}) so the node accepts it.
+   */
+  async buildSendMaxTransaction(toAddress: string): Promise<NeuraiBuildTransactionResult> {
+    const engine = await this.ensureEngine();
+    const [allUtxos, mempool] = await Promise.all([engine.getUTXOs(), engine.getMempool().catch(() => [])]);
+    // Mirror the engine's `loadSpendableFunds`: drop UTXOs already being spent
+    // by a mempool tx so a send-max issued right after another send can't
+    // double-spend them.
+    const spentInMempool = new Set(mempool.map(m => `${m.prevtxid}:${m.prevout}`));
+    const utxos = allUtxos.filter(u => u.assetName === 'XNA' && u.satoshis > 0 && !spentInMempool.has(`${u.txid}:${u.outputIndex}`));
+    if (utxos.length === 0) throw new Error('No spendable XNA funds to send');
+    const totalIn = utxos.reduce((sum, u) => sum + u.satoshis, 0);
+
+    const feeRateXnaPerKb = await this.estimateFeeRate();
+    const feeSats = estimateNeuraiFeeSats(
+      utxos.map(u => u.script),
+      [toAddress],
+      feeRateXnaPerKb,
+    );
+    const recipientSats = totalIn - feeSats;
+    if (recipientSats <= 0) throw new Error('Balance too low to cover the network fee');
+
+    const { rawTx } = createPaymentTransaction({
+      inputs: utxos.map(u => ({ txid: u.txid, vout: u.outputIndex })),
+      payments: [{ address: toAddress, valueSats: BigInt(recipientSats) }],
+    });
+
+    const privateKeys: Record<string, unknown> = {};
+    for (const u of utxos) {
+      const material = engine.getPrivateKeyByAddress(u.address);
+      if (material) privateKeys[u.address] = material;
+    }
+
+    const signedHex = signNeuraiTransaction(
+      this.network as Parameters<typeof signNeuraiTransaction>[0],
+      rawTx,
+      utxos as unknown as Parameters<typeof signNeuraiTransaction>[2],
+      privateKeys as Parameters<typeof signNeuraiTransaction>[3],
+    );
+    if (!signedHex) throw new Error('Failed to sign the send-all transaction');
+
+    return {
+      signedHex,
+      unsignedHex: rawTx,
+      fee: feeSats / ONE_FULL_COIN,
+      sentAmountSats: recipientSats,
+      // Everything leaves the wallet: recipient gets totalIn − fee, the fee is
+      // paid, no change returns — so the net debit is the whole balance.
+      netDebitSats: totalIn,
+      debug: { sendMax: true, totalIn, feeSats, recipientSats },
     };
   }
 

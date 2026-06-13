@@ -10,10 +10,12 @@
  * `wallet/wallet.h:54` the node's own `DEFAULT_FALLBACK_FEE` is 1,025,000
  * sats/kB, and the lib stays above that.
  *
- * For now we expose the engine output as-is: the user types an address and an
- * amount in XNA, we build the transaction, show the engine-computed fee, and
- * broadcast on confirm. Custom fee tiers (slow/medium/fast) and full-balance
- * "send max" can be added later by wiring `forcedUTXOs`.
+ * The user types an address and an amount in XNA, we build the transaction,
+ * show the engine-computed fee and the amount to be sent, and broadcast on
+ * confirm. Tapping the available-balance hint enters "send max" mode, which
+ * spends the whole balance with the fee deducted (see `buildSendMaxTransaction`
+ * and the hardware wallet's `sendMax` path). Custom fee tiers (slow/medium/fast)
+ * can be added later.
  */
 
 import React, { useCallback, useState } from 'react';
@@ -81,6 +83,10 @@ const SendNeurai: React.FC = () => {
   const [hwDraft, setHwDraft] = useState<NeuraiHwUnsignedSend | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isBroadcasting, setIsBroadcasting] = useState(false);
+  // "Send max" defers the amount to build time (it is `balance − fee`, only
+  // known once the fee is computed), so we track it as a mode rather than a
+  // typed amount. Any manual edit to the amount field cancels it.
+  const [isSendMax, setIsSendMax] = useState(false);
 
   const resetDrafts = useCallback(() => {
     setDraft(null);
@@ -97,6 +103,7 @@ const SendNeurai: React.FC = () => {
   const onChangeAmount = useCallback(
     (v: string) => {
       setAmount(v);
+      setIsSendMax(false);
       resetDrafts();
     },
     [resetDrafts],
@@ -134,6 +141,10 @@ const SendNeurai: React.FC = () => {
     },
     root: { backgroundColor: colors.elevated },
     feeBox: { borderColor: colors.formBorder, backgroundColor: colors.inputBackgroundColor },
+    textInput: { color: colors.foregroundColor },
+    unit: { color: colors.alternativeTextColor },
+    feeLabel: { color: colors.feeText },
+    feeValue: { color: colors.feeValue },
   };
 
   const buildDraft = useCallback(async () => {
@@ -149,17 +160,19 @@ const SendNeurai: React.FC = () => {
       return;
     }
     const xna = Number(amount);
-    if (!Number.isFinite(xna) || xna <= 0) {
+    if (!isSendMax && (!Number.isFinite(xna) || xna <= 0)) {
       presentAlert({ message: loc.send.details_amount_field_is_not_valid });
       return;
     }
 
-    // Hardware wallet: build the unsigned PQ transaction now (no device needed);
+    // Hardware wallet: build the unsigned transaction now (no device needed);
     // signing happens on the device in the next step.
     if (hwWallet) {
       setIsBuilding(true);
       try {
-        const unsigned = await hwWallet.buildUnsignedSend(address.trim(), Math.round(xna * 1e8));
+        const unsigned = isSendMax
+          ? await hwWallet.buildUnsignedSend(address.trim(), 0, { sendMax: true })
+          : await hwWallet.buildUnsignedSend(address.trim(), Math.round(xna * 1e8));
         setHwDraft(unsigned);
       } catch (err: any) {
         presentAlert({ message: err?.message ?? String(err) });
@@ -169,18 +182,24 @@ const SendNeurai: React.FC = () => {
       return;
     }
 
-    const targets: NeuraiTransactionTarget[] = [{ address: address.trim(), amount: xna }];
     setIsBuilding(true);
     try {
-      // PQ wallets with address reuse on should send change back to the static
-      // receive address; otherwise the engine picks a fresh index and surprises
-      // the user who explicitly disabled rotation.
-      let forcedChangeAddress: string | undefined;
-      if (isPQAddressReuseEnabled && wallet.walletKind === 'pq') {
-        const receiveAddr = await wallet.getStaticReceiveAddress();
-        if (receiveAddr !== address.trim()) forcedChangeAddress = receiveAddr;
+      let result: NeuraiBuildTransactionResult;
+      if (isSendMax) {
+        // Spend the whole balance: builder forces all UTXOs and deducts the fee.
+        result = await wallet.buildSendMaxTransaction(address.trim());
+      } else {
+        // PQ wallets with address reuse on should send change back to the static
+        // receive address; otherwise the engine picks a fresh index and surprises
+        // the user who explicitly disabled rotation.
+        let forcedChangeAddress: string | undefined;
+        if (isPQAddressReuseEnabled && wallet.walletKind === 'pq') {
+          const receiveAddr = await wallet.getStaticReceiveAddress();
+          if (receiveAddr !== address.trim()) forcedChangeAddress = receiveAddr;
+        }
+        const targets: NeuraiTransactionTarget[] = [{ address: address.trim(), amount: xna }];
+        result = await wallet.buildSendTransaction(targets, { forcedChangeAddress });
       }
-      const result = await wallet.buildSendTransaction(targets, { forcedChangeAddress });
       if (!result.signedHex) throw new Error('Engine did not return a signed transaction');
       setDraft(result);
     } catch (err: any) {
@@ -188,7 +207,7 @@ const SendNeurai: React.FC = () => {
     } finally {
       setIsBuilding(false);
     }
-  }, [wallet, hwWallet, address, amount, isPQAddressReuseEnabled, resetDrafts]);
+  }, [wallet, hwWallet, address, amount, isSendMax, isPQAddressReuseEnabled, resetDrafts]);
 
   const broadcast = useCallback(async () => {
     if (!draft || !wallet) return;
@@ -197,6 +216,9 @@ const SendNeurai: React.FC = () => {
       const txid = await wallet.broadcastTx(draft.signedHex);
       triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
       presentAlert({ message: `${loc.send.broadcastSuccess}: ${txid}` });
+      // Show the send immediately as a 0-conf pending entry and subtract it
+      // from the balance; it is reconciled away once the tx confirms.
+      wallet.addPendingTx(txid, -draft.netDebitSats);
       // Pull mempool + balance straight away so the wallet list reflects the
       // pending tx by the time we land on it. Failures here are non-fatal —
       // the WalletTransactions auto-poller will catch up within 10 s.
@@ -220,6 +242,9 @@ const SendNeurai: React.FC = () => {
       await hw.disconnect().catch(() => {});
       triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
       presentAlert({ message: `${loc.send.broadcastSuccess}: ${txid}` });
+      // Show the send immediately as a 0-conf pending entry and subtract it
+      // from the balance; it is reconciled away once the tx confirms.
+      hwWallet.addPendingTx(txid, -(hwDraft.amountSats + hwDraft.feeSats));
       Promise.all([hwWallet.fetchTransactions(), hwWallet.fetchBalance()]).catch(err =>
         console.debug('post-broadcast refresh failed:', err),
       );
@@ -248,13 +273,13 @@ const SendNeurai: React.FC = () => {
         <TextInput
           testID="SendNeuraiAddress"
           value={address}
-          placeholderTextColor="#81868e"
+          placeholderTextColor={colors.placeholderTextColor}
           placeholder={loc.send.details_address}
           onChangeText={onChangeAddress}
           autoCapitalize="none"
           autoCorrect={false}
           editable={!isBuilding && !isBroadcasting}
-          style={styles.textInput}
+          style={[styles.textInput, stylesHook.textInput]}
           underlineColorAndroid="transparent"
         />
         <Pressable
@@ -274,19 +299,23 @@ const SendNeurai: React.FC = () => {
         <TextInput
           testID="SendNeuraiAmount"
           value={amount}
-          placeholderTextColor="#81868e"
+          placeholderTextColor={colors.placeholderTextColor}
           placeholder="0.00000000"
           keyboardType="decimal-pad"
           onChangeText={onChangeAmount}
           editable={!isBuilding && !isBroadcasting}
-          style={styles.textInput}
+          style={[styles.textInput, stylesHook.textInput]}
           underlineColorAndroid="transparent"
         />
-        <Text style={styles.unit}>XNA</Text>
+        <Text style={[styles.unit, stylesHook.unit]}>XNA</Text>
       </View>
       <Pressable
         accessibilityRole="button"
-        onPress={() => setAmount(availableXna.toString())}
+        onPress={() => {
+          setIsSendMax(true);
+          setAmount(availableXna.toFixed(8));
+          resetDrafts();
+        }}
         disabled={isBuilding || isBroadcasting || availableSats === 0}
         style={styles.balanceHintRow}
       >
@@ -297,8 +326,12 @@ const SendNeurai: React.FC = () => {
 
       {(draft || hwDraft) && (
         <View style={[styles.feeBox, stylesHook.feeBox]}>
-          <Text style={styles.feeLabel}>{loc.send.create_fee}</Text>
-          <Text style={styles.feeValue}>{draft ? draft.fee : (hwDraft!.feeSats / 1e8).toFixed(8)} XNA</Text>
+          <Text style={[styles.feeLabel, stylesHook.feeLabel]}>{loc.send.create_amount}</Text>
+          <Text style={[styles.feeValue, stylesHook.feeValue]}>
+            {((draft ? draft.sentAmountSats : hwDraft!.amountSats) / 1e8).toFixed(8)} XNA
+          </Text>
+          <Text style={[styles.feeLabel, stylesHook.feeLabel, styles.feeLabelSpacer]}>{loc.send.create_fee}</Text>
+          <Text style={[styles.feeValue, stylesHook.feeValue]}>{(draft ? draft.fee : hwDraft!.feeSats / 1e8).toFixed(8)} XNA</Text>
         </View>
       )}
 
@@ -308,7 +341,7 @@ const SendNeurai: React.FC = () => {
           <>
             <ActivityIndicator />
             {hwWallet && isBroadcasting ? (
-              <Text style={[styles.feeLabel, styles.hwHint]}>
+              <Text style={[styles.feeLabel, styles.hwHint, stylesHook.feeLabel]}>
                 {hw.status === 'connecting' ? 'Connect the device and confirm on it…' : 'Signing on device…'}
               </Text>
             ) : null}
@@ -340,7 +373,7 @@ const styles = StyleSheet.create({
     marginVertical: 12,
     borderRadius: 4,
   },
-  textInput: { flex: 1, marginHorizontal: 8, color: '#81868e' },
+  textInput: { flex: 1, marginHorizontal: 8 },
   balanceHintRow: { marginHorizontal: 20, marginTop: -4, marginBottom: 8 },
   balanceHint: { fontSize: 12, textAlign: 'right' },
   scanButton: {
@@ -350,7 +383,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scanButtonPressed: { opacity: 0.5 },
-  unit: { paddingHorizontal: 12, fontWeight: '600', color: '#81868e' },
+  unit: { paddingHorizontal: 12, fontWeight: '600' },
   feeBox: {
     marginHorizontal: 20,
     marginVertical: 12,
@@ -359,6 +392,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   feeLabel: { fontSize: 12, opacity: 0.6, marginBottom: 4 },
+  feeLabelSpacer: { marginTop: 12 },
   hwHint: { textAlign: 'center', marginTop: 8 },
   feeValue: { fontSize: 16, fontWeight: '600' },
   actions: { marginHorizontal: 20 },
