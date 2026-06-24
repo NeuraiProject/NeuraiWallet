@@ -26,6 +26,22 @@
     "ssl_port": "SSL Port",
     "suggested": "Suggested"
   },
+  "assets": {
+    "tab_transactions": "Transactions",
+    "tab_assets": "Assets",
+    "list_count": "Assets: {count}",
+    "list_empty": "This wallet holds no assets.",
+    "send_toggle": "Send an asset",
+    "send_select": "Select asset",
+    "send_avail_max": "Available: {amount} {asset} (tap to use max)",
+    "type_root": "Asset",
+    "type_sub": "Sub-asset",
+    "type_unique": "Unique",
+    "type_owner": "Owner",
+    "type_restricted": "Restricted",
+    "type_qualifier": "Qualifier",
+    "type_depin": "DePIN"
+  },
   "errors": {
     "error": "Error",
     "network": "Network Error"

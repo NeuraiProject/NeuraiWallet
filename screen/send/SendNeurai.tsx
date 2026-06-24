@@ -19,7 +19,7 @@
  */
 
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
@@ -40,6 +40,28 @@ import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc from '../../loc';
 import type { DetailViewStackParamList } from '../../navigation/DetailViewStackParamList';
 import type { NeuraiBuildTransactionResult, NeuraiTransactionTarget } from '../../class/wallets/abstract-neurai-wallet';
+import { formatAssetAmount, type NeuraiAssetType, type NeuraiHeldAsset } from '../../blue_modules/neurai/assetUtils';
+import ActionSheet from '../ActionSheet';
+
+/** Human label for an asset type, for the picker rows. */
+function assetTypeLabel(type: NeuraiAssetType): string {
+  switch (type) {
+    case 'sub':
+      return loc.assets.type_sub;
+    case 'unique':
+      return loc.assets.type_unique;
+    case 'owner':
+      return loc.assets.type_owner;
+    case 'restricted':
+      return loc.assets.type_restricted;
+    case 'qualifier':
+      return loc.assets.type_qualifier;
+    case 'depin':
+      return loc.assets.type_depin;
+    default:
+      return loc.assets.type_root;
+  }
+}
 
 type RouteProps = RouteProp<DetailViewStackParamList, 'SendNeurai'>;
 type NavigationProps = NativeStackNavigationProp<DetailViewStackParamList, 'SendNeurai'>;
@@ -87,6 +109,14 @@ const SendNeurai: React.FC = () => {
   // known once the fee is computed), so we track it as a mode rather than a
   // typed amount. Any manual edit to the amount field cancels it.
   const [isSendMax, setIsSendMax] = useState(false);
+  // Asset send mode: a switch reveals an asset picker; when an asset is selected
+  // the amount is denominated in that asset and the network fee is still paid in
+  // XNA. Hardware wallets have no engine, so asset sends are not offered there.
+  const canSendAssets = !!wallet && !hwWallet;
+  const [isAssetMode, setIsAssetMode] = useState(false);
+  const [heldAssets, setHeldAssets] = useState<NeuraiHeldAsset[]>([]);
+  const [selectedAsset, setSelectedAsset] = useState<NeuraiHeldAsset | null>(null);
+  const [isLoadingAssets, setIsLoadingAssets] = useState(false);
 
   const resetDrafts = useCallback(() => {
     setDraft(null);
@@ -114,6 +144,47 @@ const SendNeurai: React.FC = () => {
   // backing out to the wallet view.
   const availableSats = wallet?.getBalance() ?? 0;
   const availableXna = availableSats / 1e8;
+  const assetAvailable = selectedAsset?.amount ?? 0;
+  const amountUnit = isAssetMode && selectedAsset ? selectedAsset.name : 'XNA';
+
+  const onToggleAssetMode = useCallback(
+    async (on: boolean) => {
+      setIsAssetMode(on);
+      setIsSendMax(false);
+      setSelectedAsset(null);
+      setAmount('');
+      resetDrafts();
+      if (!on || !wallet) return;
+      let assets = wallet.getHeldAssetsCached();
+      if (assets.length === 0) {
+        setIsLoadingAssets(true);
+        try {
+          await wallet.refreshHeldAssets();
+          assets = wallet.getHeldAssetsCached();
+        } catch (err: any) {
+          presentAlert({ message: err?.message ?? String(err) });
+        } finally {
+          setIsLoadingAssets(false);
+        }
+      }
+      setHeldAssets(assets);
+      // Auto-select when there's only one asset to spare the user a tap.
+      if (assets.length === 1) setSelectedAsset(assets[0]);
+    },
+    [wallet, resetDrafts],
+  );
+
+  const openAssetPicker = useCallback(() => {
+    if (heldAssets.length === 0) return;
+    const options = [loc._.cancel, ...heldAssets.map(a => `${a.name} · ${formatAssetAmount(a.amount)} · ${assetTypeLabel(a.type)}`)];
+    ActionSheet.showActionSheetWithOptions({ title: loc.assets.send_select, options, cancelButtonIndex: 0 }, index => {
+      if (index && index > 0) {
+        setSelectedAsset(heldAssets[index - 1]);
+        setAmount('');
+        resetDrafts();
+      }
+    });
+  }, [heldAssets, resetDrafts]);
 
   // Use the callback path of ScanQRCode (it calls back + goBack()) instead of
   // the popTo path: SendNeurai lives inside the nested DetailViewScreensStack
@@ -145,6 +216,8 @@ const SendNeurai: React.FC = () => {
     unit: { color: colors.alternativeTextColor },
     feeLabel: { color: colors.feeText },
     feeValue: { color: colors.feeValue },
+    assetToggleLabel: { color: colors.foregroundColor },
+    balanceHint: { color: colors.alternativeTextColor },
   };
 
   const buildDraft = useCallback(async () => {
@@ -160,8 +233,12 @@ const SendNeurai: React.FC = () => {
       return;
     }
     const xna = Number(amount);
-    if (!isSendMax && (!Number.isFinite(xna) || xna <= 0)) {
+    if (!isSendMax && !isAssetMode && (!Number.isFinite(xna) || xna <= 0)) {
       presentAlert({ message: loc.send.details_amount_field_is_not_valid });
+      return;
+    }
+    if (isAssetMode && !selectedAsset) {
+      presentAlert({ message: loc.assets.send_select });
       return;
     }
 
@@ -185,18 +262,24 @@ const SendNeurai: React.FC = () => {
     setIsBuilding(true);
     try {
       let result: NeuraiBuildTransactionResult;
-      if (isSendMax) {
+      // PQ wallets with address reuse on should send change back to the static
+      // receive address; otherwise the engine picks a fresh index and surprises
+      // the user who explicitly disabled rotation. (Reused by both the XNA and
+      // the asset path — the wallet also routes asset change there for PQ.)
+      let forcedChangeAddress: string | undefined;
+      if (isPQAddressReuseEnabled && wallet.walletKind === 'pq') {
+        const receiveAddr = await wallet.getStaticReceiveAddress();
+        if (receiveAddr !== address.trim()) forcedChangeAddress = receiveAddr;
+      }
+      if (isAssetMode && selectedAsset) {
+        // Asset transfer: amount is in the asset's units; the fee is paid in XNA
+        // and selected by the engine.
+        const targets: NeuraiTransactionTarget[] = [{ address: address.trim(), amount: xna }];
+        result = await wallet.buildSendTransaction(targets, { forcedChangeAddress, assetName: selectedAsset.name });
+      } else if (isSendMax) {
         // Spend the whole balance: builder forces all UTXOs and deducts the fee.
         result = await wallet.buildSendMaxTransaction(address.trim());
       } else {
-        // PQ wallets with address reuse on should send change back to the static
-        // receive address; otherwise the engine picks a fresh index and surprises
-        // the user who explicitly disabled rotation.
-        let forcedChangeAddress: string | undefined;
-        if (isPQAddressReuseEnabled && wallet.walletKind === 'pq') {
-          const receiveAddr = await wallet.getStaticReceiveAddress();
-          if (receiveAddr !== address.trim()) forcedChangeAddress = receiveAddr;
-        }
         const targets: NeuraiTransactionTarget[] = [{ address: address.trim(), amount: xna }];
         result = await wallet.buildSendTransaction(targets, { forcedChangeAddress });
       }
@@ -207,7 +290,7 @@ const SendNeurai: React.FC = () => {
     } finally {
       setIsBuilding(false);
     }
-  }, [wallet, hwWallet, address, amount, isSendMax, isPQAddressReuseEnabled, resetDrafts]);
+  }, [wallet, hwWallet, address, amount, isSendMax, isAssetMode, selectedAsset, isPQAddressReuseEnabled, resetDrafts]);
 
   const broadcast = useCallback(async () => {
     if (!draft || !wallet) return;
@@ -218,7 +301,7 @@ const SendNeurai: React.FC = () => {
       presentAlert({ message: `${loc.send.broadcastSuccess}: ${txid}` });
       // Show the send immediately as a 0-conf pending entry and subtract it
       // from the balance; it is reconciled away once the tx confirms.
-      wallet.addPendingTx(txid, -draft.netDebitSats);
+      wallet.addPendingTx(txid, -draft.netDebitSats, draft.asset);
       // Pull mempool + balance straight away so the wallet list reflects the
       // pending tx by the time we land on it. Failures here are non-fatal —
       // the WalletTransactions auto-poller will catch up within 10 s.
@@ -294,6 +377,42 @@ const SendNeurai: React.FC = () => {
         </Pressable>
       </View>
 
+      {canSendAssets && (
+        <>
+          <View style={styles.assetToggleRow}>
+            <Text style={[styles.assetToggleLabel, stylesHook.assetToggleLabel]}>{loc.assets.send_toggle}</Text>
+            <Switch
+              testID="SendNeuraiAssetSwitch"
+              value={isAssetMode}
+              onValueChange={onToggleAssetMode}
+              disabled={isBuilding || isBroadcasting}
+            />
+          </View>
+          {isAssetMode && (
+            <Pressable
+              accessibilityRole="button"
+              testID="SendNeuraiAssetPicker"
+              onPress={openAssetPicker}
+              disabled={isBuilding || isBroadcasting || isLoadingAssets || heldAssets.length === 0}
+              style={[styles.input, stylesHook.label]}
+            >
+              {isLoadingAssets ? (
+                <ActivityIndicator style={styles.assetPickerSpinner} />
+              ) : (
+                <Text style={[styles.textInput, stylesHook.textInput]} numberOfLines={1}>
+                  {selectedAsset
+                    ? `${selectedAsset.name} · ${formatAssetAmount(selectedAsset.amount)}`
+                    : heldAssets.length === 0
+                      ? loc.assets.list_empty
+                      : loc.assets.send_select}
+                </Text>
+              )}
+              <MaterialIcons name="arrow-drop-down" size={22} color={colors.foregroundColor} />
+            </Pressable>
+          )}
+        </>
+      )}
+
       <BlueFormLabel>{loc.send.create_amount}</BlueFormLabel>
       <View style={[styles.input, stylesHook.label]}>
         <TextInput
@@ -307,20 +426,28 @@ const SendNeurai: React.FC = () => {
           style={[styles.textInput, stylesHook.textInput]}
           underlineColorAndroid="transparent"
         />
-        <Text style={[styles.unit, stylesHook.unit]}>XNA</Text>
+        <Text style={[styles.unit, stylesHook.unit]}>{amountUnit}</Text>
       </View>
       <Pressable
         accessibilityRole="button"
         onPress={() => {
-          setIsSendMax(true);
-          setAmount(availableXna.toFixed(8));
+          if (isAssetMode) {
+            if (selectedAsset) setAmount(formatAssetAmount(selectedAsset.amount));
+          } else {
+            setIsSendMax(true);
+            setAmount(availableXna.toFixed(8));
+          }
           resetDrafts();
         }}
-        disabled={isBuilding || isBroadcasting || availableSats === 0}
+        disabled={isBuilding || isBroadcasting || (isAssetMode ? !selectedAsset || assetAvailable === 0 : availableSats === 0)}
         style={styles.balanceHintRow}
       >
-        <Text style={[styles.balanceHint, { color: colors.alternativeTextColor }]}>
-          {loc.formatString(loc.send.create_avail_max, { amount: availableXna.toFixed(8) })}
+        <Text style={[styles.balanceHint, stylesHook.balanceHint]}>
+          {isAssetMode
+            ? selectedAsset
+              ? loc.formatString(loc.assets.send_avail_max, { amount: formatAssetAmount(assetAvailable), asset: selectedAsset.name })
+              : ''
+            : loc.formatString(loc.send.create_avail_max, { amount: availableXna.toFixed(8) })}
         </Text>
       </Pressable>
 
@@ -328,7 +455,9 @@ const SendNeurai: React.FC = () => {
         <View style={[styles.feeBox, stylesHook.feeBox]}>
           <Text style={[styles.feeLabel, stylesHook.feeLabel]}>{loc.send.create_amount}</Text>
           <Text style={[styles.feeValue, stylesHook.feeValue]}>
-            {((draft ? draft.sentAmountSats : hwDraft!.amountSats) / 1e8).toFixed(8)} XNA
+            {draft?.asset
+              ? `${formatAssetAmount(draft.asset.amount)} ${draft.asset.name}`
+              : `${((draft ? draft.sentAmountSats : hwDraft!.amountSats) / 1e8).toFixed(8)} XNA`}
           </Text>
           <Text style={[styles.feeLabel, stylesHook.feeLabel, styles.feeLabelSpacer]}>{loc.send.create_fee}</Text>
           <Text style={[styles.feeValue, stylesHook.feeValue]}>{(draft ? draft.fee : hwDraft!.feeSats / 1e8).toFixed(8)} XNA</Text>
@@ -374,6 +503,15 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   textInput: { flex: 1, marginHorizontal: 8 },
+  assetToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 20,
+    marginTop: 8,
+  },
+  assetToggleLabel: { fontSize: 16, fontWeight: '600' },
+  assetPickerSpinner: { flex: 1, alignItems: 'flex-start', marginHorizontal: 8 },
   balanceHintRow: { marginHorizontal: 20, marginTop: -4, marginBottom: 8 },
   balanceHint: { fontSize: 12, textAlign: 'right' },
   scanButton: {

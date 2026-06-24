@@ -214,6 +214,14 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     /* no-op: hardware wallet has no engine */
   }
 
+  // Assets are not supported on hardware wallets yet (the engine, which builds
+  // and signs asset transfers, is unavailable here). Keep the cache empty and
+  // skip the refresh so the regular fetch loop doesn't try to bootstrap an
+  // engine that throws.
+  async refreshHeldAssets(): Promise<void> {
+    /* no-op: hardware wallet has no engine */
+  }
+
   // ---------- HD discovery (legacy) ------------------------------------------------
 
   /** Derive a legacy address + cache its metadata. */

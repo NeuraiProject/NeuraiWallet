@@ -19,7 +19,10 @@ import { isDesktop } from '../../blue_modules/environment';
 import * as fs from '../../blue_modules/fs';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
+import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
 import presentAlert, { AlertType } from '../../components/Alert';
+import AssetsList from '../../components/AssetsList';
+import SegmentedControl from '../../components/SegmentedControl';
 import { FButton, FContainer, FloatButtonsBottomFade } from '../../components/FloatButtons';
 import { useTheme } from '../../components/themes';
 import { TransactionListItem } from '../../components/TransactionListItem';
@@ -71,6 +74,10 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const [balance, setBalance] = useState(wallet.getBalance());
   const [displayUnit, setDisplayUnit] = useState(wallet.preferredBalanceUnit);
   const [isUnitSwitching, setIsUnitSwitching] = useState(false);
+  // Neurai wallets (except hardware, which has no engine) get a Transactions /
+  // Assets tab switch in the list header.
+  const showAssetsTab = isNeuraiWallet(wallet) && wallet.type !== NeuraiHardwareWallet.type;
+  const [activeTab, setActiveTab] = useState<'transactions' | 'assets'>('transactions');
   const MAX_FAILURES = 3;
   const flatListRef = useRef<FlatList<Transaction>>(null);
   const headerRef = useRef<View>(null);
@@ -475,9 +482,20 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
           <View style={stylesHook.headerBottomBar} />
         </View>
         <View style={[styles.flex, stylesHook.backgroundContainer]}>
-          <View style={styles.listHeaderTextRow}>
-            <Text style={[styles.listHeaderText, stylesHook.listHeaderText]}>{loc.transactions.list_title}</Text>
-          </View>
+          {showAssetsTab ? (
+            <View style={styles.tabsRow}>
+              <SegmentedControl
+                testID="WalletTabs"
+                values={[loc.assets.tab_transactions, loc.assets.tab_assets]}
+                selectedIndex={activeTab === 'assets' ? 1 : 0}
+                onChange={index => setActiveTab(index === 1 ? 'assets' : 'transactions')}
+              />
+            </View>
+          ) : (
+            <View style={styles.listHeaderTextRow}>
+              <Text style={[styles.listHeaderText, stylesHook.listHeaderText]}>{loc.transactions.list_title}</Text>
+            </View>
+          )}
         </View>
       </View>
     ),
@@ -492,6 +510,8 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       stylesHook.listHeaderText,
       saveToDisk,
       isBiometricUseCapableAndEnabled,
+      showAssetsTab,
+      activeTab,
     ],
   );
 
@@ -504,39 +524,43 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   return (
     <View style={[styles.flex, stylesHook.backgroundContainer]}>
       <View style={[styles.refreshIndicatorBackground, stylesHook.gradientBackground]} testID="TransactionsListView" />
-      <FlatList<Transaction>
-        ref={flatListRef}
-        getItemLayout={getItemLayout}
-        updateCellsBatchingPeriod={50}
-        onEndReachedThreshold={0.3}
-        onEndReached={loadMoreTransactions}
-        ListFooterComponent={renderListFooterComponent}
-        data={getTransactions(limit)}
-        extraData={[wallet, displayUnit, wallet.hideBalance]}
-        keyExtractor={_keyExtractor}
-        renderItem={renderItem}
-        initialNumToRender={10}
-        removeClippedSubviews
-        contentContainerStyle={stylesHook.backgroundContainer}
-        contentInset={{ top: 0, left: 0, bottom: 90, right: 0 }}
-        maxToRenderPerBatch={10}
-        onScroll={handleScroll}
-        windowSize={15}
-        scrollEventThrottle={16}
-        ListHeaderComponent={ListHeaderComponent}
-        ListEmptyComponent={
-          <ScrollView style={[styles.emptyTxsContainer, stylesHook.backgroundContainer]} contentContainerStyle={styles.scrollViewContent}>
-            <Text numberOfLines={0} style={styles.emptyTxs} testID="TransactionsListEmpty">
-              {loc.wallets.list_empty_txs1}
-            </Text>
-          </ScrollView>
-        }
-        refreshControl={
-          !isDesktop ? (
-            <RefreshControl refreshing={isLoading} onRefresh={() => refreshTransactions(true)} tintColor={colors.msSuccessCheck} />
-          ) : undefined
-        }
-      />
+      {showAssetsTab && activeTab === 'assets' ? (
+        <AssetsList walletID={walletID} ListHeaderComponent={ListHeaderComponent} />
+      ) : (
+        <FlatList<Transaction>
+          ref={flatListRef}
+          getItemLayout={getItemLayout}
+          updateCellsBatchingPeriod={50}
+          onEndReachedThreshold={0.3}
+          onEndReached={loadMoreTransactions}
+          ListFooterComponent={renderListFooterComponent}
+          data={getTransactions(limit)}
+          extraData={[wallet, displayUnit, wallet.hideBalance]}
+          keyExtractor={_keyExtractor}
+          renderItem={renderItem}
+          initialNumToRender={10}
+          removeClippedSubviews
+          contentContainerStyle={stylesHook.backgroundContainer}
+          contentInset={{ top: 0, left: 0, bottom: 90, right: 0 }}
+          maxToRenderPerBatch={10}
+          onScroll={handleScroll}
+          windowSize={15}
+          scrollEventThrottle={16}
+          ListHeaderComponent={ListHeaderComponent}
+          ListEmptyComponent={
+            <ScrollView style={[styles.emptyTxsContainer, stylesHook.backgroundContainer]} contentContainerStyle={styles.scrollViewContent}>
+              <Text numberOfLines={0} style={styles.emptyTxs} testID="TransactionsListEmpty">
+                {loc.wallets.list_empty_txs1}
+              </Text>
+            </ScrollView>
+          }
+          refreshControl={
+            !isDesktop ? (
+              <RefreshControl refreshing={isLoading} onRefresh={() => refreshTransactions(true)} tintColor={colors.msSuccessCheck} />
+            ) : undefined
+          }
+        />
+      )}
 
       <FloatButtonsBottomFade />
       <FContainer ref={walletActionButtonsRef}>
@@ -599,6 +623,7 @@ const styles = StyleSheet.create({
   scrollViewContent: { flex: 1, justifyContent: 'center', paddingHorizontal: 16, paddingBottom: 500 },
   activityIndicator: { marginVertical: 20 },
   listHeaderTextRow: { flex: 1, marginHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between' },
+  tabsRow: { marginHorizontal: 16, marginTop: 4 },
   listHeaderText: { marginTop: 0, marginBottom: 16, fontWeight: 'bold', fontSize: 24 },
   refreshIndicatorBackground: {
     position: 'absolute',

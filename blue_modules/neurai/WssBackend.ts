@@ -383,7 +383,10 @@ export class WssBackend implements NeuraiBackend {
     const out: AddressDelta[] = [];
     let cursor: string | null = null;
     do {
-      const state = await this.fetchAddressState(address, true, false, { cursor });
+      // `assets: true` makes the service include non-native asset deltas in the
+      // history (it switches `getaddressdeltas` to the `assetName: "*"` call).
+      // Without it the history is XNA-only and asset transfers never show up.
+      const state = await this.fetchAddressState(address, true, false, { cursor, assets: true });
       out.push(...(state.history || []).map(item => this.toAddressDelta(address, item)));
       cursor = state.page?.has_more ? state.page.next_cursor || null : null;
     } while (cursor);

@@ -5,6 +5,8 @@ import { Transaction } from '../class/wallets/types';
 import TransactionIncomingIcon from '../components/icons/TransactionIncomingIcon';
 import TransactionOutgoingIcon from '../components/icons/TransactionOutgoingIcon';
 import TransactionPendingIcon from '../components/icons/TransactionPendingIcon';
+import TransactionAssetIcon from '../components/icons/TransactionAssetIcon';
+import { formatAssetAmount } from '../blue_modules/neurai/assetUtils';
 import loc, { formatBalanceWithoutSuffix, formatTransactionListDate, transactionTimeToReadable } from '../loc';
 import { XnaUnit } from '../models/xnaUnits';
 import { getBlockExplorerUrlForWallet } from '../models/blockExplorer';
@@ -144,10 +146,16 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
     const txMemo = txMetadata[item.hash]?.memo ?? '';
     const noteForCopy = txMemo.trim() || undefined;
 
+    // A Neurai asset (token) transaction: direction and amount come from the
+    // asset, not the XNA value (which only reflects the fee/change).
+    const isAsset = !!item.assetName;
+    const assetSent = (item.assetAmount ?? 0) < 0;
+
     const listTitleKey = useMemo((): 'pending' | 'sent' | 'received' => {
       if (!item.confirmations) return 'pending';
+      if (isAsset) return assetSent ? 'sent' : 'received';
       return item.value! < 0 ? 'sent' : 'received';
-    }, [item.confirmations, item.value]);
+    }, [item.confirmations, item.value, isAsset, assetSent]);
 
     const listTitle = useMemo(() => {
       if (listTitleKey === 'pending') return loc.transactions.pending;
@@ -168,11 +176,17 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
       return formatBalanceWithoutSuffix(item.value && item.value, itemPriceUnit, true).toString();
     }, [item.value, itemPriceUnit]);
 
-    const rowTitle = formattedAmount;
+    const rowTitle = useMemo(() => {
+      if (isAsset) return `${formatAssetAmount(Math.abs(item.assetAmount ?? 0))} ${item.assetName}`;
+      return formattedAmount;
+    }, [isAsset, item.assetAmount, item.assetName, formattedAmount]);
 
     const rowTitleStyle = useMemo<TextStyle>(() => {
       let color = colors.successColor;
-      if (item.value! / 100000000 < 0) {
+      if (isAsset) {
+        // Asset moved: red when it leaves, green when it arrives.
+        color = assetSent ? '#d0021b' : colors.successColor;
+      } else if (item.value! / 100000000 < 0) {
         color = colors.foregroundColor;
       }
       return {
@@ -183,13 +197,18 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
         paddingRight: insets.right,
         paddingLeft: insets.left,
       } as TextStyle;
-    }, [colors.successColor, colors.foregroundColor, item.value, insets.right, insets.left]);
+    }, [colors.successColor, colors.foregroundColor, item.value, insets.right, insets.left, isAsset, assetSent]);
 
     const determineTransactionTypeAndAvatar = () => {
       if (!item.confirmations) {
         return {
           label: loc.transactions.pending_transaction,
           icon: <TransactionPendingIcon />,
+        };
+      } else if (isAsset) {
+        return {
+          label: assetSent ? loc.transactions.outgoing_transaction : loc.transactions.incoming_transaction,
+          icon: <TransactionAssetIcon sent={assetSent} />,
         };
       } else if (item.value! < 0) {
         return {
@@ -207,9 +226,10 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
     const { label: transactionTypeLabel, icon: avatar } = determineTransactionTypeAndAvatar();
 
     const amountWithUnit = useMemo(() => {
+      if (isAsset) return rowTitle;
       const unitSuffix = itemPriceUnit === XnaUnit.XNA || itemPriceUnit === XnaUnit.SATS ? ` ${itemPriceUnit}` : ' ';
       return `${formattedAmount}${unitSuffix}`;
-    }, [formattedAmount, itemPriceUnit]);
+    }, [isAsset, rowTitle, formattedAmount, itemPriceUnit]);
 
     const onPress = useCallback(async () => {
       // If a custom onPress handler was provided, use it and return

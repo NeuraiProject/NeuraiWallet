@@ -60,6 +60,10 @@ export type Transaction = {
   /** seconds, not milliseconds */
   timestamp: number;
   value?: number;
+  /** Neurai asset moved by this transaction (absent for plain XNA transactions). */
+  assetName?: string;
+  /** Signed asset amount in full units (negative = sent, positive = received). */
+  assetAmount?: number;
 };
 
 /**

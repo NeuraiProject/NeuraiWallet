@@ -10,14 +10,25 @@
  */
 
 const LEGACY_INPUT_VBYTES = 148;
-const PQ_INPUT_VBYTES = 976;
+const PQ_INPUT_VBYTES = 977;
 const LEGACY_OUTPUT_BYTES = 34;
-const PQ_OUTPUT_BYTES = 31;
+const PQ_OUTPUT_BYTES = 43;
 const SATS_PER_XNA = 100_000_000;
 
-/** A PQ (ML-DSA-44 / AuthScript) prevout script is detected by the engine via
- * its `5114` prefix; mirror that exactly so our fee matches the engine's. */
-const isPQScript = (script: string | undefined): boolean => script?.startsWith('5114') === true;
+/**
+ * A PQ (ML-DSA-44 / AuthScript) prevout script is `OP_1 <32-byte commitment>`,
+ * i.e. it starts with `5120` (0x51 = OP_1, 0x20 = push-32). This matches the
+ * signer's `isPQScript` in `@neuraiproject/neurai-sign-transaction`, the source
+ * of truth for these sizes.
+ *
+ * NOTE: `@neuraiproject/neurai-jswallet`'s internal `isPQUTXO` checks the wrong
+ * prefix (`5114`) and therefore sizes PQ inputs as legacy (148 vs 977 vbytes),
+ * underpricing the fee below the node's min-relay floor ("66: min relay fee not
+ * met"). We deliberately do NOT mirror that bug — that is exactly why asset
+ * transfers and PQ send-max are assembled and priced here instead of via the
+ * engine's `createTransaction`.
+ */
+const isPQScript = (script: string | undefined): boolean => script?.toLowerCase().startsWith('5120') === true;
 
 /** PQ destinations use the bech32 HRPs `nq` / `tnq`. */
 const isPQAddress = (address: string): boolean => {

@@ -99,7 +99,7 @@
     "@neuraiproject/neurai-key": "4.0.0",
     "@neuraiproject/neurai-rpc": "0.4.7",
     "@neuraiproject/neurai-sign-esp32": "^0.5.7",
-    "@neuraiproject/neurai-sign-transaction": "2.1.0",
+    "@neuraiproject/neurai-sign-transaction": "^2.1.3",
     "@ngraveio/bc-ur": "1.1.13",
     "@noble/hashes": "1.3.3",
     "@noble/secp256k1": "1.6.3",

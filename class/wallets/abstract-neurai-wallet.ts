@@ -16,7 +16,7 @@ import { InteractionManager } from 'react-native';
 import NeuraiJsWallet from '@neuraiproject/neurai-jswallet';
 import NeuraiKey from '@neuraiproject/neurai-key';
 import { type IDelta, type IHistoryItem } from '@neuraiproject/neurai-history-list';
-import { createPaymentTransaction } from '@neuraiproject/neurai-create-transaction';
+import { createPaymentTransaction, createStandardAssetTransferTransaction } from '@neuraiproject/neurai-create-transaction';
 import { sign as signNeuraiTransaction } from '@neuraiproject/neurai-sign-transaction';
 
 import {
@@ -27,12 +27,14 @@ import {
   WalletKind,
   chainFor,
   createDefaultBackend,
+  createDefaultRpcBackend,
   isPQChain,
   type NeuraiBackend,
 } from '../../blue_modules/neurai';
 import type { AddressChangedEvent } from '../../blue_modules/neurai/WssBackend';
 import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
 import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
+import { getAssetType, type NeuraiHeldAsset } from '../../blue_modules/neurai/assetUtils';
 import { AbstractWallet } from './abstract-wallet';
 import { Transaction, Utxo } from './types';
 
@@ -47,8 +49,62 @@ const PENDING_TX_TTL_MS = 24 * 60 * 60 * 1000;
 const HISTORY_DELTA_BATCH_SIZE = 250;
 const HISTORY_ITEM_BATCH_SIZE = 100;
 const TX_CACHE_BATCH_SIZE = 100;
+/** Outputs below this many sats are dust; a sub-dust change is folded into the fee. */
+const SEND_DUST_SATS = 546;
+
+/** Minimal UTXO shape we need for selection / signing (matches engine `IUTXO`). */
+interface SpendableUtxo {
+  txid: string;
+  outputIndex: number;
+  satoshis: number;
+  address: string;
+  assetName: string;
+  script: string;
+}
+
+/** Greedy UTXO selection: accumulate until `neededSats` is covered. Throws if the
+ * pool can't cover it. */
+function selectUtxosForSats<T extends { satoshis: number }>(utxos: T[], neededSats: number): T[] {
+  const selected: T[] = [];
+  let sum = 0;
+  for (const u of utxos) {
+    if (sum >= neededSats) break;
+    selected.push(u);
+    sum += u.satoshis;
+  }
+  if (sum < neededSats) throw new Error(`Insufficient funds — need ${neededSats} sats, have ${sum}`);
+  return selected;
+}
 
 const yieldToEventLoop = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+/**
+ * Build a human-readable string from a backend/RPC error. `@neuraiproject/neurai-rpc`
+ * rejects node errors as `{ status, statusText, description, error: { code, message } }`
+ * with NO `.message` of its own, so a naive `err.message` is empty — which is exactly
+ * why the WSS service collapses node rejections to a useless "broadcast failed". Pull
+ * the real reason out of `error` / `description` here.
+ */
+function describeBackendError(e: unknown): string {
+  if (e == null) return 'unknown error';
+  const o = e as Record<string, unknown>;
+  const parts: string[] = [];
+  if (o.description) parts.push(`description=${String(o.description)}`);
+  if (o.error) parts.push(`error=${typeof o.error === 'string' ? o.error : JSON.stringify(o.error)}`);
+  if (o.status != null) parts.push(`status=${String(o.status)}`);
+  if (o.statusText) parts.push(`statusText=${String(o.statusText)}`);
+  if (o.message) parts.push(`message=${String(o.message)}`);
+  if (o.code != null) parts.push(`code=${String(o.code)}`);
+  if (o.type) parts.push(`type=${String(o.type)}`);
+  if (parts.length === 0) {
+    try {
+      return JSON.stringify(o);
+    } catch {
+      return String(o);
+    }
+  }
+  return parts.join(' | ');
+}
 
 type HistoryAsset = IHistoryItem['assets'][number];
 
@@ -150,8 +206,13 @@ export interface NeuraiBuildTransactionResult {
   fee: number;
   /** Amount sent to the recipient, in satoshis (for display). */
   sentAmountSats: number;
-  /** Net amount leaving the wallet, in satoshis (amount sent + fee). */
+  /** Net amount leaving the wallet, in satoshis (amount sent + fee). For an
+   * asset transfer this is just the XNA fee (the recipient asset output carries
+   * ~0 XNA). */
   netDebitSats: number;
+  /** Present only for asset transfers: the asset name and amount (full units)
+   * being sent. Absent for plain XNA sends. */
+  asset?: { name: string; amount: number };
   /** Engine-level debug payload (inputs, outputs, change, etc.). */
   debug: unknown;
 }
@@ -173,6 +234,11 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * disk so the wallet shows its known history before the next RPC fetch.
    * Replaced wholesale on each `fetchTransactions`. */
   protected _txCache: Transaction[];
+  /** Cached list of assets (tokens) this wallet holds. Persisted to disk
+   * (enumerable) like `_historyItems` so the wallet card on the home screen and
+   * the in-wallet Assets tab can render a count/list immediately on app launch,
+   * before the next refresh. Refreshed at the end of `fetchTransactions`. */
+  protected _heldAssets: NeuraiHeldAsset[];
   /** Just-broadcast outgoing sends, shown optimistically as 0-conf "pending"
    * entries and subtracted from the balance until the backend surfaces them
    * confirmed. Persisted (enumerable) like `_txCache` so a pending send
@@ -206,6 +272,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._lastTxBlockHeight = 0;
     this._historyItems = [];
     this._txCache = [];
+    this._heldAssets = [];
     this._pendingTxs = [];
     this._addressStatus = {};
     this._engine = null;
@@ -244,6 +311,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._lastTxBlockHeight = 0;
     this._historyItems = [];
     this._txCache = [];
+    this._heldAssets = [];
     this._pendingTxs = [];
   }
 
@@ -759,6 +827,42 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._lastTxFetch = Date.now();
     this._lastTxBlockHeight = Math.max(tipHeight, this._lastTxBlockHeight, ...items.map(item => item.blockHeight));
     this._persistBackendStatuses();
+    // Refresh the held-asset cache off the critical path: the engine is already
+    // bootstrapped here (via `_walletAddresses`), so this is just one extra RPC.
+    // Fire-and-forget so it never delays the transaction render; it emits its
+    // own `walletChanged` when the list arrives.
+    this.refreshHeldAssets().catch(err => console.debug('AbstractNeuraiWallet: refreshHeldAssets failed', err));
+  }
+
+  // ---------- assets ---------------------------------------------------------------
+
+  /** Held assets (tokens) from the last refresh. Synchronous — reads the
+   * persisted cache, so the home-screen card and the Assets tab can render
+   * without bootstrapping the engine. */
+  getHeldAssetsCached(): NeuraiHeldAsset[] {
+    return this._heldAssets;
+  }
+
+  /**
+   * Fetch the wallet's current asset balances via the engine and refresh the
+   * cache. The engine's `getAssets()` returns base-currency (XNA) and
+   * zero-balance rows too (its internal filter is a no-op), so we drop those
+   * here. Amounts come back already divided by 1e8 in `value`.
+   */
+  async refreshHeldAssets(): Promise<void> {
+    const engine = await this.ensureEngine();
+    const baseCurrency = await this._walletBaseCurrency();
+    const raw = (await engine.getAssets()) as Array<{ assetName?: string; balance?: number; value?: number }> | null;
+    const assets: NeuraiHeldAsset[] = (raw ?? [])
+      .filter(a => typeof a?.assetName === 'string' && a.assetName !== baseCurrency && (a.balance ?? 0) > 0)
+      .map(a => ({
+        name: a.assetName as string,
+        type: getAssetType(a.assetName as string),
+        amount: typeof a.value === 'number' ? a.value : (a.balance as number) / ONE_FULL_COIN,
+      }))
+      .sort((x, y) => x.name.localeCompare(y.name));
+    this._heldAssets = assets;
+    emitWalletChanged(this.getID());
   }
 
   getTransactions(): Transaction[] {
@@ -794,8 +898,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * `fetchTransactions` once the real tx confirms (or after a TTL).
    * @param txid       broadcast transaction id
    * @param valueSats  net wallet debit in sats; negative (amount sent + fee)
+   * @param asset      for an asset transfer, the token name and amount sent
+   *                   (positive full units) so the pending row shows the asset.
    */
-  addPendingTx(txid: string, valueSats: number): void {
+  addPendingTx(txid: string, valueSats: number, asset?: { name: string; amount: number }): void {
     if (!txid || this._pendingTxs.some(t => t.txid === txid)) return;
     const nowSec = Math.floor(Date.now() / 1000);
     this._pendingTxs.unshift({
@@ -814,6 +920,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       blocktime: nowSec,
       timestamp: nowSec,
       value: valueSats,
+      assetName: asset?.name,
+      // Pending entries are always outgoing sends → negative asset amount.
+      assetAmount: asset ? -Math.abs(asset.amount) : undefined,
     });
     emitWalletChanged(this.getID());
   }
@@ -838,14 +947,32 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   async buildSendTransaction(
     targets: NeuraiTransactionTarget[],
-    opts?: { forcedChangeAddress?: string },
+    opts?: { forcedChangeAddress?: string; assetName?: string },
   ): Promise<NeuraiBuildTransactionResult> {
     if (targets.length === 0) {
       throw new Error('buildSendTransaction requires at least one target');
     }
-    const engine = await this.ensureEngine();
     const forcedChangeAddressBaseCurrency = opts?.forcedChangeAddress;
+    const assetName = opts?.assetName;
+    const isAsset = !!assetName && assetName !== 'XNA';
 
+    // Asset transfers are built here rather than via `engine.createTransaction`:
+    // the engine prices the fee straight off `estimatesmartfee` with NO min-relay
+    // floor, so on low-traffic chains (testnet) it produces a fee below the
+    // node's minimum → "min relay fee not met". We assemble the transfer
+    // ourselves (like `buildSendMaxTransaction`) and price it off the backend's
+    // fee rate, which is safely above min relay.
+    if (isAsset) {
+      if (targets.length !== 1) throw new Error('Asset transfers support a single recipient');
+      return this._buildAssetTransferTransaction(
+        targets[0].address,
+        targets[0].amount,
+        assetName as string,
+        forcedChangeAddressBaseCurrency,
+      );
+    }
+
+    const engine = await this.ensureEngine();
     if (targets.length === 1) {
       const result = await engine.createTransaction({
         toAddress: targets[0].address,
@@ -872,6 +999,119 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       sentAmountSats: Math.round(result.debug.amount * ONE_FULL_COIN),
       netDebitSats: Math.round(result.debug.xnaAmount * ONE_FULL_COIN),
       debug: result.debug,
+    };
+  }
+
+  /**
+   * Build + sign an asset transfer transaction, mirroring the reference web
+   * wallet (`neurai-addon-sign`) and our own `buildSendMaxTransaction`:
+   *   - select asset UTXOs to cover the amount (asset change back to the wallet),
+   *   - select XNA UTXOs to cover a fee priced off the backend rate (≥ min relay),
+   *   - emit recipient/asset-change `transfers` + an XNA-change `payment`,
+   *   - assemble with `createStandardAssetTransferTransaction` and sign locally.
+   * `amount` is in full asset units; asset amounts use the same 1e8 raw scaling
+   * as XNA satoshis.
+   */
+  private async _buildAssetTransferTransaction(
+    toAddress: string,
+    amount: number,
+    assetName: string,
+    forcedChangeAddress?: string,
+  ): Promise<NeuraiBuildTransactionResult> {
+    const engine = await this.ensureEngine();
+    // Asset UTXOs and native (XNA) UTXOs come from different RPC queries:
+    // `getUTXOs()` is `getaddressutxos` with NO assetName (native only), while
+    // `getAssetUTXOs(name)` passes the assetName. Filtering `getUTXOs()` by an
+    // asset name therefore always yields nothing — fetch each from its source.
+    const [assetUtxosRaw, xnaUtxosRaw, mempool] = await Promise.all([
+      engine.getAssetUTXOs(assetName),
+      engine.getUTXOs(),
+      engine.getMempool().catch(() => []),
+    ]);
+    const spentInMempool = new Set(mempool.map(m => `${m.prevtxid}:${m.prevout}`));
+    const spendable = (u: SpendableUtxo) => u.satoshis > 0 && !spentInMempool.has(`${u.txid}:${u.outputIndex}`);
+    const assetUtxos = (assetUtxosRaw as unknown as SpendableUtxo[]).filter(u => u.assetName === assetName && spendable(u));
+    const xnaUtxos = (xnaUtxosRaw as unknown as SpendableUtxo[]).filter(u => (u.assetName === 'XNA' || !u.assetName) && spendable(u));
+    if (assetUtxos.length === 0) throw new Error(`No spendable ${assetName} to send`);
+    if (xnaUtxos.length === 0) throw new Error('No spendable XNA to cover the network fee');
+
+    const amountRaw = Math.round(amount * ONE_FULL_COIN);
+    if (!Number.isFinite(amountRaw) || amountRaw <= 0) throw new Error('Invalid asset amount');
+    const totalAssetRaw = assetUtxos.reduce((sum, u) => sum + u.satoshis, 0);
+    if (totalAssetRaw < amountRaw) throw new Error(`Insufficient ${assetName} balance`);
+
+    const selectedAsset = selectUtxosForSats(assetUtxos, amountRaw);
+    const assetChangeRaw = selectedAsset.reduce((sum, u) => sum + u.satoshis, 0) - amountRaw;
+
+    const feeRate = await this.estimateFeeRate();
+    const xnaChangeAddress = forcedChangeAddress ?? (await engine.getChangeAddress());
+    const assetChangeAddress = forcedChangeAddress ?? (await engine.getAssetChangeAddress());
+
+    // Two-pass fee: estimate with one XNA input, select to cover it, then
+    // re-estimate with the chosen input count (and the change outputs present).
+    const outputAddresses = (xnaChange: boolean) => [
+      toAddress,
+      ...(assetChangeRaw > 0 ? [assetChangeAddress] : []),
+      ...(xnaChange ? [xnaChangeAddress] : []),
+    ];
+    let selectedXna = [xnaUtxos[0]];
+    let feeSats = estimateNeuraiFeeSats(
+      [...selectedAsset, ...selectedXna].map(u => u.script),
+      outputAddresses(true),
+      feeRate,
+    );
+    selectedXna = selectUtxosForSats(xnaUtxos, feeSats + SEND_DUST_SATS);
+    feeSats = estimateNeuraiFeeSats(
+      [...selectedAsset, ...selectedXna].map(u => u.script),
+      outputAddresses(true),
+      feeRate,
+    );
+
+    const xnaIn = selectedXna.reduce((sum, u) => sum + u.satoshis, 0);
+    let xnaChangeSats = xnaIn - feeSats;
+    if (xnaChangeSats < 0) throw new Error('Balance too low to cover the network fee');
+    // Fold a sub-dust change into the fee rather than emitting an unspendable output.
+    if (xnaChangeSats > 0 && xnaChangeSats < SEND_DUST_SATS) {
+      feeSats += xnaChangeSats;
+      xnaChangeSats = 0;
+    }
+
+    const transfers: { address: string; assetName: string; amountRaw: bigint }[] = [
+      { address: toAddress, assetName, amountRaw: BigInt(amountRaw) },
+    ];
+    if (assetChangeRaw > 0) transfers.push({ address: assetChangeAddress, assetName, amountRaw: BigInt(assetChangeRaw) });
+    const payments: { address: string; valueSats: bigint }[] = [];
+    if (xnaChangeSats > 0) payments.push({ address: xnaChangeAddress, valueSats: BigInt(xnaChangeSats) });
+
+    const inputs = [...selectedAsset, ...selectedXna];
+    const built = createStandardAssetTransferTransaction({
+      inputs: inputs.map(u => ({ txid: u.txid, vout: u.outputIndex })),
+      payments,
+      transfers,
+    });
+
+    const privateKeys: Record<string, unknown> = {};
+    for (const u of inputs) {
+      const material = engine.getPrivateKeyByAddress(u.address);
+      if (material) privateKeys[u.address] = material;
+    }
+    const signedHex = signNeuraiTransaction(
+      this.network as Parameters<typeof signNeuraiTransaction>[0],
+      built.rawTx,
+      inputs as unknown as Parameters<typeof signNeuraiTransaction>[2],
+      privateKeys as Parameters<typeof signNeuraiTransaction>[3],
+    );
+    if (!signedHex) throw new Error('Failed to sign the asset transfer');
+
+    return {
+      signedHex,
+      unsignedHex: built.rawTx,
+      fee: feeSats / ONE_FULL_COIN,
+      // An asset transfer sends 0 XNA to the recipient; only the fee leaves the wallet.
+      sentAmountSats: 0,
+      netDebitSats: feeSats,
+      asset: { name: assetName, amount },
+      debug: { assetName, amountRaw, assetChangeRaw, feeSats, xnaChangeSats, inputs: inputs.length },
     };
   }
 
@@ -940,7 +1180,34 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   }
 
   async broadcastTx(rawHex: string): Promise<string> {
-    return this.getBackend().broadcast(rawHex);
+    const primary = this.getBackend();
+    try {
+      return await primary.broadcast(rawHex);
+    } catch (err) {
+      console.warn(`[Neurai] primary broadcast failed (kind=${primary.kind}):`, describeBackendError(err));
+      // The WSS service surfaces only a generic "broadcast failed" (code 1005)
+      // and discards the node's real reason. Fall back to a direct node RPC,
+      // which returns the descriptive reject reason (and relays the tx if the
+      // failure was WSS-specific rather than a true node rejection).
+      if (primary.kind === 'rpc') throw new Error(describeBackendError(err));
+      let rpc: NeuraiBackend;
+      try {
+        rpc = createDefaultRpcBackend(this.getNeuraiNetwork(), this.walletKind);
+      } catch (mkErr) {
+        console.warn('[Neurai] could not create RPC fallback backend:', String(mkErr));
+        throw new Error(describeBackendError(err));
+      }
+      try {
+        const txid = await rpc.broadcast(rawHex);
+        console.warn('[Neurai] RPC fallback broadcast OK:', txid);
+        return txid;
+      } catch (rpcErr) {
+        const reason = describeBackendError(rpcErr);
+        console.warn('[Neurai] RPC fallback broadcast failed:', reason);
+        // Surface the node's descriptive reason instead of WSS's "broadcast failed".
+        throw new Error(reason);
+      }
+    }
   }
 
   /** Smart fee estimate in XNA/kB for the given confirmation depth. */
@@ -954,6 +1221,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   private _historyItemToTransaction(item: IHistoryItem, _deltas: IDelta[], blockTimes: Record<number, number>): Transaction {
     const xnaAsset = item.assets.find(a => a.assetName === 'XNA');
     const value = xnaAsset ? Math.round(xnaAsset.satoshis) : 0;
+    // A transaction that moves a Neurai asset (token) carries a non-XNA entry;
+    // surface its name and signed amount so the list can render it as an asset
+    // movement (e.g. "Sent · 100 FOO") rather than a plain XNA row.
+    const nonXnaAsset = item.assets.find(a => a.assetName !== 'XNA');
     // Mempool txs (height 0) get the current wall clock so the UI shows
     // "just now" instead of 1970. Confirmed txs use the block header time.
     const nowSec = Math.floor(Date.now() / 1000);
@@ -974,6 +1245,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       blocktime: time,
       timestamp: time,
       value: item.isSent ? -Math.abs(value) : Math.abs(value),
+      assetName: nonXnaAsset?.assetName,
+      assetAmount: nonXnaAsset?.value,
     };
   }
 
