@@ -379,18 +379,35 @@ export class WssBackend implements NeuraiBackend {
     return Array.isArray(query.addresses) ? query.addresses.filter((a): a is string => typeof a === 'string' && a.length > 0) : [];
   }
 
-  private async fetchFullHistory(address: string): Promise<AddressDelta[]> {
+  private async fetchHistoryPage(address: string, withAssets: boolean): Promise<AddressDelta[]> {
     const out: AddressDelta[] = [];
     let cursor: string | null = null;
     do {
-      // `assets: true` makes the service include non-native asset deltas in the
-      // history (it switches `getaddressdeltas` to the `assetName: "*"` call).
-      // Without it the history is XNA-only and asset transfers never show up.
-      const state = await this.fetchAddressState(address, true, false, { cursor, assets: true });
+      const extra = withAssets ? { cursor, assets: true } : { cursor };
+      const state = await this.fetchAddressState(address, true, false, extra);
       out.push(...(state.history || []).map(item => this.toAddressDelta(address, item)));
       cursor = state.page?.has_more ? state.page.next_cursor || null : null;
     } while (cursor);
     return out;
+  }
+
+  private async fetchFullHistory(address: string): Promise<AddressDelta[]> {
+    // `assets: true` makes the service include non-native asset deltas in the
+    // history (it switches `getaddressdeltas` to the `assetName: "*"` call).
+    // Some nodes/services reject that wildcard and the service then returns an
+    // EMPTY history — which would silently hide all XNA transactions. So when
+    // the asset-aware call comes back empty, fall back to the native-only call
+    // so XNA history still shows.
+    const withAssets = await this.fetchHistoryPage(address, true);
+    if (withAssets.length > 0) return withAssets;
+    const nativeOnly = await this.fetchHistoryPage(address, false);
+    if (nativeOnly.length > 0) {
+      console.warn(
+        '[Neurai] history fallback (assets wildcard returned empty):',
+        JSON.stringify({ address: address.slice(0, 14), nativeOnly: nativeOnly.length }),
+      );
+    }
+    return nativeOnly;
   }
 
   private async fetchFullUtxos(address: string, assetName?: string): Promise<NeuraiUtxo[]> {

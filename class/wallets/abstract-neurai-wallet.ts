@@ -821,6 +821,22 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     }
     this._historyItems = items;
     this._txCache = txCache;
+    // DIAGNOSTIC: trace history fetch + pending reconciliation.
+    console.warn(
+      '[Neurai] fetchTransactions:',
+      JSON.stringify({
+        network: this.network,
+        rawDeltas: rawDeltas.length,
+        items: items.length,
+        txCache: txCache.length,
+        pending: this._pendingTxs.map(t => ({
+          txid: t.txid.slice(0, 12),
+          inCache: txCache.some(c => c.txid === t.txid),
+          cacheConf: txCache.find(c => c.txid === t.txid)?.confirmations,
+        })),
+        firstCache: txCache.slice(0, 3).map(c => `${c.txid.slice(0, 10)}@conf${c.confirmations}`),
+      }),
+    );
     // Reconcile optimistic pending sends against the fresh history: drop any
     // that have now confirmed (or aged out).
     this._prunePendingTxs();

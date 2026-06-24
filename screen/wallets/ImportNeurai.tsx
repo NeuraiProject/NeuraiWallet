@@ -2,8 +2,8 @@
  * Simple Import flow for Neurai wallets.
  *
  * Asks for a 12-word mnemonic, the wallet kind (legacy ECDSA or post-quantum
- * ML-DSA-44) and the network (testnet by default, mainnet for the eventual
- * fork). Skips the BIP39 multi-format heuristics that
+ * ML-DSA-44) and the network (mainnet by default, testnet second; PQ forces
+ * testnet). Skips the BIP39 multi-format heuristics that
  * `class/wallet-import.ts` runs against Bitcoin paths — for Neurai there is
  * exactly one derivation path per kind, defined in `neurai-key`.
  */
@@ -29,7 +29,7 @@ import loc from '../../loc';
 type WalletKind = 'legacy' | 'pq';
 
 const KIND_OPTIONS: WalletKind[] = ['legacy', 'pq'];
-const NETWORK_OPTIONS: NeuraiNetwork[] = ['testnet', 'mainnet'];
+const NETWORK_OPTIONS: NeuraiNetwork[] = ['mainnet', 'testnet'];
 
 const ImportNeurai: React.FC = () => {
   const { colors } = useTheme();
@@ -39,7 +39,7 @@ const ImportNeurai: React.FC = () => {
   const [mnemonic, setMnemonic] = useState('');
   const [passphrase, setPassphrase] = useState('');
   const [kind, setKind] = useState<WalletKind>('legacy');
-  const [network, setNetwork] = useState<NeuraiNetwork>('testnet');
+  const [network, setNetwork] = useState<NeuraiNetwork>('mainnet');
   const [isImporting, setIsImporting] = useState(false);
 
   const stylesHook = {
