@@ -814,29 +814,15 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
     const txCache: Transaction[] = [];
     for (let i = 0; i < items.length; i += TX_CACHE_BATCH_SIZE) {
-      txCache.push(...items.slice(i, i + TX_CACHE_BATCH_SIZE).map(item => this._historyItemToTransaction(item, deltas, blockTimes)));
+      txCache.push(
+        ...items.slice(i, i + TX_CACHE_BATCH_SIZE).map(item => this._historyItemToTransaction(item, deltas, blockTimes, tipHeight)),
+      );
       if (i + TX_CACHE_BATCH_SIZE < items.length) {
         await yieldToEventLoop();
       }
     }
     this._historyItems = items;
     this._txCache = txCache;
-    // DIAGNOSTIC: trace history fetch + pending reconciliation.
-    console.warn(
-      '[Neurai] fetchTransactions:',
-      JSON.stringify({
-        network: this.network,
-        rawDeltas: rawDeltas.length,
-        items: items.length,
-        txCache: txCache.length,
-        pending: this._pendingTxs.map(t => ({
-          txid: t.txid.slice(0, 12),
-          inCache: txCache.some(c => c.txid === t.txid),
-          cacheConf: txCache.find(c => c.txid === t.txid)?.confirmations,
-        })),
-        firstCache: txCache.slice(0, 3).map(c => `${c.txid.slice(0, 10)}@conf${c.confirmations}`),
-      }),
-    );
     // Reconcile optimistic pending sends against the fresh history: drop any
     // that have now confirmed (or aged out).
     this._prunePendingTxs();
@@ -1234,9 +1220,18 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   // ---------- helpers --------------------------------------------------------------
 
-  private _historyItemToTransaction(item: IHistoryItem, _deltas: IDelta[], blockTimes: Record<number, number>): Transaction {
+  private _historyItemToTransaction(
+    item: IHistoryItem,
+    _deltas: IDelta[],
+    blockTimes: Record<number, number>,
+    tipHeight: number,
+  ): Transaction {
     const xnaAsset = item.assets.find(a => a.assetName === 'XNA');
     const value = xnaAsset ? Math.round(xnaAsset.satoshis) : 0;
+    // Real confirmation depth = tip − block + 1 (a tx in the tip block has 1).
+    // Falls back to 1 when the tip is unknown (getTipHeight failed → 0) or the
+    // cached tip lags behind the tx's block.
+    const confirmations = item.blockHeight > 0 ? Math.max(1, tipHeight - item.blockHeight + 1) : 0;
     // A transaction that moves a Neurai asset (token) carries a non-XNA entry;
     // surface its name and signed amount so the list can render it as an asset
     // movement (e.g. "Sent · 100 FOO") rather than a plain XNA row.
@@ -1256,7 +1251,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       inputs: [],
       outputs: [],
       blockhash: '',
-      confirmations: item.blockHeight > 0 ? 1 : 0,
+      confirmations,
       time,
       blocktime: time,
       timestamp: time,
