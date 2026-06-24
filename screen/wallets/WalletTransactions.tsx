@@ -8,21 +8,21 @@ import {
   InteractionManager,
   Platform,
   PixelRatio,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
   RefreshControl,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import Icon from '../../components/Icon';
 import { isDesktop } from '../../blue_modules/environment';
 import * as fs from '../../blue_modules/fs';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
-import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
 import presentAlert, { AlertType } from '../../components/Alert';
 import AssetsList from '../../components/AssetsList';
-import SegmentedControl from '../../components/SegmentedControl';
 import { FButton, FContainer, FloatButtonsBottomFade } from '../../components/FloatButtons';
 import { useTheme } from '../../components/themes';
 import { TransactionListItem } from '../../components/TransactionListItem';
@@ -74,9 +74,9 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const [balance, setBalance] = useState(wallet.getBalance());
   const [displayUnit, setDisplayUnit] = useState(wallet.preferredBalanceUnit);
   const [isUnitSwitching, setIsUnitSwitching] = useState(false);
-  // Neurai wallets (except hardware, which has no engine) get a Transactions /
-  // Assets tab switch in the list header.
-  const showAssetsTab = isNeuraiWallet(wallet) && wallet.type !== NeuraiHardwareWallet.type;
+  // All Neurai wallets (including the hardware wallet, which reads assets via
+  // the backend) get a Transactions / Assets tab switch in the list header.
+  const showAssetsTab = isNeuraiWallet(wallet);
   const [activeTab, setActiveTab] = useState<'transactions' | 'assets'>('transactions');
   const MAX_FAILURES = 3;
   const flatListRef = useRef<FlatList<Transaction>>(null);
@@ -87,6 +87,21 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const stylesHook = StyleSheet.create({
     listHeaderText: {
       color: colors.foregroundColor,
+    },
+    tabActiveBg: {
+      // Same tone as the list/content area so the active tab reads as part of it.
+      backgroundColor: colors.background,
+    },
+    tabInactiveBg: {
+      // Muted/greyed tone + visible outline for the unselected tab.
+      backgroundColor: colors.inputBackgroundColor,
+      borderColor: colors.formBorder,
+    },
+    tabLabelActive: {
+      color: colors.foregroundColor,
+    },
+    tabLabelInactive: {
+      color: colors.alternativeTextColor,
     },
     listFooterStyle: {
       height: '100%',
@@ -483,13 +498,31 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
         </View>
         <View style={[styles.flex, stylesHook.backgroundContainer]}>
           {showAssetsTab ? (
-            <View style={styles.tabsRow}>
-              <SegmentedControl
-                testID="WalletTabs"
-                values={[loc.assets.tab_transactions, loc.assets.tab_assets]}
-                selectedIndex={activeTab === 'assets' ? 1 : 0}
-                onChange={index => setActiveTab(index === 1 ? 'assets' : 'transactions')}
-              />
+            <View style={styles.tabsBar}>
+              {(['transactions', 'assets'] as const).map(tab => {
+                const active = activeTab === tab;
+                const label = tab === 'transactions' ? loc.assets.tab_transactions : loc.assets.tab_assets;
+                return (
+                  <Pressable
+                    key={tab}
+                    testID={`WalletTab-${tab}`}
+                    onPress={() => setActiveTab(tab)}
+                    style={[
+                      styles.tab,
+                      active ? [styles.tabActive, stylesHook.tabActiveBg] : [styles.tabInactive, stylesHook.tabInactiveBg],
+                    ]}
+                  >
+                    {active && (
+                      <LinearGradient
+                        colors={['rgba(249, 115, 22, 0.5)', 'rgba(249, 115, 22, 0)']}
+                        style={StyleSheet.absoluteFill}
+                        pointerEvents="none"
+                      />
+                    )}
+                    <Text style={[styles.tabLabel, active ? stylesHook.tabLabelActive : stylesHook.tabLabelInactive]}>{label}</Text>
+                  </Pressable>
+                );
+              })}
             </View>
           ) : (
             <View style={styles.listHeaderTextRow}>
@@ -508,6 +541,10 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       stylesHook.backgroundContainer,
       stylesHook.headerBottomBar,
       stylesHook.listHeaderText,
+      stylesHook.tabActiveBg,
+      stylesHook.tabInactiveBg,
+      stylesHook.tabLabelActive,
+      stylesHook.tabLabelInactive,
       saveToDisk,
       isBiometricUseCapableAndEnabled,
       showAssetsTab,
@@ -623,7 +660,21 @@ const styles = StyleSheet.create({
   scrollViewContent: { flex: 1, justifyContent: 'center', paddingHorizontal: 16, paddingBottom: 500 },
   activityIndicator: { marginVertical: 20 },
   listHeaderTextRow: { flex: 1, marginHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between' },
-  tabsRow: { marginHorizontal: 16, marginTop: 4 },
+  tabsBar: { flexDirection: 'row', marginHorizontal: 16, marginTop: 2, columnGap: 8 },
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+  },
+  // Selected tab: merges with the content tone, marked by a soft Neurai-orange
+  // gradient fading down from the top. `overflow: hidden` clips the gradient to
+  // the rounded top corners.
+  tabActive: { overflow: 'hidden' },
+  // Unselected tab: outlined, muted background (set via stylesHook).
+  tabInactive: { borderWidth: 1 },
+  tabLabel: { fontSize: 15, fontWeight: '700' },
   listHeaderText: { marginTop: 0, marginBottom: 16, fontWeight: 'bold', fontSize: 24 },
   refreshIndicatorBackground: {
     position: 'absolute',

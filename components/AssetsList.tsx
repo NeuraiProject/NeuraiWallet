@@ -52,7 +52,7 @@ const AssetsList: React.FC<AssetsListProps> = ({ walletID, ListHeaderComponent }
   const [isLoading, setIsLoading] = useState(false);
 
   const stylesHook = {
-    root: { backgroundColor: colors.elevated },
+    root: { backgroundColor: colors.background },
     row: { borderBottomColor: colors.formBorder },
     name: { color: colors.foregroundColor },
     badge: { backgroundColor: colors.inputBackgroundColor, borderColor: colors.formBorder },

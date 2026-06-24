@@ -22,6 +22,7 @@ import NeuraiJsWallet from '@neuraiproject/neurai-jswallet';
 import { Buffer } from 'buffer';
 import { Transaction } from 'bitcoinjs-lib';
 import {
+  buildAssetTransferDisplayMetadata,
   buildPSBTFromRawTransaction,
   buildUnsignedPQTransaction,
   encodeDestinationScript,
@@ -34,13 +35,40 @@ import type {
   IPQSignInput,
   IPQUTXO,
   IPSBTInputMetadata,
+  ISigningDisplayMetadata,
   NetworkType,
   NeuraiESP32,
 } from '@neuraiproject/neurai-sign-esp32/react-native';
+import { createStandardAssetTransferTransaction } from '@neuraiproject/neurai-create-transaction';
 
 import { chainFor, createDefaultRpcBackend, NeuraiChainType, WalletKind, type NeuraiBackend } from '../../blue_modules/neurai';
+import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
+import { getAssetType } from '../../blue_modules/neurai/assetUtils';
+import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
 import { AbstractNeuraiWallet } from './abstract-neurai-wallet';
 import { deriveLegacyAddress } from '../../blue_modules/neurai-hw/xpubDerivation';
+
+/** Minimal UTXO shape returned by `getaddressutxos`. */
+interface HwUtxo {
+  txid: string;
+  outputIndex: number;
+  satoshis: number;
+  address: string;
+  assetName?: string;
+}
+
+/** Greedy selection: accumulate UTXOs until `needed` (sats / asset raw) is covered. */
+function pickUtxos<T extends { satoshis: number }>(utxos: T[], needed: number): T[] {
+  const out: T[] = [];
+  let sum = 0;
+  for (const u of utxos) {
+    if (sum >= needed) break;
+    out.push(u);
+    sum += u.satoshis;
+  }
+  if (sum < needed) throw new Error(`Insufficient funds — need ${needed}, have ${sum}`);
+  return out;
+}
 
 /** Gap limit for HD address discovery (consecutive unused before stopping). */
 const GAP_LIMIT = 20;
@@ -70,6 +98,11 @@ export interface NeuraiHwUnsignedSend {
   inputs?: IPQSignInput[];
   /** Legacy: base64 PSBT for `sign_psbt`. */
   psbtBase64?: string;
+  /** Present for an asset transfer: the token name and amount (full units). */
+  asset?: { name: string; amount: number };
+  /** Device display metadata — drives what the NeuraiHW screen shows. For an
+   * asset transfer this makes the device show the token name and amount. */
+  display?: ISigningDisplayMetadata;
 }
 
 function chainForDevice(network: string | undefined, keyType: WalletKind): NeuraiChainType {
@@ -214,12 +247,35 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     /* no-op: hardware wallet has no engine */
   }
 
-  // Assets are not supported on hardware wallets yet (the engine, which builds
-  // and signs asset transfers, is unavailable here). Keep the cache empty and
-  // skip the refresh so the regular fetch loop doesn't try to bootstrap an
-  // engine that throws.
+  /**
+   * Asset (token) balances for the hardware wallet. There is no local engine
+   * here, so instead of `engine.getAssets()` we sum the wallet's asset UTXOs:
+   * `getaddressutxos` with `assetName: "*"` (the WSS backend supports the param
+   * on its rpc passthrough) returns native + asset outputs across all watched
+   * addresses; grouping the non-XNA ones by name gives the spendable balance
+   * per token.
+   */
   async refreshHeldAssets(): Promise<void> {
-    /* no-op: hardware wallet has no engine */
+    const addresses = await this._walletAddresses();
+    if (addresses.length === 0) return;
+    let utxos: Array<{ assetName?: string; satoshis?: number }> = [];
+    try {
+      utxos = await this.getBackend().rpc('getaddressutxos', [{ addresses, assetName: '*' }]);
+    } catch (err) {
+      console.debug('NeuraiHardwareWallet: asset utxo fetch failed', err);
+      return;
+    }
+    const byAsset: Record<string, number> = {};
+    for (const u of utxos ?? []) {
+      const name = u.assetName;
+      if (!name || name === 'XNA' || !u.satoshis) continue;
+      byAsset[name] = (byAsset[name] || 0) + u.satoshis;
+    }
+    this._heldAssets = Object.entries(byAsset)
+      .filter(([, sats]) => sats > 0)
+      .map(([name, sats]) => ({ name, type: getAssetType(name), amount: sats / 1e8 }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    emitWalletChanged(this.getID());
   }
 
   // ---------- HD discovery (legacy) ------------------------------------------------
@@ -446,6 +502,186 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     return { keyType: 'legacy', psbtBase64, feeSats: inSats - amountToSend - changeSats, amountSats: amountToSend };
   }
 
+  // ---------- device-signed asset transfer -----------------------------------------
+
+  /**
+   * Build an unsigned asset (token) transfer for the device to sign. Mirrors the
+   * software asset send (`createStandardAssetTransferTransaction`) but stages the
+   * result for the NeuraiHW: the device shows the asset name/amount via the
+   * `buildAssetTransferDisplayMetadata` display payload, and the fee is paid in
+   * XNA. `amount` is in full asset units.
+   */
+  async buildUnsignedAssetSend(toAddress: string, assetName: string, amount: number): Promise<NeuraiHwUnsignedSend> {
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Invalid asset amount');
+    const feeRateXnaPerKb = await this.estimateFeeRate();
+    if (this.keyType === 'pq') return this._buildPqAssetSend(toAddress, assetName, amount, feeRateXnaPerKb);
+    return this._buildLegacyAssetSend(toAddress, assetName, amount, feeRateXnaPerKb);
+  }
+
+  /** Fetch the wallet's asset UTXOs (for `assetName`) and native XNA UTXOs. */
+  private async _fetchAssetAndXnaUtxos(addresses: string[], assetName: string): Promise<{ assetUtxos: HwUtxo[]; xnaUtxos: HwUtxo[] }> {
+    const raw = await this.getBackend().rpc<HwUtxo[]>('getaddressutxos', [{ addresses, assetName: '*' }]);
+    const all = (raw ?? []).filter(u => u.satoshis > 0);
+    return {
+      assetUtxos: all.filter(u => u.assetName === assetName),
+      xnaUtxos: all.filter(u => !u.assetName || u.assetName === 'XNA'),
+    };
+  }
+
+  private async _buildPqAssetSend(
+    toAddress: string,
+    assetName: string,
+    amount: number,
+    feeRateXnaPerKb: number,
+  ): Promise<NeuraiHwUnsignedSend> {
+    if (!this.address) throw new Error('Hardware wallet has no address');
+    const { assetUtxos, xnaUtxos } = await this._fetchAssetAndXnaUtxos([this.address], assetName);
+    if (assetUtxos.length === 0) throw new Error(`No spendable ${assetName} to send`);
+    if (xnaUtxos.length === 0) throw new Error('No spendable XNA to cover the network fee');
+
+    const amountRaw = Math.round(amount * 1e8);
+    if (assetUtxos.reduce((s, u) => s + u.satoshis, 0) < amountRaw) throw new Error(`Insufficient ${assetName} balance`);
+    const selectedAsset = pickUtxos(assetUtxos, amountRaw);
+    const assetChangeRaw = selectedAsset.reduce((s, u) => s + u.satoshis, 0) - amountRaw;
+
+    // PQ-sized fee: the WSS UTXO scripts aren't populated, so feed synthetic
+    // `5120` (AuthScript) prefixes to the estimator. Backend rate (≥ min relay).
+    const outAddrs = (xnaChange: boolean) => [
+      toAddress,
+      ...(assetChangeRaw > 0 ? [this.address] : []),
+      ...(xnaChange ? [this.address] : []),
+    ];
+    const pqScripts = (n: number) => Array.from({ length: n }, () => '5120');
+    let selectedXna = [xnaUtxos[0]];
+    let feeSats = estimateNeuraiFeeSats(pqScripts(selectedAsset.length + selectedXna.length), outAddrs(true), feeRateXnaPerKb);
+    selectedXna = pickUtxos(xnaUtxos, feeSats + CHANGE_DUST_SATS);
+    feeSats = estimateNeuraiFeeSats(pqScripts(selectedAsset.length + selectedXna.length), outAddrs(true), feeRateXnaPerKb);
+    const xnaIn = selectedXna.reduce((s, u) => s + u.satoshis, 0);
+    let xnaChangeSats = xnaIn - feeSats;
+    if (xnaChangeSats < 0) throw new Error('Balance too low to cover the network fee');
+    if (xnaChangeSats > 0 && xnaChangeSats < CHANGE_DUST_SATS) {
+      feeSats += xnaChangeSats;
+      xnaChangeSats = 0;
+    }
+
+    const transfers: { address: string; assetName: string; amountRaw: bigint }[] = [
+      { address: toAddress, assetName, amountRaw: BigInt(amountRaw) },
+    ];
+    if (assetChangeRaw > 0) transfers.push({ address: this.address, assetName, amountRaw: BigInt(assetChangeRaw) });
+    const payments: { address: string; valueSats: bigint }[] = [];
+    if (xnaChangeSats > 0) payments.push({ address: this.address, valueSats: BigInt(xnaChangeSats) });
+
+    const allInputs = [...selectedAsset, ...selectedXna];
+    const built = createStandardAssetTransferTransaction({
+      inputs: allInputs.map(u => ({ txid: u.txid, vout: u.outputIndex })),
+      payments,
+      transfers,
+    });
+
+    // Asset-wrapped prevouts carry 0 XNA, so their sighash amount is 0; XNA fee
+    // inputs use their real value.
+    const inputs: IPQSignInput[] = allInputs.map((u, index) => ({
+      index,
+      amount: u.assetName && u.assetName !== 'XNA' ? 0 : u.satoshis,
+      // Optional prevout script for device-side verification; the WSS UTXO
+      // scripts aren't populated, so we omit it (empty) like the XNA path.
+      script_pub_key: '',
+    }));
+
+    const display = buildAssetTransferDisplayMetadata({
+      assetName,
+      assetAmount: amount,
+      destinationAddress: toAddress,
+      changeAddress: this.address,
+      inputAddresses: [this.address],
+      feeAmount: feeSats / 1e8,
+      baseCurrency: 'XNA',
+    });
+
+    return { keyType: 'pq', rawTxHex: built.rawTx, inputs, feeSats, amountSats: 0, asset: { name: assetName, amount }, display };
+  }
+
+  private async _buildLegacyAssetSend(
+    toAddress: string,
+    assetName: string,
+    amount: number,
+    feeRateXnaPerKb: number,
+  ): Promise<NeuraiHwUnsignedSend> {
+    await this._ensureDiscovered();
+    const { assetUtxos, xnaUtxos } = await this._fetchAssetAndXnaUtxos(this._watched, assetName);
+    const ownedAsset = assetUtxos.filter(u => this._addrMeta.has(u.address));
+    const ownedXna = xnaUtxos.filter(u => this._addrMeta.has(u.address));
+    if (ownedAsset.length === 0) throw new Error(`No spendable ${assetName} to send`);
+    if (ownedXna.length === 0) throw new Error('No spendable XNA to cover the network fee');
+
+    const amountRaw = Math.round(amount * 1e8);
+    if (ownedAsset.reduce((s, u) => s + u.satoshis, 0) < amountRaw) throw new Error(`Insufficient ${assetName} balance`);
+    const selectedAsset = pickUtxos(ownedAsset, amountRaw);
+    const assetChangeRaw = selectedAsset.reduce((s, u) => s + u.satoshis, 0) - amountRaw;
+
+    const changeAddr = await this.getChangeAddressAsync();
+    const outAddrs = (xnaChange: boolean) => [toAddress, ...(assetChangeRaw > 0 ? [changeAddr] : []), ...(xnaChange ? [changeAddr] : [])];
+    const legacyScripts = (n: number) => Array.from({ length: n }, () => '76a914');
+    let selectedXna = [ownedXna[0]];
+    let feeSats = estimateNeuraiFeeSats(legacyScripts(selectedAsset.length + selectedXna.length), outAddrs(true), feeRateXnaPerKb);
+    selectedXna = pickUtxos(ownedXna, feeSats + CHANGE_DUST_SATS);
+    feeSats = estimateNeuraiFeeSats(legacyScripts(selectedAsset.length + selectedXna.length), outAddrs(true), feeRateXnaPerKb);
+    const xnaIn = selectedXna.reduce((s, u) => s + u.satoshis, 0);
+    let xnaChangeSats = xnaIn - feeSats;
+    if (xnaChangeSats < 0) throw new Error('Balance too low to cover the network fee');
+    if (xnaChangeSats > 0 && xnaChangeSats < CHANGE_DUST_SATS) {
+      feeSats += xnaChangeSats;
+      xnaChangeSats = 0;
+    }
+
+    const transfers: { address: string; assetName: string; amountRaw: bigint }[] = [
+      { address: toAddress, assetName, amountRaw: BigInt(amountRaw) },
+    ];
+    if (assetChangeRaw > 0) transfers.push({ address: changeAddr, assetName, amountRaw: BigInt(assetChangeRaw) });
+    const payments: { address: string; valueSats: bigint }[] = [];
+    if (xnaChangeSats > 0) payments.push({ address: changeAddr, valueSats: BigInt(xnaChangeSats) });
+
+    const allInputs = [...selectedAsset, ...selectedXna];
+    const built = createStandardAssetTransferTransaction({
+      inputs: allInputs.map(u => ({ txid: u.txid, vout: u.outputIndex })),
+      payments,
+      transfers,
+    });
+
+    // The device reads each prevout value from the full prev tx; asset outputs
+    // carry 0 XNA, so the device signs them with amount 0 automatically.
+    const inputs: IPSBTInputMetadata[] = [];
+    for (const u of allInputs) {
+      const meta = this._addrMeta.get(u.address)!;
+      const rawTxHex = await this._fetchRawTx(u.txid);
+      inputs.push({
+        txid: u.txid,
+        vout: u.outputIndex,
+        rawTxHex,
+        pubkey: meta.pubkeyHex,
+        masterFingerprint: this.hwFingerprint,
+        derivationPath: meta.path,
+      });
+    }
+
+    const display = buildAssetTransferDisplayMetadata({
+      assetName,
+      assetAmount: amount,
+      destinationAddress: toAddress,
+      changeAddress: changeAddr,
+      feeAmount: feeSats / 1e8,
+      baseCurrency: 'XNA',
+    });
+
+    const psbtBase64 = buildPSBTFromRawTransaction({
+      network: this.network as NetworkType,
+      rawUnsignedTransaction: built.rawTx,
+      inputs,
+      display,
+    });
+    return { keyType: 'legacy', psbtBase64, feeSats, amountSats: 0, asset: { name: assetName, amount }, display };
+  }
+
   async signWithDevice(device: NeuraiESP32, unsigned: NeuraiHwUnsignedSend): Promise<{ signedHex: string; txId: string }> {
     // Verify the connected device is genuine NeuraiHW firmware. `ping` needs no
     // on-device confirmation, so signing stays a single approval (the sign
@@ -459,12 +695,12 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     }
 
     if (unsigned.keyType === 'pq') {
-      const result = await device.signPqRawTransaction({ txHex: unsigned.rawTxHex!, inputs: unsigned.inputs! });
+      const result = await device.signPqRawTransaction({ txHex: unsigned.rawTxHex!, inputs: unsigned.inputs!, display: unsigned.display });
       if (!result.txHex) throw new Error('Device did not return a signed transaction');
       return { signedHex: result.txHex, txId: result.txId };
     }
 
-    const signed = await device.signPsbt(unsigned.psbtBase64!);
+    const signed = await device.signPsbt(unsigned.psbtBase64!, unsigned.display);
     const { txHex, txId } = finalizeSignedPSBT(unsigned.psbtBase64!, signed.psbt, this.network as NetworkType);
     if (!txHex) throw new Error('Could not finalize the signed transaction');
     return { signedHex: txHex, txId };
