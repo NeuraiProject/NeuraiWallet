@@ -29,6 +29,7 @@ import PlausibleDeniability from '../screen/PlausibleDeniability';
 import Licensing from '../screen/settings/Licensing';
 import NetworkSettings from '../screen/settings/NetworkSettings';
 import NeuraiBackendEdit from '../screen/settings/NeuraiBackendEdit';
+import DepinRpcEdit from '../screen/settings/DepinRpcEdit';
 import SettingsBlockExplorer from '../screen/settings/SettingsBlockExplorer';
 import About from '../screen/settings/About';
 // import DefaultView from '../screen/settings/DefaultView'; // Commented out - not accessible from UI
@@ -340,6 +341,11 @@ const DetailViewStackScreensStack = () => {
           name="NeuraiBackendEdit"
           component={NeuraiBackendEdit}
           options={navigationStyle(getSettingsHeaderOptions(loc.settings.neurai_backend_edit_title))(theme)}
+        />
+        <DetailViewStack.Screen
+          name="DepinRpcEdit"
+          component={DepinRpcEdit}
+          options={navigationStyle(getSettingsHeaderOptions(loc.depin.rpc_settings_title))(theme)}
         />
         <DetailViewStack.Screen
           name="SettingsBlockExplorer"

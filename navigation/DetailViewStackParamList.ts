@@ -61,6 +61,7 @@ export type DetailViewStackParamList = {
   Licensing: undefined;
   NetworkSettings: undefined;
   NeuraiBackendEdit: { network: NeuraiNetwork };
+  DepinRpcEdit: { network?: NeuraiNetwork };
   About: undefined;
   ElectrumSettings: { server?: ElectrumServerItem; onBarScanned?: string };
   SettingsBlockExplorer: undefined;

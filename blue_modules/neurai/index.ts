@@ -12,6 +12,7 @@ import { ElectrumXBackend } from './ElectrumXBackend';
 import { RpcBackend } from './RpcBackend';
 import { WssBackend } from './WssBackend';
 import { getWssUrlOverride } from './backendOverrides';
+import { getDepinRpcConfig } from './depinRpcOverrides';
 
 export * from './networkConfig';
 export * from './NeuraiBackend';
@@ -19,6 +20,15 @@ export { WssBackend } from './WssBackend';
 export { RpcBackend } from './RpcBackend';
 export { ElectrumXBackend } from './ElectrumXBackend';
 export { loadOverrides, getWssUrlOverride, setWssUrlOverride, isOverridesLoaded } from './backendOverrides';
+export {
+  loadDepinRpcOverrides,
+  getDepinRpcConfig,
+  getDepinRpcOverride,
+  setDepinRpcConfig,
+  isDepinRpcOverridesLoaded,
+  DEFAULT_DEPIN_RPC_URL,
+  type DepinRpcConfig,
+} from './depinRpcOverrides';
 
 /**
  * Temporary kill-switch: while the Neurai mainnet wallet-services WSS
@@ -36,33 +46,43 @@ class DisabledBackend implements NeuraiBackend {
   constructor(chain: NeuraiChainType) {
     this.chain = chain;
   }
+
   async rpc<T = unknown>(): Promise<T> {
     throw new Error(`Neurai ${this.chain} backend is temporarily disabled (mainnet WSS not deployed)`);
   }
+
   async getTipHeight(): Promise<number> {
     return 0;
   }
+
   async getBalance(): Promise<number> {
     return 0;
   }
+
   async getAddressHistory(): Promise<AddressDelta[]> {
     return [];
   }
+
   async getUtxos(): Promise<NeuraiUtxo[]> {
     return [];
   }
+
   async getMempool(): Promise<MempoolEntry[]> {
     return [];
   }
+
   async broadcast(): Promise<string> {
     throw new Error(`Neurai ${this.chain} backend is temporarily disabled (mainnet WSS not deployed)`);
   }
+
   async estimateFee(targetBlocks: number): Promise<FeeEstimate> {
     return { targetBlocks, feeRateXnaPerKb: 0 };
   }
+
   async getBlockTimes(): Promise<Record<number, number>> {
     return {};
   }
+
   async ping(): Promise<boolean> {
     return false;
   }
@@ -110,5 +130,23 @@ export function createDefaultRpcBackend(network: NeuraiNetwork, kind: WalletKind
     kind: 'rpc',
     chain,
     url: CHAIN_PARAMS[chain].defaultRpcUrl,
+  });
+}
+
+/**
+ * RPC backend for the DePIN chat node (methods `depinsubmitmsg` /
+ * `depinreceivemsg` / `checkdepinvalidity` …). Uses the user-configured DePIN
+ * RPC URL/credentials (see `depinRpcOverrides.ts`) or the public default.
+ * DePIN chat is Legacy-only, so the chain is always the legacy one.
+ */
+export function getDepinRpcBackend(network: NeuraiNetwork): NeuraiBackend {
+  const chain: NeuraiChainType = chainFor(network, 'legacy');
+  const config = getDepinRpcConfig(network);
+  return createBackend({
+    kind: 'rpc',
+    chain,
+    url: config.url,
+    username: config.username,
+    password: config.password,
   });
 }

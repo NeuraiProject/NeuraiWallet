@@ -23,6 +23,8 @@ import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/h
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 import presentAlert, { AlertType } from '../../components/Alert';
 import AssetsList from '../../components/AssetsList';
+import DePINChat from '../../components/DePINChat';
+import { isDepinChatSupportedNetwork } from '../../blue_modules/neurai/depinChatIdentity';
 import { FButton, FContainer, FloatButtonsBottomFade } from '../../components/FloatButtons';
 import { useTheme } from '../../components/themes';
 import { TransactionListItem } from '../../components/TransactionListItem';
@@ -77,7 +79,9 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   // All Neurai wallets (including the hardware wallet, which reads assets via
   // the backend) get a Transactions / Assets tab switch in the list header.
   const showAssetsTab = isNeuraiWallet(wallet);
-  const [activeTab, setActiveTab] = useState<'transactions' | 'assets'>('transactions');
+  // DePIN chat is Legacy-only (PQ networks have no BIP44 chat identity).
+  const showDepinTab = isNeuraiWallet(wallet) && isDepinChatSupportedNetwork(wallet.network);
+  const [activeTab, setActiveTab] = useState<'transactions' | 'assets' | 'depin'>('transactions');
   const MAX_FAILURES = 3;
   const flatListRef = useRef<FlatList<Transaction>>(null);
   const headerRef = useRef<View>(null);
@@ -499,9 +503,16 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
         <View style={[styles.flex, stylesHook.backgroundContainer]}>
           {showAssetsTab ? (
             <View style={styles.tabsBar}>
-              {(['transactions', 'assets'] as const).map(tab => {
+              {(
+                (showDepinTab ? (['transactions', 'assets', 'depin'] as const) : (['transactions', 'assets'] as const)) as readonly (
+                  | 'transactions'
+                  | 'assets'
+                  | 'depin'
+                )[]
+              ).map(tab => {
                 const active = activeTab === tab;
-                const label = tab === 'transactions' ? loc.assets.tab_transactions : loc.assets.tab_assets;
+                const label =
+                  tab === 'transactions' ? loc.assets.tab_transactions : tab === 'assets' ? loc.assets.tab_assets : loc.assets.tab_depin;
                 return (
                   <Pressable
                     key={tab}
@@ -548,6 +559,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       saveToDisk,
       isBiometricUseCapableAndEnabled,
       showAssetsTab,
+      showDepinTab,
       activeTab,
     ],
   );
@@ -561,7 +573,12 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   return (
     <View style={[styles.flex, stylesHook.backgroundContainer]}>
       <View style={[styles.refreshIndicatorBackground, stylesHook.gradientBackground]} testID="TransactionsListView" />
-      {showAssetsTab && activeTab === 'assets' ? (
+      {showDepinTab && activeTab === 'depin' ? (
+        <View style={[styles.flex, stylesHook.backgroundContainer]}>
+          <ListHeaderComponent />
+          <DePINChat walletID={walletID} />
+        </View>
+      ) : showAssetsTab && activeTab === 'assets' ? (
         <AssetsList walletID={walletID} ListHeaderComponent={ListHeaderComponent} />
       ) : (
         <FlatList<Transaction>

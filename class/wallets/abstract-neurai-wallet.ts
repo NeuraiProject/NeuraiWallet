@@ -1181,6 +1181,72 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     };
   }
 
+  /**
+   * Build + sign a "reveal public key" transaction for the dedicated DePIN chat
+   * address (account 100, `m/44'/coin'/100'/0/0`). That address lives OUTSIDE
+   * the wallet's normal derivation window, so the engine doesn't hold its key —
+   * we sign with the DePIN identity's WIF directly (`privateKeys[depinAddress]`).
+   *
+   * Spending any UTXO from the address publishes its public key on-chain, which
+   * is required for others to encrypt DePIN group messages to it. We send a
+   * small amount to `burnAddress` and return the rest as change to the DePIN
+   * address. `utxos` are the address's base-currency UTXOs (fetched by the
+   * caller from the DePIN node); broadcasting is also left to the caller.
+   *
+   * Mirrors {@link buildSendMaxTransaction} (manual assembly + backend-priced
+   * fee) rather than `engine.createTransaction`, which can't sign for a foreign
+   * address without per-UTXO key material.
+   */
+  async buildDepinPubkeyRevealTransaction(opts: {
+    depinAddress: string;
+    depinWif: string;
+    utxos: SpendableUtxo[];
+    burnAddress: string;
+    amountSats: number;
+  }): Promise<{ signedHex: string; feeSats: number; changeSats: number }> {
+    const { depinAddress, depinWif, burnAddress, amountSats } = opts;
+    const utxos = opts.utxos.filter(
+      u => (u.assetName === 'XNA' || !u.assetName) && u.satoshis > 0 && u.address === depinAddress,
+    );
+    if (utxos.length === 0) throw new Error('No spendable XNA at the DePIN address');
+    const totalIn = utxos.reduce((sum, u) => sum + u.satoshis, 0);
+
+    const feeRateXnaPerKb = await this.estimateFeeRate();
+    let feeSats = estimateNeuraiFeeSats(
+      utxos.map(u => u.script),
+      [burnAddress, depinAddress],
+      feeRateXnaPerKb,
+    );
+    let changeSats = totalIn - amountSats - feeSats;
+    if (changeSats < 0) throw new Error('Insufficient funds at the DePIN address to cover the burn and fee');
+    // Fold a sub-dust change into the fee rather than emitting an unspendable output.
+    if (changeSats > 0 && changeSats < SEND_DUST_SATS) {
+      feeSats += changeSats;
+      changeSats = 0;
+    }
+
+    const payments: { address: string; valueSats: bigint }[] = [{ address: burnAddress, valueSats: BigInt(amountSats) }];
+    if (changeSats > 0) payments.push({ address: depinAddress, valueSats: BigInt(changeSats) });
+
+    const { rawTx } = createPaymentTransaction({
+      inputs: utxos.map(u => ({ txid: u.txid, vout: u.outputIndex })),
+      payments,
+    });
+
+    // The DePIN address is foreign to the engine, so supply its WIF directly.
+    const privateKeys: Record<string, unknown> = { [depinAddress]: depinWif };
+
+    const signedHex = signNeuraiTransaction(
+      this.network as Parameters<typeof signNeuraiTransaction>[0],
+      rawTx,
+      utxos as unknown as Parameters<typeof signNeuraiTransaction>[2],
+      privateKeys as Parameters<typeof signNeuraiTransaction>[3],
+    );
+    if (!signedHex) throw new Error('Failed to sign the DePIN reveal transaction');
+
+    return { signedHex, feeSats, changeSats };
+  }
+
   async broadcastTx(rawHex: string): Promise<string> {
     const primary = this.getBackend();
     try {
