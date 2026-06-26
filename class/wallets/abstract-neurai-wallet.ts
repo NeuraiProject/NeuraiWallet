@@ -958,20 +958,21 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     const assetName = opts?.assetName;
     const isAsset = !!assetName && assetName !== 'XNA';
 
-    // Asset transfers are built here rather than via `engine.createTransaction`:
-    // the engine prices the fee straight off `estimatesmartfee` with NO min-relay
-    // floor, so on low-traffic chains (testnet) it produces a fee below the
-    // node's minimum → "min relay fee not met". We assemble the transfer
-    // ourselves (like `buildSendMaxTransaction`) and price it off the backend's
-    // fee rate, which is safely above min relay.
+    // Asset transfers go through `engine.transferAsset` (neurai-assets 1.3.3):
+    // it supports multiple recipients and every asset type, and crucially does
+    // the owner-token dance required to move soulbound DePIN / restricted assets
+    // — which the plain engine send path does not. The legacy manual builder is
+    // kept as a single-recipient fallback in case the engine path is
+    // unavailable or fails.
     if (isAsset) {
-      if (targets.length !== 1) throw new Error('Asset transfers support a single recipient');
-      return this._buildAssetTransferTransaction(
-        targets[0].address,
-        targets[0].amount,
-        assetName as string,
-        forcedChangeAddressBaseCurrency,
-      );
+      const name = assetName as string;
+      try {
+        return await this._buildAssetTransferViaEngine(targets, name, forcedChangeAddressBaseCurrency);
+      } catch (err) {
+        console.warn('[Neurai] engine.transferAsset failed, falling back to manual asset builder:', describeBackendError(err));
+        if (targets.length !== 1) throw err;
+        return this._buildAssetTransferTransaction(targets[0].address, targets[0].amount, name, forcedChangeAddressBaseCurrency);
+      }
     }
 
     const engine = await this.ensureEngine();
@@ -1001,6 +1002,43 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       sentAmountSats: Math.round(result.debug.amount * ONE_FULL_COIN),
       netDebitSats: Math.round(result.debug.xnaAmount * ONE_FULL_COIN),
       debug: result.debug,
+    };
+  }
+
+  /**
+   * Build + sign an asset transfer via `engine.transferAsset` (neurai-assets
+   * 1.3.3). Handles multiple recipients, every asset type, and the owner-token
+   * spend/return needed to move soulbound DePIN / restricted assets. We pass
+   * `broadcast: false` and let the caller broadcast through {@link broadcastTx}
+   * so the descriptive WSS→RPC error fallback still applies. `amount` is in the
+   * asset's display units (the node scales by the asset's declared decimals).
+   */
+  private async _buildAssetTransferViaEngine(
+    targets: NeuraiTransactionTarget[],
+    assetName: string,
+    forcedChangeAddress?: string,
+  ): Promise<NeuraiBuildTransactionResult> {
+    const engine = await this.ensureEngine();
+    const recipients = targets.map(t => ({ address: t.address, amount: t.amount }));
+    const result = await engine.transferAsset({
+      assetName,
+      recipients,
+      broadcast: false,
+      ...(forcedChangeAddress ? { changeAddress: forcedChangeAddress } : {}),
+    });
+    const signedHex = result.signedTransaction ?? '';
+    if (!signedHex) throw new Error('engine.transferAsset returned no signed transaction');
+    const feeSats = Math.round((result.fee ?? 0) * ONE_FULL_COIN);
+    const totalAmount = targets.reduce((sum, t) => sum + t.amount, 0);
+    return {
+      signedHex,
+      unsignedHex: result.rawTx ?? '',
+      fee: result.fee ?? 0,
+      // An asset transfer sends ~0 XNA to the recipient; only the fee leaves the wallet.
+      sentAmountSats: 0,
+      netDebitSats: feeSats,
+      asset: { name: assetName, amount: totalAmount },
+      debug: result,
     };
   }
 
@@ -1205,9 +1243,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     amountSats: number;
   }): Promise<{ signedHex: string; feeSats: number; changeSats: number }> {
     const { depinAddress, depinWif, burnAddress, amountSats } = opts;
-    const utxos = opts.utxos.filter(
-      u => (u.assetName === 'XNA' || !u.assetName) && u.satoshis > 0 && u.address === depinAddress,
-    );
+    const utxos = opts.utxos.filter(u => (u.assetName === 'XNA' || !u.assetName) && u.satoshis > 0 && u.address === depinAddress);
     if (utxos.length === 0) throw new Error('No spendable XNA at the DePIN address');
     const totalIn = utxos.reduce((sum, u) => sum + u.satoshis, 0);
 
