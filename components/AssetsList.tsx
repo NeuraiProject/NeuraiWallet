@@ -111,7 +111,7 @@ const AssetsList: React.FC<AssetsListProps> = ({ walletID, ListHeaderComponent }
       extraData={[isLoading, assets.length]}
       keyExtractor={keyExtractor}
       renderItem={renderItem}
-      contentContainerStyle={stylesHook.root}
+      contentContainerStyle={[styles.listContent, stylesHook.root]}
       ListHeaderComponent={ListHeaderComponent ?? undefined}
       contentInset={{ top: 0, left: 0, bottom: 90, right: 0 }}
       ListEmptyComponent={
@@ -133,6 +133,12 @@ const AssetsList: React.FC<AssetsListProps> = ({ walletID, ListHeaderComponent }
 };
 
 const styles = StyleSheet.create({
+  // Fill the viewport so the list's background covers the header's orange
+  // gradient behind it when there are only a few assets (matches Transactions,
+  // which uses a full-height footer for the same effect).
+  listContent: {
+    flexGrow: 1,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

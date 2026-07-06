@@ -72,15 +72,33 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
   const chainType = neurai ? neurai.network : 'xna';
   const supported = !!neurai && isDepinChatSupportedNetwork(chainType);
 
-  const identity = useMemo<DepinChatIdentity | null>(() => {
-    if (!neurai || !supported || !neurai.secret) return null;
-    try {
-      return deriveDepinChatIdentity({ network: chainType as 'xna' | 'xna-test', mnemonic: neurai.secret, passphrase: neurai.passphrase });
-    } catch (e) {
-      console.debug('DePINChat: failed to derive chat identity', e);
-      return null;
+  // Deriving the account-100 identity runs BIP39 seed derivation (PBKDF2), which
+  // is heavy enough to jank the tab switch if done synchronously in render — and
+  // it only depends on (mnemonic, passphrase, network), so we derive it once off
+  // the interaction after the tab has animated in, keyed on those primitives.
+  const secret = neurai?.secret ?? '';
+  const passphrase = neurai?.passphrase ?? '';
+  const [identity, setIdentity] = useState<DepinChatIdentity | null>(null);
+  useEffect(() => {
+    if (!supported || !secret) {
+      setIdentity(null);
+      return;
     }
-  }, [neurai, supported, chainType]);
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      try {
+        const derived = deriveDepinChatIdentity({ network: chainType as 'xna' | 'xna-test', mnemonic: secret, passphrase });
+        if (!cancelled) setIdentity(derived);
+      } catch (e) {
+        console.debug('DePINChat: failed to derive chat identity', e);
+        if (!cancelled) setIdentity(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+      task.cancel();
+    };
+  }, [supported, chainType, secret, passphrase]);
 
   const backendRef = useRef<NeuraiBackend | null>(null);
   const rpc = useMemo(() => {
