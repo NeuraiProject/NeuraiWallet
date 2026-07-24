@@ -1,0 +1,66 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import type { NeuraiBackend, NeuraiNetwork } from '../blue_modules/neurai';
+import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
+import type { AbstractNeuraiWallet } from '../class/wallets/abstract-neurai-wallet';
+import presentAlert from '../components/Alert';
+import { BURN_ADDRESS, ONE_COIN, REVEAL_AMOUNT_XNA, REVEAL_RETRY_MS } from '../components/depinChat/constants';
+import loc from '../loc';
+import type { DepinRpc } from './useDepinChatSetup';
+
+interface UseDepinChatRevealParams {
+  getBackend: () => NeuraiBackend;
+  identity: DepinChatIdentity | null;
+  network: NeuraiNetwork;
+  rpc: DepinRpc | null;
+  wallet: Pick<AbstractNeuraiWallet, 'buildDepinPubkeyRevealTransaction'> | null;
+}
+
+/** Broadcasts the pubkey-reveal burn and guards against duplicate submissions. */
+const useDepinChatReveal = ({ getBackend, identity, network, rpc, wallet }: UseDepinChatRevealParams) => {
+  const [revealing, setRevealing] = useState(false);
+  const [revealPending, setRevealPending] = useState(false);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    },
+    [],
+  );
+
+  const reveal = useCallback(async () => {
+    if (!wallet || !identity || revealing || !rpc) return;
+    setRevealing(true);
+    try {
+      const backend = getBackend();
+      const utxos = await backend.getUtxos([identity.address]);
+      const { signedHex } = await wallet.buildDepinPubkeyRevealTransaction({
+        depinAddress: identity.address,
+        depinWif: identity.wif,
+        utxos,
+        burnAddress: BURN_ADDRESS[network],
+        amountSats: Math.round(REVEAL_AMOUNT_XNA * ONE_COIN),
+      });
+      await backend.broadcast(signedHex);
+      setRevealPending(true);
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = setTimeout(() => setRevealPending(false), REVEAL_RETRY_MS);
+      presentAlert({ message: loc.depin.reveal_waiting });
+    } catch (error: any) {
+      const message = String(error?.message ?? error);
+      const isFundsError = /insufficient|funds|cover/i.test(message);
+      presentAlert({
+        message: isFundsError
+          ? loc.formatString(loc.depin.reveal_need_funds, { amount: REVEAL_AMOUNT_XNA, ticker: 'XNA' })
+          : loc.depin.reveal_failed,
+      });
+    } finally {
+      setRevealing(false);
+    }
+  }, [getBackend, identity, network, revealing, rpc, wallet]);
+
+  return { reveal, revealPending, revealing };
+};
+
+export default useDepinChatReveal;

@@ -23,10 +23,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NeuraiNetwork } from '../blue_modules/neurai';
 import { isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIdentity';
 import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
-import { useDePINChat, type RecipientInfo } from '../hooks/useDePINChat';
+import { useDePINChat } from '../hooks/useDePINChat';
+import useDepinChatAssetSelection from '../hooks/useDepinChatAssetSelection';
 import useDepinChatIdentity from '../hooks/useDepinChatIdentity';
 import useDepinChatKeyboard from '../hooks/useDepinChatKeyboard';
 import useDepinChatReadyState from '../hooks/useDepinChatReadyState';
+import useDepinChatReveal from '../hooks/useDepinChatReveal';
 import useDepinChatSetup from '../hooks/useDepinChatSetup';
 import useWalletSubscribe from '../hooks/useWalletSubscribe';
 import { useExtendedNavigation } from '../hooks/useExtendedNavigation';
@@ -34,7 +36,7 @@ import loc from '../loc';
 import presentAlert from './Alert';
 import Icon from './Icon';
 import { useTheme } from './themes';
-import { BURN_ADDRESS, FUND_AMOUNT_XNA, ONE_COIN, REVEAL_AMOUNT_XNA, REVEAL_RETRY_MS } from './depinChat/constants';
+import { FUND_AMOUNT_XNA } from './depinChat/constants';
 import DepinChatAddressCard from './depinChat/DepinChatAddressCard';
 import DepinChatContactsDrawer from './depinChat/DepinChatContactsDrawer';
 import DepinChatConversationPanel from './depinChat/DepinChatConversationPanel';
@@ -66,16 +68,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     network,
     supported,
   });
-  const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
-  const [recipientList, setRecipientList] = useState<RecipientInfo[]>([]);
-  const [revealing, setRevealing] = useState(false);
-  const [revealPending, setRevealPending] = useState(false);
-  const revealRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (revealRetryTimerRef.current) clearTimeout(revealRetryTimerRef.current);
-    };
-  }, []);
+  const { recipientList, selectAsset: loadAsset, selectedAsset, setSelectedAsset } = useDepinChatAssetSelection({ rpc });
   const [activeTab, setActiveTab] = useState<string>('group');
   const [showQr, setShowQr] = useState(false);
   const [draft, setDraft] = useState('');
@@ -90,6 +83,17 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   });
 
   const { keyboardHeight, messagesListRef } = useDepinChatKeyboard();
+  const {
+    reveal: handleReveal,
+    revealPending,
+    revealing,
+  } = useDepinChatReveal({
+    getBackend,
+    identity,
+    network,
+    rpc,
+    wallet: neurai,
+  });
 
   // Back handling is owned by WalletTransactions (which also owns the tab
   // state): on a back action it calls goBack() first, so an open token chat
@@ -103,7 +107,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
         return true;
       },
     }),
-    [selectedAsset],
+    [selectedAsset, setSelectedAsset],
   );
 
   const {
@@ -153,67 +157,15 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     refreshServerInfo();
   }, [fetchStats, refreshServerInfo]);
 
-  // When a token is selected: load recipients + verify validity + start polling.
   const selectAsset = useCallback(
-    async (assetName: string) => {
-      if (!rpc) return;
-      setSelectedAsset(assetName);
-      setActiveTab('group');
-      setIsPolling(true);
-      try {
-        // Both calls use the full on-chain asset name ('&NAME'). If the server
-        // is configured with a different token spelling, this one may fail —
-        // that's non-fatal: pubkeys are then resolved lazily per address via
-        // `getpubkey`, and the hook adapts the spelling on its polling path.
-        const [depinAddrs, byAsset] = await Promise.all([
-          rpc('listdepinaddresses', [assetName]) as Promise<Array<{ address: string; pubkey?: string }>>,
-          rpc('listaddressesbyasset', [assetName]) as Promise<Record<string, unknown>>,
-        ]);
-        const pubkeyByAddr = new Map<string, string>();
-        for (const item of depinAddrs ?? []) if (item.pubkey) pubkeyByAddr.set(item.address, item.pubkey);
-        const list: RecipientInfo[] = Object.keys(byAsset ?? {}).map(address => ({
-          address,
-          pubkey: pubkeyByAddr.get(address) ?? null,
-        }));
-        setRecipientList(list);
-      } catch (e) {
-        console.debug('DePINChat: failed to load recipients', e);
-      }
-      checkAssetValidity();
-    },
-    [rpc, setIsPolling, checkAssetValidity],
+    (assetName: string) =>
+      loadAsset(assetName, {
+        checkAssetValidity,
+        onAssetSelected: () => setActiveTab('group'),
+        setIsPolling,
+      }),
+    [checkAssetValidity, loadAsset, setIsPolling],
   );
-
-  const handleReveal = useCallback(async () => {
-    if (!neurai || !identity || revealing || !rpc) return;
-    setRevealing(true);
-    try {
-      const backend = getBackend();
-      const utxos = await backend.getUtxos([identity.address]);
-      const { signedHex } = await neurai.buildDepinPubkeyRevealTransaction({
-        depinAddress: identity.address,
-        depinWif: identity.wif,
-        utxos,
-        burnAddress: BURN_ADDRESS[network],
-        amountSats: Math.round(REVEAL_AMOUNT_XNA * ONE_COIN),
-      });
-      await backend.broadcast(signedHex);
-      setRevealPending(true);
-      if (revealRetryTimerRef.current) clearTimeout(revealRetryTimerRef.current);
-      revealRetryTimerRef.current = setTimeout(() => setRevealPending(false), REVEAL_RETRY_MS);
-      presentAlert({ message: loc.depin.reveal_waiting });
-    } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      const isFunds = /insufficient|funds|cover/i.test(msg);
-      presentAlert({
-        message: isFunds
-          ? loc.formatString(loc.depin.reveal_need_funds, { amount: REVEAL_AMOUNT_XNA, ticker: 'XNA' })
-          : loc.depin.reveal_failed,
-      });
-    } finally {
-      setRevealing(false);
-    }
-  }, [getBackend, identity, network, neurai, revealing, rpc]);
 
   const copyAddress = useCallback(() => {
     if (!identity) return;
