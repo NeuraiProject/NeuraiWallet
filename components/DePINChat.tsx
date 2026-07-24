@@ -30,6 +30,7 @@ import {
   View,
 } from 'react-native';
 import { GiftedChat, IMessage } from 'react-native-gifted-chat';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -71,6 +72,10 @@ const PUBKEY_POLL_MS = 25_000;
 // so a second tap can't double-burn while the tx confirms; if the pubkey still
 // hasn't appeared afterwards (tx dropped?), the button re-enables to retry.
 const REVEAL_RETRY_MS = 120_000;
+// Persisted last-known Ready state, keyed by chat address, so the badge shows
+// the previous color instantly on entry instead of defaulting to red while the
+// server / pubkey checks are still in flight.
+const READY_STATE_PREFIX = 'depin_ready_';
 const BURN_ADDRESS: Record<NeuraiNetwork, string> = {
   mainnet: 'NbURNXXXXXXXXXXXXXXXXXXXXXXXT65Gdr',
   testnet: 'tBURNXXXXXXXXXXXXXXXXXXXXXXXVZLroy',
@@ -180,8 +185,32 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   const [activeTab, setActiveTab] = useState<string>('group');
   const [showQr, setShowQr] = useState(false);
   const [draft, setDraft] = useState('');
+  // Which flap-tab of the section page is open: token chat picker or the
+  // experimental IoT area.
+  const [activeSection, setActiveSection] = useState<'chat' | 'iot'>('chat');
   const [showInfo, setShowInfo] = useState(false);
   const [serverInfo, setServerInfo] = useState<DepinServerInfo | null>(null);
+
+  // Ready-badge memory: show the last persisted state on entry, then let the
+  // live checks (server pool + pubkey) overwrite and re-persist it.
+  const [lastKnownReady, setLastKnownReady] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!identity) return;
+    let cancelled = false;
+    AsyncStorage.getItem(READY_STATE_PREFIX + identity.address)
+      .then(v => {
+        if (!cancelled && v != null) setLastKnownReady(v === '1');
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [identity]);
+  useEffect(() => {
+    if (!identity || serverInfo == null || pubkeyRevealed == null) return;
+    const real = serverInfo.enabled === true && pubkeyRevealed === true;
+    AsyncStorage.setItem(READY_STATE_PREFIX + identity.address, real ? '1' : '0').catch(() => {});
+  }, [identity, serverInfo, pubkeyRevealed]);
 
   // Keyboard handling: the app runs edge-to-edge, so Android never resizes the
   // window for the keyboard — and react-native-keyboard-controller providers
@@ -482,6 +511,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     chipActive: { backgroundColor: colors.elevated, borderColor: colors.foregroundColor },
     chipText: { color: colors.foregroundColor },
     banner: { backgroundColor: colors.inputBackgroundColor, borderColor: colors.formBorder },
+    divider: { backgroundColor: colors.formBorder },
     // With the keyboard open the chat column already ends right above it, so
     // the input bar only needs a small padding instead of the nav-bar inset.
     inputBar: {
@@ -503,7 +533,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
       accessibilityLabel={loc.depin.config}
       testID="DepinChatConfig"
     >
-      <Icon name="settings" type="material" size={22} color={colors.alternativeTextColor} />
+      <Icon name="settings" type="material" size={22} color="#f97316" />
     </Pressable>
   );
 
@@ -531,11 +561,22 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   const tokenHasAccess = (name: string): boolean | null =>
     serverInfo == null ? null : !!serverInfo.enabled && serverTokenNorm === name.replace(/^&/, '').toUpperCase();
   // Fully ready to operate: server pool enabled AND our pubkey is on-chain.
-  const isReady = serverInfo?.enabled === true && pubkeyRevealed === true;
+  // Until both checks have answered, fall back to the remembered state so the
+  // badge doesn't flash red on every entry.
+  const readyKnown = serverInfo != null && pubkeyRevealed != null;
+  const isReady = readyKnown ? serverInfo.enabled === true && pubkeyRevealed === true : (lastKnownReady ?? false);
+  // Chat section availability drives the DePIN Chat flap-tab color: green when
+  // the server pool is up and serves one of the held tokens; red = inert tab.
+  const chatActive =
+    serverInfo == null ? (lastKnownReady ?? false) : serverInfo.enabled === true && assetNames.some(n => tokenHasAccess(n) === true);
   const addressRow = (
     <View style={[styles.addressCard, stylesHook.card]}>
       <View style={[styles.readyBadge, isReady ? styles.readyBadgeOk : styles.readyBadgeNo]}>
         <Text style={styles.readyBadgeText}>{loc.depin.ready_badge}</Text>
+      </View>
+      <View style={styles.cardTitleRow}>
+        <Text style={[styles.title, stylesHook.text]}>{loc.depin.title}</Text>
+        <Text style={[styles.experimental, stylesHook.subtext]}>{` — ${loc.depin.experimental}`}</Text>
       </View>
       <Text style={[styles.addressLabel, stylesHook.subtext]}>{loc.depin.address_label}</Text>
       <Text style={[styles.addressText, stylesHook.text]} numberOfLines={1} ellipsizeMode="middle" selectable>
@@ -554,7 +595,10 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
           <QRCode value={identity.address} size={180} />
         </View>
       )}
-      <Text style={[styles.hint, stylesHook.subtext]}>{`${loc.depin.derivation_label}: ${identity.path}`}</Text>
+      <View style={styles.hintRow}>
+        <Text style={[styles.hint, stylesHook.subtext, styles.flex]}>{`${loc.depin.derivation_label}: ${identity.path}`}</Text>
+        {gearButton}
+      </View>
     </View>
   );
 
@@ -601,44 +645,80 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     </View>
   );
 
-  // No token selected yet — the section page: title, address card, the DePIN
-  // tokens held there, and (only while the RPC says the pubkey is NOT revealed)
-  // the reveal prompt at the bottom.
+  // No token selected yet — the section page: the DePIN card (title, address,
+  // derivation, Ready flap), a divider, then the flap-tabs: DePIN Chat (tokens)
+  // and the experimental IoT area.
   if (!selectedAsset) {
     return (
       <ScrollView style={[styles.flex, stylesHook.root]} contentContainerStyle={styles.scrollContent}>
-        <View style={styles.headerRow}>
-          <Text style={[styles.title, stylesHook.text]}>{loc.depin.title}</Text>
-          {gearButton}
-        </View>
-
         {addressRow}
 
-        <Text style={[styles.sectionLabel, stylesHook.subtext]}>{loc.depin.tokens_label}</Text>
-        {loadingAssets && assetNames.length === 0 ? (
-          <ActivityIndicator style={styles.loader} />
-        ) : assetNames.length === 0 ? (
-          <Text style={[styles.info, stylesHook.subtext]}>{loc.depin.no_token}</Text>
+        <View style={[styles.divider, stylesHook.divider]} />
+
+        <View style={styles.sectionTabs}>
+          <Pressable
+            onPress={() => {
+              if (chatActive) setActiveSection('chat');
+            }}
+            style={[
+              styles.sectionTab,
+              activeSection === 'chat' ? stylesHook.chipActive : stylesHook.chip,
+              chatActive ? styles.sectionTabOk : styles.sectionTabNo,
+            ]}
+            testID="DepinSectionChat"
+          >
+            <View style={[styles.chipDot, chatActive ? styles.chipDotOk : styles.chipDotNo]} />
+            <Text style={[styles.sectionTabText, stylesHook.chipText]}>{loc.depin.tab_chat}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setActiveSection('iot')}
+            style={[styles.sectionTab, activeSection === 'iot' ? stylesHook.chipActive : stylesHook.chip]}
+            testID="DepinSectionIot"
+          >
+            <Text style={[styles.sectionTabText, stylesHook.chipText]}>{loc.depin.tab_iot}</Text>
+            <View style={styles.testBadge}>
+              <Text style={styles.testBadgeText}>{loc.depin.iot_test_badge}</Text>
+            </View>
+          </Pressable>
+        </View>
+
+        {activeSection === 'chat' ? (
+          <>
+            <Text style={[styles.sectionLabel, stylesHook.subtext]}>{loc.depin.tokens_label}</Text>
+            {loadingAssets && assetNames.length === 0 ? (
+              <ActivityIndicator style={styles.loader} />
+            ) : assetNames.length === 0 ? (
+              <Text style={[styles.info, stylesHook.subtext]}>{loc.depin.no_token}</Text>
+            ) : (
+              <View style={styles.chipsWrap}>
+                {assetNames.map(name => {
+                  const access = tokenHasAccess(name);
+                  return (
+                    <Pressable
+                      key={name}
+                      onPress={() => selectAsset(name)}
+                      style={[styles.chip, stylesHook.chip, access === true && styles.chipAccess, access === false && styles.chipNoAccess]}
+                      testID={`DepinAsset-${name}`}
+                    >
+                      {access != null && <View style={[styles.chipDot, access ? styles.chipDotOk : styles.chipDotNo]} />}
+                      <Text style={[styles.chipText, stylesHook.chipText]}>{name}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
+            {revealBanner}
+          </>
         ) : (
-          <View style={styles.chipsWrap}>
-            {assetNames.map(name => {
-              const access = tokenHasAccess(name);
-              return (
-                <Pressable
-                  key={name}
-                  onPress={() => selectAsset(name)}
-                  style={[styles.chip, stylesHook.chip, access === true && styles.chipAccess, access === false && styles.chipNoAccess]}
-                  testID={`DepinAsset-${name}`}
-                >
-                  {access != null && <View style={[styles.chipDot, access ? styles.chipDotOk : styles.chipDotNo]} />}
-                  <Text style={[styles.chipText, stylesHook.chipText]}>{name}</Text>
-                </Pressable>
-              );
-            })}
+          <View style={[styles.banner, stylesHook.banner]}>
+            <View style={styles.bannerTitleRow}>
+              <Icon name="memory" type="material" size={18} color={colors.alternativeTextColor} />
+              <Text style={[styles.bannerTitle, stylesHook.text]}>{loc.depin.tab_iot}</Text>
+            </View>
+            <Text style={[styles.bannerDesc, stylesHook.subtext]}>{loc.depin.iot_placeholder}</Text>
           </View>
         )}
-
-        {revealBanner}
       </ScrollView>
     );
   }
@@ -742,7 +822,9 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
           user={{ _id: identity.address }}
           isInverted={false}
           renderInputToolbar={() => null}
-          keyboardProviderProps={{ enabled: false }}
+          // The type demands `children`, but GiftedChat itself supplies them
+          // when it spreads these props onto its internal KeyboardProvider.
+          keyboardProviderProps={{ enabled: false } as any}
           messagesContainerRef={messagesListRef}
           messagesContainerStyle={stylesHook.root}
           renderAvatar={(p: any) => (
@@ -891,7 +973,32 @@ const styles = StyleSheet.create({
   drawerItemName: { fontSize: 14, fontWeight: '600' },
   drawerItemSub: { fontSize: 12, marginTop: 1 },
   drawerSection: { fontSize: 12, fontWeight: '700', paddingHorizontal: 14, paddingTop: 14, paddingBottom: 4, textTransform: 'uppercase' },
-  addressCard: { marginTop: 16, padding: 14, borderRadius: 12, borderWidth: 1 },
+  addressCard: { padding: 14, borderRadius: 12, borderWidth: 1 },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'baseline', marginBottom: 10 },
+  hintRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', columnGap: 8 },
+  experimental: { fontSize: 13, fontWeight: '600', fontStyle: 'italic' },
+  divider: { height: StyleSheet.hairlineWidth, marginTop: 18 },
+  // Folder-flap section tabs (mirrors the wallet screen's tab bar look):
+  // rounded top corners, squared bottoms sitting on the content area.
+  sectionTabs: { flexDirection: 'row', columnGap: 8, marginTop: 14 },
+  sectionTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    columnGap: 6,
+    paddingVertical: 10,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    borderBottomLeftRadius: 4,
+    borderBottomRightRadius: 4,
+    borderWidth: 1,
+  },
+  sectionTabOk: { borderColor: '#16a34a' },
+  sectionTabNo: { borderColor: '#dc2626', opacity: 0.7 },
+  sectionTabText: { fontSize: 14, fontWeight: '700' },
+  testBadge: { backgroundColor: '#f59e0b', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1 },
+  testBadgeText: { color: '#ffffff', fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   // Corner flap glued to the card's top-right, mirroring the home cards' HQ
   // badge (top-left there): outer corner follows the card radius, inner one
   // curves softly, the other two sit flush at 90°.

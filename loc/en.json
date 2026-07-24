@@ -44,7 +44,12 @@
     "type_depin": "DePIN"
   },
   "depin": {
-    "title": "DePIN Chat",
+    "title": "DePIN",
+    "experimental": "Experimental",
+    "tab_chat": "DePIN Chat",
+    "tab_iot": "IoT",
+    "iot_test_badge": "TEST",
+    "iot_placeholder": "Send messages to IoT devices over the DePIN network. Test area — not functional yet.",
     "config": "Chat settings",
     "not_supported_pq": "DePIN chat is only available on Legacy wallets.",
     "no_token": "You don't hold any DePIN token at your DePIN address. Acquire a DePIN asset (name starting with \"&\") at the address below to join its chat.",
