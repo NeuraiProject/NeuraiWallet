@@ -30,7 +30,6 @@ import {
   View,
 } from 'react-native';
 import { GiftedChat, IMessage } from 'react-native-gifted-chat';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -42,9 +41,11 @@ import {
   type NeuraiBackend,
   type NeuraiNetwork,
 } from '../blue_modules/neurai';
-import { deriveDepinChatIdentity, type DepinChatIdentity, isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIdentity';
+import { isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIdentity';
 import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
 import { useDePINChat, type RecipientInfo } from '../hooks/useDePINChat';
+import useDepinChatIdentity from '../hooks/useDepinChatIdentity';
+import useDepinChatReadyState from '../hooks/useDepinChatReadyState';
 import useWalletSubscribe from '../hooks/useWalletSubscribe';
 import { useExtendedNavigation } from '../hooks/useExtendedNavigation';
 import loc from '../loc';
@@ -52,63 +53,11 @@ import presentAlert from './Alert';
 import Icon from './Icon';
 import QRCode from './QRCode';
 import { useTheme } from './themes';
+import { BURN_ADDRESS, FUND_AMOUNT_XNA, ONE_COIN, PUBKEY_POLL_MS, REVEAL_AMOUNT_XNA, REVEAL_RETRY_MS } from './depinChat/constants';
+import type { DePINChatHandle, DePINChatProps, DepinServerInfo } from './depinChat/types';
+import { normalizeAmount, parseRevealed, shortAddr } from './depinChat/utils';
 
-interface DePINChatProps {
-  walletID: string;
-}
-
-export interface DePINChatHandle {
-  /** Handle a back action: true = consumed (closed the open token chat), false = nothing to close. */
-  goBack: () => boolean;
-}
-
-const ONE_COIN = 1e8;
-// The reveal burn itself only needs 0.1 XNA; when the chat address is empty we
-// suggest sending 1 XNA so the burn plus network fees are comfortably covered.
-const REVEAL_AMOUNT_XNA = 0.1;
-const FUND_AMOUNT_XNA = 1;
-const PUBKEY_POLL_MS = 25_000;
-// After a successful reveal broadcast the burn button stays disabled this long,
-// so a second tap can't double-burn while the tx confirms; if the pubkey still
-// hasn't appeared afterwards (tx dropped?), the button re-enables to retry.
-const REVEAL_RETRY_MS = 120_000;
-// Persisted last-known Ready state, keyed by chat address, so the badge shows
-// the previous color instantly on entry instead of defaulting to red while the
-// server / pubkey checks are still in flight.
-const READY_STATE_PREFIX = 'depin_ready_';
-const BURN_ADDRESS: Record<NeuraiNetwork, string> = {
-  mainnet: 'NbURNXXXXXXXXXXXXXXXXXXXXXXXT65Gdr',
-  testnet: 'tBURNXXXXXXXXXXXXXXXXXXXXXXXVZLroy',
-};
-
-const shortAddr = (a: string) => (a.length > 10 ? `${a.substring(0, 5)}…${a.substring(a.length - 5)}` : a);
-
-const parseRevealed = (res: unknown): boolean | null => {
-  if (res && typeof res === 'object') {
-    const r = res as { revealed?: number; pubkey?: string };
-    if (typeof r.revealed === 'number') return r.revealed === 1;
-    if (typeof r.pubkey === 'string' && /^0[23][0-9a-f]{64}$/i.test(r.pubkey.trim())) return true;
-  }
-  if (typeof res === 'string' && /^0[23][0-9a-f]{64}$/i.test(res.trim())) return true;
-  return null;
-};
-
-const normalizeAmount = (raw: unknown): number => {
-  if (typeof raw === 'number') return raw > 1e6 ? raw / ONE_COIN : raw;
-  const n = Number(raw);
-  return Number.isFinite(n) ? (n > 1e6 ? n / ONE_COIN : n) : 0;
-};
-
-/** Server DePIN configuration reported by `depingetmsginfo`. */
-interface DepinServerInfo {
-  enabled?: boolean;
-  token?: string;
-  cipher?: string;
-  maxrecipients?: number;
-  maxmessagesize?: number;
-  messageexpiryhours?: number;
-  maxpoolsizemb?: number;
-}
+export type { DePINChatHandle } from './depinChat/types';
 
 const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref) => {
   const { colors } = useTheme();
@@ -121,33 +70,9 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   const chainType = neurai ? neurai.network : 'xna';
   const supported = !!neurai && isDepinChatSupportedNetwork(chainType);
 
-  // Deriving the account-100 identity runs BIP39 seed derivation (PBKDF2), which
-  // is heavy enough to jank the tab switch if done synchronously in render — and
-  // it only depends on (mnemonic, passphrase, network), so we derive it once off
-  // the interaction after the tab has animated in, keyed on those primitives.
   const secret = neurai?.secret ?? '';
   const passphrase = neurai?.passphrase ?? '';
-  const [identity, setIdentity] = useState<DepinChatIdentity | null>(null);
-  useEffect(() => {
-    if (!supported || !secret) {
-      setIdentity(null);
-      return;
-    }
-    let cancelled = false;
-    const task = InteractionManager.runAfterInteractions(() => {
-      try {
-        const derived = deriveDepinChatIdentity({ network: chainType as 'xna' | 'xna-test', mnemonic: secret, passphrase });
-        if (!cancelled) setIdentity(derived);
-      } catch (e) {
-        console.debug('DePINChat: failed to derive chat identity', e);
-        if (!cancelled) setIdentity(null);
-      }
-    });
-    return () => {
-      cancelled = true;
-      task.cancel();
-    };
-  }, [supported, chainType, secret, passphrase]);
+  const identity = useDepinChatIdentity({ chainType, passphrase, secret, supported });
 
   const backendRef = useRef<{ key: string; backend: NeuraiBackend } | null>(null);
   const rpc = useMemo(() => {
@@ -191,26 +116,11 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   const [showInfo, setShowInfo] = useState(false);
   const [serverInfo, setServerInfo] = useState<DepinServerInfo | null>(null);
 
-  // Ready-badge memory: show the last persisted state on entry, then let the
-  // live checks (server pool + pubkey) overwrite and re-persist it.
-  const [lastKnownReady, setLastKnownReady] = useState<boolean | null>(null);
-  useEffect(() => {
-    if (!identity) return;
-    let cancelled = false;
-    AsyncStorage.getItem(READY_STATE_PREFIX + identity.address)
-      .then(v => {
-        if (!cancelled && v != null) setLastKnownReady(v === '1');
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [identity]);
-  useEffect(() => {
-    if (!identity || serverInfo == null || pubkeyRevealed == null) return;
-    const real = serverInfo.enabled === true && pubkeyRevealed === true;
-    AsyncStorage.setItem(READY_STATE_PREFIX + identity.address, real ? '1' : '0').catch(() => {});
-  }, [identity, serverInfo, pubkeyRevealed]);
+  const lastKnownReady = useDepinChatReadyState({
+    identity,
+    pubkeyRevealed,
+    serverInfo,
+  });
 
   // Keyboard handling: the app runs edge-to-edge, so Android never resizes the
   // window for the keyboard — and react-native-keyboard-controller providers
