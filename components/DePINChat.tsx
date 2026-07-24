@@ -14,15 +14,31 @@
  *
  * Mirrors the Neurai web wallet's `Chat.tsx` / `useDePINChat.ts`.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  InteractionManager,
+  Keyboard,
+  LayoutAnimation,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { GiftedChat, IMessage } from 'react-native-gifted-chat';
-import { KeyboardAvoidingView, KeyboardProvider } from 'react-native-keyboard-controller';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { getDepinRpcBackend, type NeuraiBackend, type NeuraiNetwork } from '../blue_modules/neurai';
+import {
+  getDepinRpcBackend,
+  getDepinRpcConfig,
+  loadDepinRpcOverrides,
+  type NeuraiBackend,
+  type NeuraiNetwork,
+} from '../blue_modules/neurai';
 import { deriveDepinChatIdentity, type DepinChatIdentity, isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIdentity';
 import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
 import { useDePINChat, type RecipientInfo } from '../hooks/useDePINChat';
@@ -30,6 +46,7 @@ import useWalletSubscribe from '../hooks/useWalletSubscribe';
 import { useExtendedNavigation } from '../hooks/useExtendedNavigation';
 import loc from '../loc';
 import presentAlert from './Alert';
+import Icon from './Icon';
 import QRCode from './QRCode';
 import { useTheme } from './themes';
 
@@ -37,9 +54,21 @@ interface DePINChatProps {
   walletID: string;
 }
 
+export interface DePINChatHandle {
+  /** Handle a back action: true = consumed (closed the open token chat), false = nothing to close. */
+  goBack: () => boolean;
+}
+
 const ONE_COIN = 1e8;
+// The reveal burn itself only needs 0.1 XNA; when the chat address is empty we
+// suggest sending 1 XNA so the burn plus network fees are comfortably covered.
 const REVEAL_AMOUNT_XNA = 0.1;
+const FUND_AMOUNT_XNA = 1;
 const PUBKEY_POLL_MS = 25_000;
+// After a successful reveal broadcast the burn button stays disabled this long,
+// so a second tap can't double-burn while the tx confirms; if the pubkey still
+// hasn't appeared afterwards (tx dropped?), the button re-enables to retry.
+const REVEAL_RETRY_MS = 120_000;
 const BURN_ADDRESS: Record<NeuraiNetwork, string> = {
   mainnet: 'NbURNXXXXXXXXXXXXXXXXXXXXXXXT65Gdr',
   testnet: 'tBURNXXXXXXXXXXXXXXXXXXXXXXXVZLroy',
@@ -63,7 +92,7 @@ const normalizeAmount = (raw: unknown): number => {
   return Number.isFinite(n) ? (n > 1e6 ? n / ONE_COIN : n) : 0;
 };
 
-const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
+const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref) => {
   const { colors } = useTheme();
   const { navigate } = useExtendedNavigation();
   const insets = useSafeAreaInsets();
@@ -102,12 +131,23 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
     };
   }, [supported, chainType, secret, passphrase]);
 
-  const backendRef = useRef<NeuraiBackend | null>(null);
+  const backendRef = useRef<{ key: string; backend: NeuraiBackend } | null>(null);
   const rpc = useMemo(() => {
     if (!supported) return null;
-    return <T = unknown,>(method: string, params: unknown[]): Promise<T> => {
-      if (!backendRef.current) backendRef.current = getDepinRpcBackend(network);
-      return backendRef.current.rpc<T>(method, params);
+    return async <T = unknown,>(method: string, params: unknown[]): Promise<T> => {
+      // The user's DePIN RPC setting hydrates from disk asynchronously at app
+      // start. If the chat opens before that finishes, building the backend
+      // right away would target the DEFAULT server instead of the configured
+      // one — and caching it made that mistake permanent (the "works after
+      // exiting and re-entering" bug). So: await hydration, and key the cached
+      // backend by the effective config so settings edits apply live.
+      await loadDepinRpcOverrides();
+      const cfg = getDepinRpcConfig(network);
+      const key = `${cfg.url}|${cfg.username ?? ''}|${cfg.password ?? ''}`;
+      if (!backendRef.current || backendRef.current.key !== key) {
+        backendRef.current = { key, backend: getDepinRpcBackend(network) };
+      }
+      return backendRef.current.backend.rpc<T>(method, params);
     };
   }, [supported, network]);
 
@@ -117,11 +157,59 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
   const [recipientList, setRecipientList] = useState<RecipientInfo[]>([]);
   const [pubkeyRevealed, setPubkeyRevealed] = useState<boolean | null>(null);
   const [revealing, setRevealing] = useState(false);
+  const [revealPending, setRevealPending] = useState(false);
+  const revealRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (revealRetryTimerRef.current) clearTimeout(revealRetryTimerRef.current);
+    };
+  }, []);
   const [activeTab, setActiveTab] = useState<string>('group');
   const [showQr, setShowQr] = useState(false);
   const [draft, setDraft] = useState('');
 
-  const { groupMessages, privateConversations, error, sendMessage, checkAssetValidity, setIsPolling } = useDePINChat({
+  // Keyboard handling: the app runs edge-to-edge, so Android never resizes the
+  // window for the keyboard — and react-native-keyboard-controller providers
+  // (ours + the one GiftedChat nests internally) starve each other of events.
+  // Plain RN Keyboard listeners are provider-independent: we shrink the chat
+  // column by the keyboard height so the input bar and last messages stay
+  // visible above it.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const messagesListRef = useRef<any>(null);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', e => {
+      // Animate the column shrinking so the whole chat visibly slides up with
+      // the keyboard, then reveal the latest messages once the resize settles.
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setKeyboardHeight(e.endCoordinates?.height ?? 0);
+      setTimeout(() => messagesListRef.current?.scrollToEnd?.({ animated: true }), 300);
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setKeyboardHeight(0);
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  // Back handling is owned by WalletTransactions (which also owns the tab
+  // state): on a back action it calls goBack() first, so an open token chat
+  // closes before the tab or the screen does.
+  useImperativeHandle(
+    ref,
+    () => ({
+      goBack: () => {
+        if (selectedAsset == null) return false;
+        setSelectedAsset(null);
+        return true;
+      },
+    }),
+    [selectedAsset],
+  );
+
+  const { groupMessages, privateConversations, error, lastPoll, sendMessage, checkAssetValidity, setIsPolling } = useDePINChat({
     rpc,
     selectedAsset,
     identity,
@@ -137,7 +225,9 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
       const next: Record<string, number> = {};
       if (balances && typeof balances === 'object') {
         for (const name of Object.keys(balances)) {
-          if (name === 'XNA') continue;
+          // Only DePIN assets ('&NAME') can gate a chat; skip XNA and any other
+          // asset types held at the address.
+          if (!name.startsWith('&')) continue;
           const amount = normalizeAmount(balances[name]);
           if (amount > 0) next[name] = amount;
         }
@@ -179,6 +269,30 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
     };
   }, [rpc, identity, pubkeyRevealed]);
 
+  // XNA balance at the chat address — decides whether the reveal banner offers
+  // the burn directly or first routes through Send to fund the address.
+  const [depinBalance, setDepinBalance] = useState<number | null>(null);
+  useEffect(() => {
+    if (!identity || pubkeyRevealed !== false || !rpc) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const backend = backendRef.current?.backend ?? getDepinRpcBackend(network);
+        const utxos = await backend.getUtxos([identity.address]);
+        const sats = (utxos ?? [])
+          .filter(u => !u.assetName || u.assetName === 'XNA')
+          .reduce((sum, u) => sum + (Number(u.satoshis) || 0), 0);
+        if (!cancelled) setDepinBalance(sats / ONE_COIN);
+      } catch (e) {
+        console.debug('DePINChat: failed to load chat address balance', e);
+        if (!cancelled) setDepinBalance(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [identity, pubkeyRevealed, rpc, network]);
+
   // When a token is selected: load recipients + verify validity + start polling.
   const selectAsset = useCallback(
     async (assetName: string) => {
@@ -187,6 +301,10 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
       setActiveTab('group');
       setIsPolling(true);
       try {
+        // Both calls use the full on-chain asset name ('&NAME'). If the server
+        // is configured with a different token spelling, this one may fail —
+        // that's non-fatal: pubkeys are then resolved lazily per address via
+        // `getpubkey`, and the hook adapts the spelling on its polling path.
         const [depinAddrs, byAsset] = await Promise.all([
           rpc('listdepinaddresses', [assetName]) as Promise<Array<{ address: string; pubkey?: string }>>,
           rpc('listaddressesbyasset', [assetName]) as Promise<Record<string, unknown>>,
@@ -210,7 +328,8 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
     if (!neurai || !identity || revealing || !rpc) return;
     setRevealing(true);
     try {
-      const utxos = await getDepinRpcBackend(network).getUtxos([identity.address]);
+      const backend = backendRef.current?.backend ?? getDepinRpcBackend(network);
+      const utxos = await backend.getUtxos([identity.address]);
       const { signedHex } = await neurai.buildDepinPubkeyRevealTransaction({
         depinAddress: identity.address,
         depinWif: identity.wif,
@@ -218,8 +337,10 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
         burnAddress: BURN_ADDRESS[network],
         amountSats: Math.round(REVEAL_AMOUNT_XNA * ONE_COIN),
       });
-      const backend = backendRef.current ?? getDepinRpcBackend(network);
       await backend.broadcast(signedHex);
+      setRevealPending(true);
+      if (revealRetryTimerRef.current) clearTimeout(revealRetryTimerRef.current);
+      revealRetryTimerRef.current = setTimeout(() => setRevealPending(false), REVEAL_RETRY_MS);
       presentAlert({ message: loc.depin.reveal_waiting });
     } catch (e: any) {
       const msg = String(e?.message ?? e);
@@ -240,19 +361,41 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
     presentAlert({ message: loc.depin.address_copied });
   }, [identity]);
 
+  // Not enough XNA at the chat address for the reveal burn: jump to the parent
+  // wallet's Send screen with the chat address and the amount pre-filled, so
+  // the user only has to confirm.
+  const goFundDepinAddress = useCallback(() => {
+    if (!identity) return;
+    navigate('SendNeurai', { walletID, address: identity.address, amount: FUND_AMOUNT_XNA });
+  }, [identity, navigate, walletID]);
+
   const messages = useMemo<IMessage[]>(() => {
     const src = activeTab === 'group' ? groupMessages : (privateConversations.get(activeTab)?.messages ?? []);
-    return src
-      .map((m, i) => ({
-        _id: `${m.messageHash ?? m.sender}-${m.timestamp}-${i}`,
-        text: m.message,
-        createdAt: new Date(m.timestamp * 1000),
-        user: { _id: m.sender, name: shortAddr(m.sender) },
-      }))
-      // Oldest first: paired with GiftedChat's `inverted={false}` below this
-      // renders top-to-bottom (first message at the top, newest at the bottom).
-      .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+    return (
+      src
+        .map((m, i) => ({
+          _id: `${m.messageHash ?? m.sender}-${m.timestamp}-${i}`,
+          text: m.message,
+          createdAt: new Date(m.timestamp * 1000),
+          user: { _id: m.sender, name: shortAddr(m.sender) },
+        }))
+        // Oldest first: paired with GiftedChat's `inverted={false}` below this
+        // renders top-to-bottom (first message at the top, newest at the bottom).
+        .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt))
+    );
   }, [activeTab, groupMessages, privateConversations]);
+
+  // With a non-inverted list, GiftedChat does NOT follow new messages — they
+  // appear below the visible area while the view stays frozen. Whenever a
+  // message arrives (sent or received) or the conversation tab changes, slide
+  // to the end so the latest message is always in view. The small delay lets
+  // the list commit the new row before measuring the scroll target.
+  const messageCount = messages.length;
+  useEffect(() => {
+    if (messageCount === 0) return;
+    const t = setTimeout(() => messagesListRef.current?.scrollToEnd?.({ animated: true }), 100);
+    return () => clearTimeout(t);
+  }, [messageCount, activeTab]);
 
   // We render our own input bar (below) instead of GiftedChat's built-in
   // InputToolbar, which proved unreliable to display in this embedded layout.
@@ -273,8 +416,18 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
     chipActive: { backgroundColor: colors.elevated, borderColor: colors.foregroundColor },
     chipText: { color: colors.foregroundColor },
     banner: { backgroundColor: colors.inputBackgroundColor, borderColor: colors.formBorder },
-    inputBar: { backgroundColor: colors.elevated, borderTopColor: colors.formBorder, paddingBottom: insets.bottom || 8 },
+    // With the keyboard open the chat column already ends right above it, so
+    // the input bar only needs a small padding instead of the nav-bar inset.
+    inputBar: {
+      backgroundColor: colors.elevated,
+      borderTopColor: colors.formBorder,
+      paddingBottom: keyboardHeight > 0 ? 8 : insets.bottom || 8,
+    },
     inputField: { color: colors.foregroundColor, backgroundColor: colors.inputBackgroundColor },
+    // RN reports the keyboard height without the system nav-bar inset when the
+    // app draws edge-to-edge, so pad by both — otherwise the input bar ends up
+    // mostly hidden behind the keyboard (only a few px visible).
+    chatRoot: { paddingBottom: keyboardHeight > 0 ? keyboardHeight + (insets.bottom || 0) : 0 },
   };
 
   const gearButton = (
@@ -324,29 +477,56 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
           <QRCode value={identity.address} size={180} />
         </View>
       )}
-      <Text style={[styles.hint, stylesHook.subtext]}>{loc.formatString(loc.depin.deposit_hint, { ticker: 'XNA' })}</Text>
+      <Text style={[styles.hint, stylesHook.subtext]}>{`${loc.depin.derivation_label}: ${identity.path}`}</Text>
     </View>
   );
 
+  // Pubkey not on-chain yet: red flame = a burn is required. If the chat
+  // address lacks the XNA for it, the action becomes "fund the address" via
+  // the parent wallet's Send screen instead of the burn itself.
+  const needsFunding = depinBalance !== null && depinBalance < REVEAL_AMOUNT_XNA;
   const revealBanner = pubkeyRevealed === false && (
     <View style={[styles.banner, stylesHook.banner]}>
-      <Text style={[styles.bannerTitle, stylesHook.text]}>{loc.depin.reveal_title}</Text>
+      <View style={styles.bannerTitleRow}>
+        <Icon name="fire" type="font-awesome" size={18} color="#ef4444" />
+        <Text style={[styles.bannerTitle, stylesHook.text]}>{loc.depin.reveal_title}</Text>
+      </View>
       <Text style={[styles.bannerDesc, stylesHook.subtext]}>
-        {loc.formatString(loc.depin.reveal_desc, { amount: REVEAL_AMOUNT_XNA, ticker: 'XNA' })}
+        {loc.formatString(needsFunding ? loc.depin.reveal_need_funds : loc.depin.reveal_desc, {
+          amount: needsFunding ? FUND_AMOUNT_XNA : REVEAL_AMOUNT_XNA,
+          ticker: 'XNA',
+        })}
       </Text>
-      <Pressable onPress={handleReveal} disabled={revealing} style={[styles.revealBtn, stylesHook.chipActive]} testID="DepinRevealPubkey">
-        {revealing ? (
-          <ActivityIndicator />
-        ) : (
+      {needsFunding ? (
+        <Pressable onPress={goFundDepinAddress} style={[styles.revealBtn, stylesHook.chipActive]} testID="DepinFundAddress">
           <Text style={[styles.revealBtnText, stylesHook.text]}>
-            {loc.formatString(loc.depin.reveal_button, { amount: REVEAL_AMOUNT_XNA, ticker: 'XNA' })}
+            {loc.formatString(loc.depin.reveal_send_button, { amount: FUND_AMOUNT_XNA, ticker: 'XNA' })}
           </Text>
-        )}
-      </Pressable>
+        </Pressable>
+      ) : (
+        <Pressable
+          onPress={handleReveal}
+          disabled={revealing || revealPending}
+          style={[styles.revealBtn, stylesHook.chipActive, revealPending && styles.revealBtnDisabled]}
+          testID="DepinRevealPubkey"
+        >
+          {revealing ? (
+            <ActivityIndicator />
+          ) : (
+            <Text style={[styles.revealBtnText, stylesHook.text]}>
+              {revealPending
+                ? loc.depin.reveal_waiting
+                : loc.formatString(loc.depin.reveal_button, { amount: REVEAL_AMOUNT_XNA, ticker: 'XNA' })}
+            </Text>
+          )}
+        </Pressable>
+      )}
     </View>
   );
 
-  // No token selected yet — show picker, address/QR and any reveal prompt.
+  // No token selected yet — the section page: title, address card, the DePIN
+  // tokens held there, and (only while the RPC says the pubkey is NOT revealed)
+  // the reveal prompt at the bottom.
   if (!selectedAsset) {
     return (
       <ScrollView style={[styles.flex, stylesHook.root]} contentContainerStyle={styles.scrollContent}>
@@ -355,30 +535,24 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
           {gearButton}
         </View>
 
+        {addressRow}
+
+        <Text style={[styles.sectionLabel, stylesHook.subtext]}>{loc.depin.tokens_label}</Text>
         {loadingAssets && assetNames.length === 0 ? (
           <ActivityIndicator style={styles.loader} />
         ) : assetNames.length === 0 ? (
           <Text style={[styles.info, stylesHook.subtext]}>{loc.depin.no_token}</Text>
         ) : (
-          <>
-            <Text style={[styles.sectionLabel, stylesHook.subtext]}>{loc.depin.select_asset}</Text>
-            <View style={styles.chipsWrap}>
-              {assetNames.map(name => (
-                <Pressable
-                  key={name}
-                  onPress={() => selectAsset(name)}
-                  style={[styles.chip, stylesHook.chip]}
-                  testID={`DepinAsset-${name}`}
-                >
-                  <Text style={[styles.chipText, stylesHook.chipText]}>{name}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </>
+          <View style={styles.chipsWrap}>
+            {assetNames.map(name => (
+              <Pressable key={name} onPress={() => selectAsset(name)} style={[styles.chip, stylesHook.chip]} testID={`DepinAsset-${name}`}>
+                <Text style={[styles.chipText, stylesHook.chipText]}>{name}</Text>
+              </Pressable>
+            ))}
+          </View>
         )}
 
         {revealBanner}
-        {addressRow}
       </ScrollView>
     );
   }
@@ -386,78 +560,88 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
   const privateTabs = Array.from(privateConversations.values()).sort((a, b) => b.lastMessageTime - a.lastMessageTime);
 
   return (
-    // We use GiftedChat only to render the message list (its built-in
-    // InputToolbar is disabled via renderInputToolbar) and provide our own
-    // KeyboardProvider so our custom input bar can keyboard-avoid on its own.
-    <KeyboardProvider>
-      <View style={[styles.flex, stylesHook.root]}>
-        <View style={styles.headerRow}>
-          <Pressable onPress={() => setSelectedAsset(null)} style={styles.backBtn}>
-            <Text style={[styles.title, stylesHook.text]} numberOfLines={1}>
-              {`# ${selectedAsset}`}
-            </Text>
-          </Pressable>
-          {gearButton}
-        </View>
-
-        <View style={styles.tabsRow}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsContent}>
-            <Pressable
-              onPress={() => setActiveTab('group')}
-              style={[styles.tabChip, activeTab === 'group' ? stylesHook.chipActive : stylesHook.chip]}
-            >
-              <Text style={[styles.chipText, stylesHook.chipText]}>{loc.depin.tab_group}</Text>
-            </Pressable>
-            {privateTabs.map(c => (
-              <Pressable
-                key={c.address}
-                onPress={() => setActiveTab(c.address)}
-                style={[styles.tabChip, activeTab === c.address ? stylesHook.chipActive : stylesHook.chip]}
-              >
-                <Text style={[styles.chipText, stylesHook.chipText]}>{c.displayName}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-
-        {revealBanner}
-        {error ? <Text style={[styles.errorText, stylesHook.subtext]}>{error}</Text> : null}
-
-        <View style={styles.flex}>
-          <GiftedChat
-            messages={messages}
-            user={{ _id: identity.address }}
-            isInverted={false}
-            renderInputToolbar={() => null}
-            messagesContainerStyle={stylesHook.root}
-          />
-        </View>
-
-        <KeyboardAvoidingView behavior="padding">
-          <View style={[styles.inputBar, stylesHook.inputBar]}>
-            <TextInput
-              style={[styles.inputField, stylesHook.inputField]}
-              value={draft}
-              onChangeText={setDraft}
-              placeholder={activeTab === 'group' ? loc.depin.input_placeholder : loc.depin.input_placeholder_private}
-              placeholderTextColor={colors.alternativeTextColor}
-              multiline
-              testID="DepinChatInput"
-            />
-            <Pressable
-              onPress={handleSend}
-              disabled={!draft.trim()}
-              style={[styles.sendBtn, !draft.trim() && styles.sendBtnDisabled]}
-              testID="DepinChatSend"
-            >
-              <Text style={styles.sendBtnGlyph}>➤</Text>
-            </Pressable>
-          </View>
-        </KeyboardAvoidingView>
+    // GiftedChat renders only the message list here (its built-in InputToolbar
+    // and internal KeyboardProvider are both disabled); the input bar below is
+    // ours, and `chatRoot` shrinks the whole column by the keyboard height.
+    <View style={[styles.flex, stylesHook.root, stylesHook.chatRoot]}>
+      <View style={styles.headerRow}>
+        <Pressable onPress={() => setSelectedAsset(null)} style={styles.backBtn}>
+          <Text style={[styles.title, stylesHook.text]} numberOfLines={1}>
+            {`# ${selectedAsset}`}
+          </Text>
+        </Pressable>
+        {gearButton}
       </View>
-    </KeyboardProvider>
+
+      <View style={styles.tabsRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsContent}>
+          <Pressable
+            onPress={() => setActiveTab('group')}
+            style={[styles.tabChip, activeTab === 'group' ? stylesHook.chipActive : stylesHook.chip]}
+          >
+            <Text style={[styles.chipText, stylesHook.chipText]}>{loc.depin.tab_group}</Text>
+          </Pressable>
+          {privateTabs.map(c => (
+            <Pressable
+              key={c.address}
+              onPress={() => setActiveTab(c.address)}
+              style={[styles.tabChip, activeTab === c.address ? stylesHook.chipActive : stylesHook.chip]}
+            >
+              <Text style={[styles.chipText, stylesHook.chipText]}>{c.displayName}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+
+      {revealBanner}
+      {error ? (
+        <View style={styles.statusRow}>
+          <ActivityIndicator size="small" />
+          <Text style={[styles.errorText, stylesHook.subtext]}>{`${error} — ${loc.depin.connection_retrying}`}</Text>
+        </View>
+      ) : !lastPoll ? (
+        <View style={styles.statusRow}>
+          <ActivityIndicator size="small" />
+          <Text style={[styles.errorText, stylesHook.subtext]}>{loc.depin.checking_server}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.flex}>
+        <GiftedChat
+          messages={messages}
+          user={{ _id: identity.address }}
+          isInverted={false}
+          renderInputToolbar={() => null}
+          keyboardProviderProps={{ enabled: false }}
+          messagesContainerRef={messagesListRef}
+          messagesContainerStyle={stylesHook.root}
+        />
+      </View>
+
+      <View style={[styles.inputBar, stylesHook.inputBar]}>
+        <TextInput
+          style={[styles.inputField, stylesHook.inputField]}
+          value={draft}
+          onChangeText={setDraft}
+          placeholder={activeTab === 'group' ? loc.depin.input_placeholder : loc.depin.input_placeholder_private}
+          placeholderTextColor={colors.alternativeTextColor}
+          multiline
+          testID="DepinChatInput"
+        />
+        <Pressable
+          onPress={handleSend}
+          disabled={!draft.trim()}
+          style={[styles.sendBtn, !draft.trim() && styles.sendBtnDisabled]}
+          testID="DepinChatSend"
+        >
+          <Text style={styles.sendBtnGlyph}>➤</Text>
+        </Pressable>
+      </View>
+    </View>
   );
-};
+});
+
+DePINChat.displayName = 'DePINChat';
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
@@ -470,7 +654,7 @@ const styles = StyleSheet.create({
   gearGlyph: { fontSize: 20 },
   info: { fontSize: 15, textAlign: 'center', lineHeight: 22, paddingHorizontal: 8 },
   loader: { marginVertical: 24 },
-  sectionLabel: { fontSize: 13, fontWeight: '600', marginBottom: 8, marginTop: 4 },
+  sectionLabel: { fontSize: 13, fontWeight: '600', marginBottom: 8, marginTop: 20 },
   chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, borderWidth: 1 },
   chipText: { fontSize: 14, fontWeight: '600' },
@@ -486,11 +670,14 @@ const styles = StyleSheet.create({
   qrWrap: { alignItems: 'center', marginTop: 14 },
   hint: { fontSize: 12, marginTop: 10, lineHeight: 18 },
   banner: { margin: 16, padding: 14, borderRadius: 12, borderWidth: 1 },
+  bannerTitleRow: { flexDirection: 'row', alignItems: 'center', columnGap: 8, marginBottom: 4 },
   bannerTitle: { fontSize: 15, fontWeight: '700', marginBottom: 4 },
   bannerDesc: { fontSize: 13, lineHeight: 19, marginBottom: 12 },
   revealBtn: { paddingVertical: 10, borderRadius: 10, borderWidth: 1, alignItems: 'center' },
+  revealBtnDisabled: { opacity: 0.45 },
   revealBtnText: { fontSize: 14, fontWeight: '700' },
-  errorText: { fontSize: 12, textAlign: 'center', paddingVertical: 6 },
+  errorText: { fontSize: 12, textAlign: 'center', paddingVertical: 6, flexShrink: 1 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', columnGap: 8, paddingHorizontal: 16 },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',

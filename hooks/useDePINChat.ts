@@ -31,6 +31,33 @@ import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity
 const DEPIN_POLL_INTERVAL_MS = 5_000;
 const PRIVATE_MSG_PREFIX = 'depin_private_msg_';
 
+/** The RPC client rejects with the raw JSON error object (no `.message`), so dig the real message out. */
+const describeRpcError = (err: any): string | null => {
+  if (typeof err?.message === 'string' && err.message.length > 0) return err.message;
+  const nested = err?.error?.error?.message ?? err?.error?.message;
+  if (typeof nested === 'string' && nested.length > 0) return nested;
+  return null;
+};
+
+const stripAmp = (name: string): string => name.replace(/^&/, '');
+
+/**
+ * DePIN asset names start with '&' on-chain, and that full name is what we
+ * send to the server by default. Some operators configure their node's token
+ * without the prefix though (e.g. the internal test node serves
+ * 'TESTDEPIN112025' for asset '&TESTDEPIN112025'), in which case the server
+ * rejects with "Token '&X' does not match configured token 'X'". When that
+ * happens — and it's clearly the SAME token, just spelled differently — we
+ * adopt the server's spelling for subsequent calls instead of erroring out.
+ */
+const alternateTokenSpelling = (asset: string, err: unknown): string | null => {
+  const msg = describeRpcError(err);
+  const m = msg?.match(/configured token '([^']+)'/i);
+  if (!m) return null;
+  const configured = m[1];
+  return stripAmp(configured).toUpperCase() === stripAmp(asset).toUpperCase() ? configured : null;
+};
+
 export type DepinRpc = <T = unknown>(method: string, params: unknown[]) => Promise<T>;
 
 export interface DePINMessage {
@@ -122,6 +149,9 @@ export function useDePINChat(params: {
   const effectiveAddress = identity?.address ?? null;
 
   const lastTimestampRef = useRef<number>(0);
+  const consecutiveFailuresRef = useRef<number>(0);
+  // Token spelling the server actually accepts (learned via alternateTokenSpelling).
+  const serverTokenRef = useRef<string | null>(null);
   const seenMessageKeysRef = useRef<Set<string>>(new Set());
   const recipientPubKeyCacheRef = useRef<Map<string, string | null>>(new Map());
   // In-memory mirror of persisted private-message recipient mapping (hash -> address).
@@ -158,7 +188,7 @@ export function useDePINChat(params: {
     async (assetName: string) => {
       if (!assetName || !rpc) return;
       try {
-        const data = (await rpc('listdepinaddresses', [assetName])) as Array<{ address: string; pubkey?: string }>;
+        const data = (await rpc('listdepinaddresses', [serverTokenRef.current ?? assetName])) as Array<{ address: string; pubkey?: string }>;
         for (const item of data ?? []) {
           const pk = (item.pubkey ?? '').trim().toLowerCase();
           if (pk.length === 66 && (pk.startsWith('02') || pk.startsWith('03'))) {
@@ -223,9 +253,13 @@ export function useDePINChat(params: {
   // Reset incremental polling + dedupe on token/address change; preload pubkeys.
   useEffect(() => {
     lastTimestampRef.current = 0;
+    consecutiveFailuresRef.current = 0;
+    serverTokenRef.current = null;
     seenMessageKeysRef.current = new Set();
     setGroupMessages([]);
     setPrivateConversations(new Map());
+    setError(null);
+    setLastPoll(null);
     recipientPubKeyCacheRef.current.clear();
     if (selectedAsset) preloadRecipientPubkeys(selectedAsset);
   }, [selectedAsset, effectiveAddress, preloadRecipientPubkeys]);
@@ -267,10 +301,22 @@ export function useDePINChat(params: {
     if (!selectedAsset || !effectiveAddress || !identity?.wif || !rpc) return;
     const recipientPrivateKey = String(identity.wif);
 
-    const rpcParams: (string | number)[] = [selectedAsset, effectiveAddress];
-    if (lastTimestampRef.current > 0) rpcParams.push(lastTimestampRef.current);
+    const callReceive = (token: string) => {
+      const rpcParams: (string | number)[] = [token, effectiveAddress];
+      if (lastTimestampRef.current > 0) rpcParams.push(lastTimestampRef.current);
+      return rpc('depinreceivemsg', rpcParams);
+    };
 
-    const result = await rpc('depinreceivemsg', rpcParams);
+    let result: unknown;
+    try {
+      result = await callReceive(serverTokenRef.current ?? selectedAsset);
+    } catch (err) {
+      const alt = alternateTokenSpelling(selectedAsset, err);
+      if (!alt) throw err;
+      console.debug(`useDePINChat: adopting server token spelling '${alt}' for asset '${selectedAsset}'`);
+      serverTokenRef.current = alt;
+      result = await callReceive(alt);
+    }
 
     let items: DepinReceiveMsgItem[] = [];
     if (isEncryptedResult(result)) {
@@ -331,9 +377,19 @@ export function useDePINChat(params: {
     const run = async () => {
       try {
         await pollOnce();
-        if (active) setError(null);
+        if (active) {
+          consecutiveFailuresRef.current = 0;
+          setError(null);
+        }
       } catch (err: any) {
-        if (active) setError(err?.message ?? 'Failed to fetch messages');
+        console.warn('useDePINChat: poll failed:', describeRpcError(err) ?? err);
+        // The first poll right after selecting a token often races a cold RPC
+        // connection; polling keeps retrying every 5s, so only surface an error
+        // after it fails repeatedly (the UI shows a "checking…" state meanwhile).
+        consecutiveFailuresRef.current += 1;
+        if (active && consecutiveFailuresRef.current >= 2) {
+          setError(describeRpcError(err) ?? 'Failed to fetch messages');
+        }
       }
     };
 
@@ -401,7 +457,7 @@ export function useDePINChat(params: {
       if (recipientPubKeys.length === 0) throw new Error('No valid recipient public keys found');
 
       const built = await buildDepinMessage({
-        token: selectedAsset,
+        token: serverTokenRef.current ?? selectedAsset,
         senderAddress: effectiveAddress,
         senderPubKey,
         privateKey: senderPrivateKey,

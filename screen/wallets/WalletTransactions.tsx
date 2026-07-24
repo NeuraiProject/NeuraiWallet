@@ -2,6 +2,7 @@ import { RouteProp, useFocusEffect, useRoute, useLocale } from '@react-navigatio
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   Dimensions,
   findNodeHandle,
   FlatList,
@@ -23,7 +24,7 @@ import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/h
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 import presentAlert, { AlertType } from '../../components/Alert';
 import AssetsList from '../../components/AssetsList';
-import DePINChat from '../../components/DePINChat';
+import DePINChat, { DePINChatHandle } from '../../components/DePINChat';
 import { isDepinChatSupportedNetwork } from '../../blue_modules/neurai/depinChatIdentity';
 import { FButton, FContainer, FloatButtonsBottomFade } from '../../components/FloatButtons';
 import { useTheme } from '../../components/themes';
@@ -84,6 +85,33 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const [activeTab, setActiveTab] = useState<'transactions' | 'assets' | 'depin'>('transactions');
   const MAX_FAILURES = 3;
   const flatListRef = useRef<FlatList<Transaction>>(null);
+  const depinChatRef = useRef<DePINChatHandle>(null);
+
+  // On the DePIN tab, back (hardware button or header arrow) walks one level
+  // at a time instead of leaving the screen: open token chat → token picker
+  // (handled by DePINChat.goBack()) → the wallet's Transactions tab → and only
+  // from there does the screen actually pop.
+  const isDepinTabActive = showDepinTab && activeTab === 'depin';
+  const handleDepinBack = useCallback((): boolean => {
+    if (!isDepinTabActive) return false;
+    if (!depinChatRef.current?.goBack()) setActiveTab('transactions');
+    return true;
+  }, [isDepinTabActive]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!isDepinTabActive) return;
+      const sub = BackHandler.addEventListener('hardwareBackPress', handleDepinBack);
+      return () => sub.remove();
+    }, [isDepinTabActive, handleDepinBack]),
+  );
+  useEffect(() => {
+    if (!isDepinTabActive) return;
+    return navigation.addListener('beforeRemove', (e: any) => {
+      const actionType = e?.data?.action?.type;
+      if (actionType !== 'GO_BACK' && actionType !== 'POP') return;
+      if (handleDepinBack()) e.preventDefault();
+    });
+  }, [navigation, isDepinTabActive, handleDepinBack]);
   const headerRef = useRef<View>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
   const refreshInProgressRef = useRef(false);
@@ -576,7 +604,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       {showDepinTab && activeTab === 'depin' ? (
         <View style={[styles.flex, stylesHook.backgroundContainer]}>
           <ListHeaderComponent />
-          <DePINChat walletID={walletID} />
+          <DePINChat ref={depinChatRef} walletID={walletID} />
         </View>
       ) : showAssetsTab && activeTab === 'assets' ? (
         <AssetsList walletID={walletID} ListHeaderComponent={ListHeaderComponent} />
