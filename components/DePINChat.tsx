@@ -33,11 +33,13 @@ import { useExtendedNavigation } from '../hooks/useExtendedNavigation';
 import loc from '../loc';
 import presentAlert from './Alert';
 import Icon from './Icon';
-import QRCode from './QRCode';
 import { useTheme } from './themes';
 import { BURN_ADDRESS, FUND_AMOUNT_XNA, ONE_COIN, REVEAL_AMOUNT_XNA, REVEAL_RETRY_MS } from './depinChat/constants';
+import DepinChatAddressCard from './depinChat/DepinChatAddressCard';
 import DepinChatContactsDrawer from './depinChat/DepinChatContactsDrawer';
 import DepinChatInfoModal from './depinChat/DepinChatInfoModal';
+import DepinChatRevealBanner from './depinChat/DepinChatRevealBanner';
+import DepinChatTokenSections from './depinChat/DepinChatTokenSections';
 import type { DePINChatHandle, DePINChatProps } from './depinChat/types';
 import { shortAddr } from './depinChat/utils';
 
@@ -333,80 +335,16 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   // the server pool is up and serves one of the held tokens; red = inert tab.
   const chatActive =
     serverInfo == null ? (lastKnownReady ?? false) : serverInfo.enabled === true && assetNames.some(n => tokenHasAccess(n) === true);
-  const addressRow = (
-    <View style={[styles.addressCard, stylesHook.card]}>
-      <View style={[styles.readyBadge, isReady ? styles.readyBadgeOk : styles.readyBadgeNo]}>
-        <Text style={styles.readyBadgeText}>{loc.depin.ready_badge}</Text>
-      </View>
-      <View style={styles.cardTitleRow}>
-        <Text style={[styles.title, stylesHook.text]}>{loc.depin.title}</Text>
-        <Text style={[styles.experimental, stylesHook.subtext]}>{` — ${loc.depin.experimental}`}</Text>
-      </View>
-      <Text style={[styles.addressLabel, stylesHook.subtext]}>{loc.depin.address_label}</Text>
-      <Text style={[styles.addressText, stylesHook.text]} numberOfLines={1} ellipsizeMode="middle" selectable>
-        {identity.address}
-      </Text>
-      <View style={styles.addressActions}>
-        <Pressable onPress={copyAddress} style={[styles.smallBtn, stylesHook.chip]} testID="DepinCopyAddress">
-          <Text style={[styles.smallBtnText, stylesHook.chipText]}>{loc.depin.copy}</Text>
-        </Pressable>
-        <Pressable onPress={() => setShowQr(v => !v)} style={[styles.smallBtn, stylesHook.chip]}>
-          <Text style={[styles.smallBtnText, stylesHook.chipText]}>{loc.depin.show_qr}</Text>
-        </Pressable>
-      </View>
-      {showQr && (
-        <View style={styles.qrWrap}>
-          <QRCode value={identity.address} size={180} />
-        </View>
-      )}
-      <View style={styles.hintRow}>
-        <Text style={[styles.hint, stylesHook.subtext, styles.flex]}>{`${loc.depin.derivation_label}: ${identity.path}`}</Text>
-        {gearButton}
-      </View>
-    </View>
-  );
-
-  // Pubkey not on-chain yet: red flame = a burn is required. If the chat
-  // address lacks the XNA for it, the action becomes "fund the address" via
-  // the parent wallet's Send screen instead of the burn itself.
-  const needsFunding = depinBalance !== null && depinBalance < REVEAL_AMOUNT_XNA;
-  const revealBanner = pubkeyRevealed === false && (
-    <View style={[styles.banner, stylesHook.banner]}>
-      <View style={styles.bannerTitleRow}>
-        <Icon name="fire" type="font-awesome" size={18} color="#ef4444" />
-        <Text style={[styles.bannerTitle, stylesHook.text]}>{loc.depin.reveal_title}</Text>
-      </View>
-      <Text style={[styles.bannerDesc, stylesHook.subtext]}>
-        {loc.formatString(needsFunding ? loc.depin.reveal_need_funds : loc.depin.reveal_desc, {
-          amount: needsFunding ? FUND_AMOUNT_XNA : REVEAL_AMOUNT_XNA,
-          ticker: 'XNA',
-        })}
-      </Text>
-      {needsFunding ? (
-        <Pressable onPress={goFundDepinAddress} style={[styles.revealBtn, stylesHook.chipActive]} testID="DepinFundAddress">
-          <Text style={[styles.revealBtnText, stylesHook.text]}>
-            {loc.formatString(loc.depin.reveal_send_button, { amount: FUND_AMOUNT_XNA, ticker: 'XNA' })}
-          </Text>
-        </Pressable>
-      ) : (
-        <Pressable
-          onPress={handleReveal}
-          disabled={revealing || revealPending}
-          style={[styles.revealBtn, stylesHook.chipActive, revealPending && styles.revealBtnDisabled]}
-          testID="DepinRevealPubkey"
-        >
-          {revealing ? (
-            <ActivityIndicator />
-          ) : (
-            <Text style={[styles.revealBtnText, stylesHook.text]}>
-              {revealPending
-                ? loc.depin.reveal_waiting
-                : loc.formatString(loc.depin.reveal_button, { amount: REVEAL_AMOUNT_XNA, ticker: 'XNA' })}
-            </Text>
-          )}
-        </Pressable>
-      )}
-    </View>
+  const revealBanner = (
+    <DepinChatRevealBanner
+      depinBalance={depinBalance}
+      onFund={goFundDepinAddress}
+      onReveal={handleReveal}
+      pubkeyRevealed={pubkeyRevealed}
+      revealPending={revealPending}
+      revealing={revealing}
+      stylesHook={stylesHook}
+    />
   );
 
   // No token selected yet — the section page: the DePIN card (title, address,
@@ -415,74 +353,28 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   if (!selectedAsset) {
     return (
       <ScrollView style={[styles.flex, stylesHook.root]} contentContainerStyle={styles.scrollContent}>
-        {addressRow}
+        <DepinChatAddressCard
+          gearButton={gearButton}
+          identity={identity}
+          isReady={isReady}
+          onCopy={copyAddress}
+          onToggleQr={() => setShowQr(value => !value)}
+          showQr={showQr}
+          stylesHook={stylesHook}
+        />
 
-        <View style={[styles.divider, stylesHook.divider]} />
-
-        <View style={styles.sectionTabs}>
-          <Pressable
-            onPress={() => {
-              if (chatActive) setActiveSection('chat');
-            }}
-            style={[
-              styles.sectionTab,
-              activeSection === 'chat' ? stylesHook.chipActive : stylesHook.chip,
-              chatActive ? styles.sectionTabOk : styles.sectionTabNo,
-            ]}
-            testID="DepinSectionChat"
-          >
-            <View style={[styles.chipDot, chatActive ? styles.chipDotOk : styles.chipDotNo]} />
-            <Text style={[styles.sectionTabText, stylesHook.chipText]}>{loc.depin.tab_chat}</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setActiveSection('iot')}
-            style={[styles.sectionTab, activeSection === 'iot' ? stylesHook.chipActive : stylesHook.chip]}
-            testID="DepinSectionIot"
-          >
-            <Text style={[styles.sectionTabText, stylesHook.chipText]}>{loc.depin.tab_iot}</Text>
-            <View style={styles.testBadge}>
-              <Text style={styles.testBadgeText}>{loc.depin.iot_test_badge}</Text>
-            </View>
-          </Pressable>
-        </View>
-
-        {activeSection === 'chat' ? (
-          <>
-            <Text style={[styles.sectionLabel, stylesHook.subtext]}>{loc.depin.tokens_label}</Text>
-            {loadingAssets && assetNames.length === 0 ? (
-              <ActivityIndicator style={styles.loader} />
-            ) : assetNames.length === 0 ? (
-              <Text style={[styles.info, stylesHook.subtext]}>{loc.depin.no_token}</Text>
-            ) : (
-              <View style={styles.chipsWrap}>
-                {assetNames.map(name => {
-                  const access = tokenHasAccess(name);
-                  return (
-                    <Pressable
-                      key={name}
-                      onPress={() => selectAsset(name)}
-                      style={[styles.chip, stylesHook.chip, access === true && styles.chipAccess, access === false && styles.chipNoAccess]}
-                      testID={`DepinAsset-${name}`}
-                    >
-                      {access != null && <View style={[styles.chipDot, access ? styles.chipDotOk : styles.chipDotNo]} />}
-                      <Text style={[styles.chipText, stylesHook.chipText]}>{name}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
-
-            {revealBanner}
-          </>
-        ) : (
-          <View style={[styles.banner, stylesHook.banner]}>
-            <View style={styles.bannerTitleRow}>
-              <Icon name="memory" type="material" size={18} color={colors.alternativeTextColor} />
-              <Text style={[styles.bannerTitle, stylesHook.text]}>{loc.depin.tab_iot}</Text>
-            </View>
-            <Text style={[styles.bannerDesc, stylesHook.subtext]}>{loc.depin.iot_placeholder}</Text>
-          </View>
-        )}
+        <DepinChatTokenSections
+          activeSection={activeSection}
+          assetNames={assetNames}
+          chatActive={chatActive}
+          iconColor={colors.alternativeTextColor}
+          loadingAssets={loadingAssets}
+          onSelectAsset={selectAsset}
+          onSelectSection={setActiveSection}
+          revealBanner={revealBanner}
+          stylesHook={stylesHook}
+          tokenHasAccess={tokenHasAccess}
+        />
       </ScrollView>
     );
   }
@@ -614,88 +506,11 @@ const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: '700' },
   gear: { padding: 8 },
   info: { fontSize: 15, textAlign: 'center', lineHeight: 22, paddingHorizontal: 8 },
-  loader: { marginVertical: 24 },
-  sectionLabel: { fontSize: 13, fontWeight: '600', marginBottom: 8, marginTop: 20 },
-  chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    columnGap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  // Chat access per token: green = the configured server serves this token,
-  // red = it doesn't (or the pool is disabled).
-  chipAccess: { borderColor: '#16a34a', borderWidth: 1.5, backgroundColor: 'rgba(22, 163, 74, 0.10)' },
-  chipNoAccess: { borderColor: '#dc2626', borderWidth: 1.5, backgroundColor: 'rgba(220, 38, 38, 0.08)' },
-  chipDot: { width: 8, height: 8, borderRadius: 4 },
-  chipDotOk: { backgroundColor: '#16a34a' },
-  chipDotNo: { backgroundColor: '#dc2626' },
-  chipText: { fontSize: 14, fontWeight: '600' },
   activeConvRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, columnGap: 6 },
   activeConvText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' },
   msgAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   msgAvatarText: { fontSize: 10, fontWeight: '700' },
-  addressCard: { padding: 14, borderRadius: 12, borderWidth: 1 },
-  cardTitleRow: { flexDirection: 'row', alignItems: 'baseline', marginBottom: 10 },
-  hintRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', columnGap: 8 },
-  experimental: { fontSize: 13, fontWeight: '600', fontStyle: 'italic' },
-  divider: { height: StyleSheet.hairlineWidth, marginTop: 18 },
-  // Folder-flap section tabs (mirrors the wallet screen's tab bar look):
-  // rounded top corners, squared bottoms sitting on the content area.
-  sectionTabs: { flexDirection: 'row', columnGap: 8, marginTop: 14 },
-  sectionTab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    columnGap: 6,
-    paddingVertical: 10,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    borderBottomLeftRadius: 4,
-    borderBottomRightRadius: 4,
-    borderWidth: 1,
-  },
-  sectionTabOk: { borderColor: '#16a34a' },
-  sectionTabNo: { borderColor: '#dc2626', opacity: 0.7 },
-  sectionTabText: { fontSize: 14, fontWeight: '700' },
-  testBadge: { backgroundColor: '#f59e0b', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1 },
-  testBadgeText: { color: '#ffffff', fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
-  // Corner flap glued to the card's top-right, mirroring the home cards' HQ
-  // badge (top-left there): outer corner follows the card radius, inner one
-  // curves softly, the other two sit flush at 90°.
-  readyBadge: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderTopRightRadius: 12,
-    borderBottomLeftRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  readyBadgeOk: { backgroundColor: '#16a34a' },
-  readyBadgeNo: { backgroundColor: '#dc2626' },
-  readyBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
-  addressLabel: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
-  addressText: { fontSize: 14, fontWeight: '600' },
-  addressActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  smallBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, borderWidth: 1 },
-  smallBtnText: { fontSize: 13, fontWeight: '600' },
-  qrWrap: { alignItems: 'center', marginTop: 14 },
-  hint: { fontSize: 12, marginTop: 10, lineHeight: 18 },
-  banner: { margin: 16, padding: 14, borderRadius: 12, borderWidth: 1 },
-  bannerTitleRow: { flexDirection: 'row', alignItems: 'center', columnGap: 8, marginBottom: 4 },
-  bannerTitle: { fontSize: 15, fontWeight: '700', marginBottom: 4 },
-  bannerDesc: { fontSize: 13, lineHeight: 19, marginBottom: 12 },
-  revealBtn: { paddingVertical: 10, borderRadius: 10, borderWidth: 1, alignItems: 'center' },
-  revealBtnDisabled: { opacity: 0.45 },
-  revealBtnText: { fontSize: 14, fontWeight: '700' },
   errorText: { fontSize: 12, textAlign: 'center', paddingVertical: 6, flexShrink: 1 },
   statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', columnGap: 8, paddingHorizontal: 16 },
   inputBar: {
