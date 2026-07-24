@@ -15,18 +15,7 @@
  * Mirrors the Neurai web wallet's `Chat.tsx` / `useDePINChat.ts`.
  */
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Animated,
-  Keyboard,
-  LayoutAnimation,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { GiftedChat, IMessage } from 'react-native-gifted-chat';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -36,6 +25,7 @@ import { isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIde
 import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
 import { useDePINChat, type RecipientInfo } from '../hooks/useDePINChat';
 import useDepinChatIdentity from '../hooks/useDepinChatIdentity';
+import useDepinChatKeyboard from '../hooks/useDepinChatKeyboard';
 import useDepinChatReadyState from '../hooks/useDepinChatReadyState';
 import useDepinChatSetup from '../hooks/useDepinChatSetup';
 import useWalletSubscribe from '../hooks/useWalletSubscribe';
@@ -46,6 +36,7 @@ import Icon from './Icon';
 import QRCode from './QRCode';
 import { useTheme } from './themes';
 import { BURN_ADDRESS, FUND_AMOUNT_XNA, ONE_COIN, REVEAL_AMOUNT_XNA, REVEAL_RETRY_MS } from './depinChat/constants';
+import DepinChatContactsDrawer from './depinChat/DepinChatContactsDrawer';
 import DepinChatInfoModal from './depinChat/DepinChatInfoModal';
 import type { DePINChatHandle, DePINChatProps } from './depinChat/types';
 import { shortAddr } from './depinChat/utils';
@@ -95,31 +86,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     serverInfo,
   });
 
-  // Keyboard handling: the app runs edge-to-edge, so Android never resizes the
-  // window for the keyboard — and react-native-keyboard-controller providers
-  // (ours + the one GiftedChat nests internally) starve each other of events.
-  // Plain RN Keyboard listeners are provider-independent: we shrink the chat
-  // column by the keyboard height so the input bar and last messages stay
-  // visible above it.
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const messagesListRef = useRef<any>(null);
-  useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', e => {
-      // Animate the column shrinking so the whole chat visibly slides up with
-      // the keyboard, then reveal the latest messages once the resize settles.
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setKeyboardHeight(e.endCoordinates?.height ?? 0);
-      setTimeout(() => messagesListRef.current?.scrollToEnd?.({ animated: true }), 300);
-    });
-    const hide = Keyboard.addListener('keyboardDidHide', () => {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setKeyboardHeight(0);
-    });
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
+  const { keyboardHeight, messagesListRef } = useDepinChatKeyboard();
 
   // Back handling is owned by WalletTransactions (which also owns the tab
   // state): on a back action it calls goBack() first, so an open token chat
@@ -157,7 +124,6 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   // Contacts drawer (mirrors the web wallet's left sidebar): Public Group,
   // then open private conversations, then the token holders you can start a
   // private chat with.
-  const DRAWER_WIDTH = 280;
   const [drawerVisible, setDrawerVisible] = useState(false);
   const drawerAnim = useRef(new Animated.Value(0)).current;
   const openDrawer = useCallback(() => {
@@ -167,7 +133,6 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   const closeDrawer = useCallback(() => {
     Animated.timing(drawerAnim, { toValue: 0, duration: 180, useNativeDriver: true }).start(() => setDrawerVisible(false));
   }, [drawerAnim]);
-  const drawerTranslateX = drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [-DRAWER_WIDTH, 0] });
   const selectConversation = useCallback(
     (tab: string) => {
       if (tab !== 'group' && !privateConversations.has(tab)) createPrivateConversation(tab);
@@ -289,7 +254,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     if (messageCount === 0) return;
     const t = setTimeout(() => messagesListRef.current?.scrollToEnd?.({ animated: true }), 100);
     return () => clearTimeout(t);
-  }, [messageCount, activeTab]);
+  }, [messageCount, activeTab, messagesListRef]);
 
   // We render our own input bar (below) instead of GiftedChat's built-in
   // InputToolbar, which proved unreliable to display in this embedded layout.
@@ -623,74 +588,17 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
         </Pressable>
       </View>
 
-      {drawerVisible && (
-        <View style={styles.drawerOverlay}>
-          <Animated.View style={[styles.drawerBackdrop, { opacity: drawerAnim }]}>
-            <Pressable style={styles.flex} onPress={closeDrawer} accessibilityLabel={loc.depin.info_close} />
-          </Animated.View>
-          <Animated.View style={[styles.drawer, stylesHook.card, { transform: [{ translateX: drawerTranslateX }] }]}>
-            <View style={styles.drawerHeader}>
-              <Text style={[styles.title, stylesHook.text]}>{loc.depin.contacts_title}</Text>
-              <Pressable onPress={closeDrawer} style={styles.gear} testID="DepinContactsClose">
-                <Icon name="close" type="material" size={22} color={colors.alternativeTextColor} />
-              </Pressable>
-            </View>
-            <ScrollView>
-              <Pressable
-                onPress={() => selectConversation('group')}
-                style={[styles.drawerItem, activeTab === 'group' && stylesHook.chipActive]}
-                testID="DepinDrawerGroup"
-              >
-                <View style={[styles.drawerAvatar, stylesHook.chip]}>
-                  <Icon name="groups" type="material" size={20} color={colors.foregroundColor} />
-                </View>
-                <View style={styles.drawerItemInfo}>
-                  <Text style={[styles.drawerItemName, stylesHook.text]}>{loc.depin.tab_group}</Text>
-                  <Text style={[styles.drawerItemSub, stylesHook.subtext]}>{loc.depin.contacts_everyone}</Text>
-                </View>
-              </Pressable>
-
-              {privateTabs.map(c => (
-                <Pressable
-                  key={c.address}
-                  onPress={() => selectConversation(c.address)}
-                  style={[styles.drawerItem, activeTab === c.address && stylesHook.chipActive]}
-                >
-                  <View style={[styles.drawerAvatar, stylesHook.chip]}>
-                    <Text style={[styles.msgAvatarText, stylesHook.chipText]}>{c.address.slice(-4)}</Text>
-                  </View>
-                  <View style={styles.drawerItemInfo}>
-                    <Text style={[styles.drawerItemName, stylesHook.text]}>{c.displayName}</Text>
-                    <Text style={[styles.drawerItemSub, stylesHook.subtext]}>{shortAddr(c.address)}</Text>
-                  </View>
-                </Pressable>
-              ))}
-
-              {holderContacts.length > 0 && (
-                <>
-                  <Text style={[styles.drawerSection, stylesHook.subtext]}>{loc.depin.contacts_title}</Text>
-                  {holderContacts.map(item => (
-                    <Pressable key={item.address} onPress={() => selectConversation(item.address)} style={styles.drawerItem}>
-                      <View style={[styles.drawerAvatar, stylesHook.chip]}>
-                        {item.address === identity.address ? (
-                          <Icon name="star" type="material" size={18} color="#f59e0b" />
-                        ) : (
-                          <Text style={[styles.msgAvatarText, stylesHook.chipText]}>{item.address.slice(-4)}</Text>
-                        )}
-                      </View>
-                      <View style={styles.drawerItemInfo}>
-                        <Text style={[styles.drawerItemName, stylesHook.text]}>
-                          {item.address === identity.address ? loc.depin.contacts_me : shortAddr(item.address)}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  ))}
-                </>
-              )}
-            </ScrollView>
-          </Animated.View>
-        </View>
-      )}
+      <DepinChatContactsDrawer
+        activeTab={activeTab}
+        closeDrawer={closeDrawer}
+        drawerAnim={drawerAnim}
+        holderContacts={holderContacts}
+        identityAddress={identity.address}
+        privateTabs={privateTabs}
+        selectConversation={selectConversation}
+        stylesHook={stylesHook}
+        visible={drawerVisible}
+      />
     </View>
   );
 });
@@ -731,16 +639,6 @@ const styles = StyleSheet.create({
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' },
   msgAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   msgAvatarText: { fontSize: 10, fontWeight: '700' },
-  drawerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10 },
-  drawerBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.45)' },
-  drawer: { width: 280, height: '100%', borderRightWidth: 1, borderTopRightRadius: 14, borderBottomRightRadius: 14 },
-  drawerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10 },
-  drawerItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, columnGap: 12 },
-  drawerAvatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  drawerItemInfo: { flex: 1 },
-  drawerItemName: { fontSize: 14, fontWeight: '600' },
-  drawerItemSub: { fontSize: 12, marginTop: 1 },
-  drawerSection: { fontSize: 12, fontWeight: '700', paddingHorizontal: 14, paddingTop: 14, paddingBottom: 4, textTransform: 'uppercase' },
   addressCard: { padding: 14, borderRadius: 12, borderWidth: 1 },
   cardTitleRow: { flexDirection: 'row', alignItems: 'baseline', marginBottom: 10 },
   hintRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', columnGap: 8 },
