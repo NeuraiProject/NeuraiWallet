@@ -188,7 +188,10 @@ export function useDePINChat(params: {
     async (assetName: string) => {
       if (!assetName || !rpc) return;
       try {
-        const data = (await rpc('listdepinaddresses', [serverTokenRef.current ?? assetName])) as Array<{ address: string; pubkey?: string }>;
+        const data = (await rpc('listdepinaddresses', [serverTokenRef.current ?? assetName])) as Array<{
+          address: string;
+          pubkey?: string;
+        }>;
         for (const item of data ?? []) {
           const pk = (item.pubkey ?? '').trim().toLowerCase();
           if (pk.length === 66 && (pk.startsWith('02') || pk.startsWith('03'))) {
@@ -351,16 +354,23 @@ export function useDePINChat(params: {
       const ts = typeof item.timestamp === 'number' ? item.timestamp : Math.floor(Date.now() / 1000);
       const messageHash = String(item.hash ?? '');
       const sender = String(item.sender ?? '');
+      // Some clients send private messages as plain "@recipient text" without
+      // tagging message_type — route those to the private conversation (and
+      // strip the prefix) instead of showing them raw in the group chat.
+      const privMatch = plaintext.match(/^@(N[a-zA-Z0-9]{33,34}|t[a-zA-Z0-9]{33,34})\s+([\s\S]*)$/);
+      const messageType = privMatch ? 'private' : item.message_type;
+      let contactAddress = getContactAddress(messageHash, sender, effectiveAddress, messageType);
+      if (privMatch && sender === effectiveAddress) contactAddress = privMatch[1];
       decrypted.push({
         recipient: effectiveAddress,
         sender,
-        message: plaintext,
+        message: privMatch ? privMatch[2] : plaintext,
         timestamp: ts,
         date: new Date(ts * 1000).toLocaleString(),
         expires: '',
         messageHash,
-        messageType: item.message_type,
-        contactAddress: getContactAddress(messageHash, sender, effectiveAddress, item.message_type),
+        messageType,
+        contactAddress,
       });
     }
 

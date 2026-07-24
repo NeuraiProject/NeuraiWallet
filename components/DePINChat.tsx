@@ -20,6 +20,7 @@ import {
   InteractionManager,
   Keyboard,
   LayoutAnimation,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -91,6 +92,15 @@ const normalizeAmount = (raw: unknown): number => {
   const n = Number(raw);
   return Number.isFinite(n) ? (n > 1e6 ? n / ONE_COIN : n) : 0;
 };
+
+/** Server DePIN configuration reported by `depingetmsginfo`. */
+interface DepinServerInfo {
+  cipher?: string;
+  maxrecipients?: number;
+  maxmessagesize?: number;
+  messageexpiryhours?: number;
+  maxpoolsizemb?: number;
+}
 
 const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref) => {
   const { colors } = useTheme();
@@ -167,6 +177,8 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   const [activeTab, setActiveTab] = useState<string>('group');
   const [showQr, setShowQr] = useState(false);
   const [draft, setDraft] = useState('');
+  const [showInfo, setShowInfo] = useState(false);
+  const [serverInfo, setServerInfo] = useState<DepinServerInfo | null>(null);
 
   // Keyboard handling: the app runs edge-to-edge, so Android never resizes the
   // window for the keyboard — and react-native-keyboard-controller providers
@@ -209,12 +221,23 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     [selectedAsset],
   );
 
-  const { groupMessages, privateConversations, error, lastPoll, sendMessage, checkAssetValidity, setIsPolling } = useDePINChat({
-    rpc,
-    selectedAsset,
-    identity,
-    recipientList,
-  });
+  const { groupMessages, privateConversations, error, lastPoll, stats, fetchStats, sendMessage, checkAssetValidity, setIsPolling } =
+    useDePINChat({
+      rpc,
+      selectedAsset,
+      identity,
+      recipientList,
+    });
+
+  // Chat info modal: server DePIN characteristics (depingetmsginfo) plus live
+  // pool stats (depinpoolstats) and the member list.
+  const openInfo = useCallback(() => {
+    setShowInfo(true);
+    fetchStats();
+    rpc?.<DepinServerInfo>('depingetmsginfo', [])
+      .then(info => setServerInfo(info))
+      .catch(e => console.debug('DePINChat: depingetmsginfo failed', e));
+  }, [rpc, fetchStats]);
 
   // Load the DePIN tokens held at the chat address.
   const loadAssets = useCallback(async () => {
@@ -377,7 +400,9 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
           _id: `${m.messageHash ?? m.sender}-${m.timestamp}-${i}`,
           text: m.message,
           createdAt: new Date(m.timestamp * 1000),
-          user: { _id: m.sender, name: shortAddr(m.sender) },
+          // Last 4 chars as the display name: every address on a network starts
+          // with the same prefix, so first-letter avatars would all look alike.
+          user: { _id: m.sender, name: m.sender.slice(-4) },
         }))
         // Oldest first: paired with GiftedChat's `inverted={false}` below this
         // renders top-to-bottom (first message at the top, newest at the bottom).
@@ -437,7 +462,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
       accessibilityLabel={loc.depin.config}
       testID="DepinChatConfig"
     >
-      <Text style={[styles.gearGlyph, stylesHook.subtext]}>⚙</Text>
+      <Icon name="settings" type="material" size={22} color={colors.alternativeTextColor} />
     </Pressable>
   );
 
@@ -570,8 +595,52 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
             {`# ${selectedAsset}`}
           </Text>
         </Pressable>
+        <Pressable onPress={openInfo} style={styles.gear} accessibilityLabel={loc.depin.info_title} testID="DepinChatInfo">
+          <Icon name="information-circle-outline" type="ionicons" size={22} color={colors.alternativeTextColor} />
+        </Pressable>
         {gearButton}
       </View>
+
+      <Modal visible={showInfo} transparent animationType="fade" onRequestClose={() => setShowInfo(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowInfo(false)}>
+          <Pressable style={[styles.infoCard, stylesHook.card]}>
+            <Text style={[styles.bannerTitle, stylesHook.text]} numberOfLines={1}>
+              {`${loc.depin.info_title} — ${selectedAsset}`}
+            </Text>
+            {(
+              [
+                [loc.depin.info_ttl, serverInfo?.messageexpiryhours != null ? `${serverInfo.messageexpiryhours} h` : null],
+                [loc.depin.info_max_pool, serverInfo?.maxpoolsizemb != null ? `${serverInfo.maxpoolsizemb} MB` : null],
+                [loc.depin.info_max_msg_size, serverInfo?.maxmessagesize != null ? `${serverInfo.maxmessagesize} B` : null],
+                [loc.depin.info_max_recipients, serverInfo?.maxrecipients ?? null],
+                [loc.depin.info_cipher, serverInfo?.cipher ?? null],
+                [loc.depin.info_total_messages, stats?.total_messages ?? null],
+                [loc.depin.info_expiring, stats?.expiring_in_24h ?? null],
+                [loc.depin.info_members, recipientList.length],
+              ] as Array<[string, string | number | null]>
+            ).map(([label, value]) =>
+              value == null ? null : (
+                <View style={styles.infoRow} key={label}>
+                  <Text style={[styles.infoLabel, stylesHook.subtext]}>{label}</Text>
+                  <Text style={[styles.infoValue, stylesHook.text]}>{String(value)}</Text>
+                </View>
+              ),
+            )}
+            {recipientList.length > 0 && (
+              <Text style={[styles.infoMembers, stylesHook.subtext]} numberOfLines={6}>
+                {recipientList.map(r => shortAddr(r.address)).join('   ')}
+              </Text>
+            )}
+            <Pressable
+              onPress={() => setShowInfo(false)}
+              style={[styles.revealBtn, stylesHook.chipActive, styles.infoClose]}
+              testID="DepinInfoClose"
+            >
+              <Text style={[styles.revealBtnText, stylesHook.text]}>{loc.depin.info_close}</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <View style={styles.tabsRow}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsContent}>
@@ -651,7 +720,6 @@ const styles = StyleSheet.create({
   backBtn: { flex: 1, marginRight: 12 },
   title: { fontSize: 18, fontWeight: '700' },
   gear: { padding: 8 },
-  gearGlyph: { fontSize: 20 },
   info: { fontSize: 15, textAlign: 'center', lineHeight: 22, paddingHorizontal: 8 },
   loader: { marginVertical: 24 },
   sectionLabel: { fontSize: 13, fontWeight: '600', marginBottom: 8, marginTop: 20 },
@@ -675,6 +743,13 @@ const styles = StyleSheet.create({
   bannerDesc: { fontSize: 13, lineHeight: 19, marginBottom: 12 },
   revealBtn: { paddingVertical: 10, borderRadius: 10, borderWidth: 1, alignItems: 'center' },
   revealBtnDisabled: { opacity: 0.45 },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.55)', justifyContent: 'center', padding: 24 },
+  infoCard: { borderRadius: 14, borderWidth: 1, padding: 18 },
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, columnGap: 12 },
+  infoLabel: { fontSize: 13 },
+  infoValue: { fontSize: 13, fontWeight: '600', flexShrink: 1, textAlign: 'right' },
+  infoMembers: { fontSize: 12, marginTop: 10, lineHeight: 18 },
+  infoClose: { marginTop: 16 },
   revealBtnText: { fontSize: 14, fontWeight: '700' },
   errorText: { fontSize: 12, textAlign: 'center', paddingVertical: 6, flexShrink: 1 },
   statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', columnGap: 8, paddingHorizontal: 16 },
