@@ -17,6 +17,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   InteractionManager,
   Keyboard,
   LayoutAnimation,
@@ -95,6 +96,8 @@ const normalizeAmount = (raw: unknown): number => {
 
 /** Server DePIN configuration reported by `depingetmsginfo`. */
 interface DepinServerInfo {
+  enabled?: boolean;
+  token?: string;
   cipher?: string;
   maxrecipients?: number;
   maxmessagesize?: number;
@@ -221,13 +224,46 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     [selectedAsset],
   );
 
-  const { groupMessages, privateConversations, error, lastPoll, stats, fetchStats, sendMessage, checkAssetValidity, setIsPolling } =
-    useDePINChat({
-      rpc,
-      selectedAsset,
-      identity,
-      recipientList,
-    });
+  const {
+    groupMessages,
+    privateConversations,
+    error,
+    lastPoll,
+    stats,
+    fetchStats,
+    sendMessage,
+    checkAssetValidity,
+    setIsPolling,
+    createPrivateConversation,
+  } = useDePINChat({
+    rpc,
+    selectedAsset,
+    identity,
+    recipientList,
+  });
+
+  // Contacts drawer (mirrors the web wallet's left sidebar): Public Group,
+  // then open private conversations, then the token holders you can start a
+  // private chat with.
+  const DRAWER_WIDTH = 280;
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const drawerAnim = useRef(new Animated.Value(0)).current;
+  const openDrawer = useCallback(() => {
+    setDrawerVisible(true);
+    Animated.timing(drawerAnim, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+  }, [drawerAnim]);
+  const closeDrawer = useCallback(() => {
+    Animated.timing(drawerAnim, { toValue: 0, duration: 180, useNativeDriver: true }).start(() => setDrawerVisible(false));
+  }, [drawerAnim]);
+  const drawerTranslateX = drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [-DRAWER_WIDTH, 0] });
+  const selectConversation = useCallback(
+    (tab: string) => {
+      if (tab !== 'group' && !privateConversations.has(tab)) createPrivateConversation(tab);
+      setActiveTab(tab);
+      closeDrawer();
+    },
+    [privateConversations, createPrivateConversation, closeDrawer],
+  );
 
   // Chat info modal: server DePIN characteristics (depingetmsginfo) plus live
   // pool stats (depinpoolstats) and the member list.
@@ -239,10 +275,15 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
       .catch(e => console.debug('DePINChat: depingetmsginfo failed', e));
   }, [rpc, fetchStats]);
 
-  // Load the DePIN tokens held at the chat address.
+  // Load the DePIN tokens held at the chat address. Also refreshes the server
+  // config (enabled + served token) that drives the Ready badge and the
+  // green/red access state of each token chip.
   const loadAssets = useCallback(async () => {
     if (!rpc || !identity) return;
     setLoadingAssets(true);
+    rpc<DepinServerInfo>('depingetmsginfo', [])
+      .then(info => setServerInfo(info))
+      .catch(e => console.debug('DePINChat: depingetmsginfo failed', e));
     try {
       const balances = (await rpc('listassetbalancesbyaddress', [identity.address])) as Record<string, unknown> | null;
       const next: Record<string, number> = {};
@@ -483,8 +524,19 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   }
 
   const assetNames = Object.keys(chatAssets);
+  // Access per token: the DePIN server serves exactly one token — green when
+  // this asset is the one it serves (and the pool is enabled), red when not,
+  // neutral while the server hasn't answered yet.
+  const serverTokenNorm = serverInfo?.token ? serverInfo.token.replace(/^&/, '').toUpperCase() : null;
+  const tokenHasAccess = (name: string): boolean | null =>
+    serverInfo == null ? null : !!serverInfo.enabled && serverTokenNorm === name.replace(/^&/, '').toUpperCase();
+  // Fully ready to operate: server pool enabled AND our pubkey is on-chain.
+  const isReady = serverInfo?.enabled === true && pubkeyRevealed === true;
   const addressRow = (
     <View style={[styles.addressCard, stylesHook.card]}>
+      <View style={[styles.readyBadge, isReady ? styles.readyBadgeOk : styles.readyBadgeNo]}>
+        <Text style={styles.readyBadgeText}>{loc.depin.ready_badge}</Text>
+      </View>
       <Text style={[styles.addressLabel, stylesHook.subtext]}>{loc.depin.address_label}</Text>
       <Text style={[styles.addressText, stylesHook.text]} numberOfLines={1} ellipsizeMode="middle" selectable>
         {identity.address}
@@ -569,11 +621,20 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
           <Text style={[styles.info, stylesHook.subtext]}>{loc.depin.no_token}</Text>
         ) : (
           <View style={styles.chipsWrap}>
-            {assetNames.map(name => (
-              <Pressable key={name} onPress={() => selectAsset(name)} style={[styles.chip, stylesHook.chip]} testID={`DepinAsset-${name}`}>
-                <Text style={[styles.chipText, stylesHook.chipText]}>{name}</Text>
-              </Pressable>
-            ))}
+            {assetNames.map(name => {
+              const access = tokenHasAccess(name);
+              return (
+                <Pressable
+                  key={name}
+                  onPress={() => selectAsset(name)}
+                  style={[styles.chip, stylesHook.chip, access === true && styles.chipAccess, access === false && styles.chipNoAccess]}
+                  testID={`DepinAsset-${name}`}
+                >
+                  {access != null && <View style={[styles.chipDot, access ? styles.chipDotOk : styles.chipDotNo]} />}
+                  <Text style={[styles.chipText, stylesHook.chipText]}>{name}</Text>
+                </Pressable>
+              );
+            })}
           </View>
         )}
 
@@ -583,6 +644,11 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   }
 
   const privateTabs = Array.from(privateConversations.values()).sort((a, b) => b.lastMessageTime - a.lastMessageTime);
+  // Holders you could start a private chat with: pubkey on-chain (required for
+  // encryption) and no conversation open yet. Yourself is listed as notes.
+  const holderContacts = recipientList.filter(r => r.pubkey && !privateConversations.has(r.address));
+  const activeConvName =
+    activeTab === 'group' ? loc.depin.tab_group : (privateConversations.get(activeTab)?.displayName ?? shortAddr(activeTab));
 
   return (
     // GiftedChat renders only the message list here (its built-in InputToolbar
@@ -590,6 +656,9 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     // ours, and `chatRoot` shrinks the whole column by the keyboard height.
     <View style={[styles.flex, stylesHook.root, stylesHook.chatRoot]}>
       <View style={styles.headerRow}>
+        <Pressable onPress={openDrawer} style={styles.gear} accessibilityLabel={loc.depin.contacts_title} testID="DepinContactsOpen">
+          <Icon name="menu" type="material" size={24} color={colors.foregroundColor} />
+        </Pressable>
         <Pressable onPress={() => setSelectedAsset(null)} style={styles.backBtn}>
           <Text style={[styles.title, stylesHook.text]} numberOfLines={1}>
             {`# ${selectedAsset}`}
@@ -642,25 +711,17 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
         </Pressable>
       </Modal>
 
-      <View style={styles.tabsRow}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsContent}>
-          <Pressable
-            onPress={() => setActiveTab('group')}
-            style={[styles.tabChip, activeTab === 'group' ? stylesHook.chipActive : stylesHook.chip]}
-          >
-            <Text style={[styles.chipText, stylesHook.chipText]}>{loc.depin.tab_group}</Text>
-          </Pressable>
-          {privateTabs.map(c => (
-            <Pressable
-              key={c.address}
-              onPress={() => setActiveTab(c.address)}
-              style={[styles.tabChip, activeTab === c.address ? stylesHook.chipActive : stylesHook.chip]}
-            >
-              <Text style={[styles.chipText, stylesHook.chipText]}>{c.displayName}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
+      <Pressable onPress={openDrawer} style={styles.activeConvRow} testID="DepinActiveConversation">
+        {activeTab === 'group' ? (
+          <Icon name="groups" type="material" size={18} color={colors.alternativeTextColor} />
+        ) : (
+          <View style={styles.onlineDot} />
+        )}
+        <Text style={[styles.activeConvText, stylesHook.text]} numberOfLines={1}>
+          {activeConvName}
+        </Text>
+        <Icon name="expand-more" type="material" size={18} color={colors.alternativeTextColor} />
+      </Pressable>
 
       {revealBanner}
       {error ? (
@@ -684,6 +745,11 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
           keyboardProviderProps={{ enabled: false }}
           messagesContainerRef={messagesListRef}
           messagesContainerStyle={stylesHook.root}
+          renderAvatar={(p: any) => (
+            <View style={[styles.msgAvatar, stylesHook.chip]}>
+              <Text style={[styles.msgAvatarText, stylesHook.chipText]}>{p?.currentMessage?.user?.name ?? '?'}</Text>
+            </View>
+          )}
         />
       </View>
 
@@ -706,6 +772,75 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
           <Text style={styles.sendBtnGlyph}>➤</Text>
         </Pressable>
       </View>
+
+      {drawerVisible && (
+        <View style={styles.drawerOverlay}>
+          <Animated.View style={[styles.drawerBackdrop, { opacity: drawerAnim }]}>
+            <Pressable style={styles.flex} onPress={closeDrawer} accessibilityLabel={loc.depin.info_close} />
+          </Animated.View>
+          <Animated.View style={[styles.drawer, stylesHook.card, { transform: [{ translateX: drawerTranslateX }] }]}>
+            <View style={styles.drawerHeader}>
+              <Text style={[styles.title, stylesHook.text]}>{loc.depin.contacts_title}</Text>
+              <Pressable onPress={closeDrawer} style={styles.gear} testID="DepinContactsClose">
+                <Icon name="close" type="material" size={22} color={colors.alternativeTextColor} />
+              </Pressable>
+            </View>
+            <ScrollView>
+              <Pressable
+                onPress={() => selectConversation('group')}
+                style={[styles.drawerItem, activeTab === 'group' && stylesHook.chipActive]}
+                testID="DepinDrawerGroup"
+              >
+                <View style={[styles.drawerAvatar, stylesHook.chip]}>
+                  <Icon name="groups" type="material" size={20} color={colors.foregroundColor} />
+                </View>
+                <View style={styles.drawerItemInfo}>
+                  <Text style={[styles.drawerItemName, stylesHook.text]}>{loc.depin.tab_group}</Text>
+                  <Text style={[styles.drawerItemSub, stylesHook.subtext]}>{loc.depin.contacts_everyone}</Text>
+                </View>
+              </Pressable>
+
+              {privateTabs.map(c => (
+                <Pressable
+                  key={c.address}
+                  onPress={() => selectConversation(c.address)}
+                  style={[styles.drawerItem, activeTab === c.address && stylesHook.chipActive]}
+                >
+                  <View style={[styles.drawerAvatar, stylesHook.chip]}>
+                    <Text style={[styles.msgAvatarText, stylesHook.chipText]}>{c.address.slice(-4)}</Text>
+                  </View>
+                  <View style={styles.drawerItemInfo}>
+                    <Text style={[styles.drawerItemName, stylesHook.text]}>{c.displayName}</Text>
+                    <Text style={[styles.drawerItemSub, stylesHook.subtext]}>{shortAddr(c.address)}</Text>
+                  </View>
+                </Pressable>
+              ))}
+
+              {holderContacts.length > 0 && (
+                <>
+                  <Text style={[styles.drawerSection, stylesHook.subtext]}>{loc.depin.contacts_title}</Text>
+                  {holderContacts.map(item => (
+                    <Pressable key={item.address} onPress={() => selectConversation(item.address)} style={styles.drawerItem}>
+                      <View style={[styles.drawerAvatar, stylesHook.chip]}>
+                        {item.address === identity.address ? (
+                          <Icon name="star" type="material" size={18} color="#f59e0b" />
+                        ) : (
+                          <Text style={[styles.msgAvatarText, stylesHook.chipText]}>{item.address.slice(-4)}</Text>
+                        )}
+                      </View>
+                      <View style={styles.drawerItemInfo}>
+                        <Text style={[styles.drawerItemName, stylesHook.text]}>
+                          {item.address === identity.address ? loc.depin.contacts_me : shortAddr(item.address)}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  ))}
+                </>
+              )}
+            </ScrollView>
+          </Animated.View>
+        </View>
+      )}
     </View>
   );
 });
@@ -724,12 +859,56 @@ const styles = StyleSheet.create({
   loader: { marginVertical: 24 },
   sectionLabel: { fontSize: 13, fontWeight: '600', marginBottom: 8, marginTop: 20 },
   chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, borderWidth: 1 },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  // Chat access per token: green = the configured server serves this token,
+  // red = it doesn't (or the pool is disabled).
+  chipAccess: { borderColor: '#16a34a', borderWidth: 1.5, backgroundColor: 'rgba(22, 163, 74, 0.10)' },
+  chipNoAccess: { borderColor: '#dc2626', borderWidth: 1.5, backgroundColor: 'rgba(220, 38, 38, 0.08)' },
+  chipDot: { width: 8, height: 8, borderRadius: 4 },
+  chipDotOk: { backgroundColor: '#16a34a' },
+  chipDotNo: { backgroundColor: '#dc2626' },
   chipText: { fontSize: 14, fontWeight: '600' },
-  tabsRow: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'transparent' },
-  tabsContent: { paddingHorizontal: 12, paddingBottom: 8, gap: 8 },
-  tabChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14, borderWidth: 1 },
+  activeConvRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, columnGap: 6 },
+  activeConvText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' },
+  msgAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  msgAvatarText: { fontSize: 10, fontWeight: '700' },
+  drawerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10 },
+  drawerBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.45)' },
+  drawer: { width: 280, height: '100%', borderRightWidth: 1, borderTopRightRadius: 14, borderBottomRightRadius: 14 },
+  drawerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10 },
+  drawerItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, columnGap: 12 },
+  drawerAvatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  drawerItemInfo: { flex: 1 },
+  drawerItemName: { fontSize: 14, fontWeight: '600' },
+  drawerItemSub: { fontSize: 12, marginTop: 1 },
+  drawerSection: { fontSize: 12, fontWeight: '700', paddingHorizontal: 14, paddingTop: 14, paddingBottom: 4, textTransform: 'uppercase' },
   addressCard: { marginTop: 16, padding: 14, borderRadius: 12, borderWidth: 1 },
+  // Corner flap glued to the card's top-right, mirroring the home cards' HQ
+  // badge (top-left there): outer corner follows the card radius, inner one
+  // curves softly, the other two sit flush at 90°.
+  readyBadge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderTopRightRadius: 12,
+    borderBottomLeftRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  readyBadgeOk: { backgroundColor: '#16a34a' },
+  readyBadgeNo: { backgroundColor: '#dc2626' },
+  readyBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
   addressLabel: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
   addressText: { fontSize: 14, fontWeight: '600' },
   addressActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
