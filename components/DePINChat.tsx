@@ -15,8 +15,8 @@
  * Mirrors the Neurai web wallet's `Chat.tsx` / `useDePINChat.ts`.
  */
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { GiftedChat, IMessage } from 'react-native-gifted-chat';
+import { ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { IMessage } from 'react-native-gifted-chat';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -37,6 +37,7 @@ import { useTheme } from './themes';
 import { BURN_ADDRESS, FUND_AMOUNT_XNA, ONE_COIN, REVEAL_AMOUNT_XNA, REVEAL_RETRY_MS } from './depinChat/constants';
 import DepinChatAddressCard from './depinChat/DepinChatAddressCard';
 import DepinChatContactsDrawer from './depinChat/DepinChatContactsDrawer';
+import DepinChatConversationPanel from './depinChat/DepinChatConversationPanel';
 import DepinChatInfoModal from './depinChat/DepinChatInfoModal';
 import DepinChatRevealBanner from './depinChat/DepinChatRevealBanner';
 import DepinChatTokenSections from './depinChat/DepinChatTokenSections';
@@ -387,111 +388,50 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     activeTab === 'group' ? loc.depin.tab_group : (privateConversations.get(activeTab)?.displayName ?? shortAddr(activeTab));
 
   return (
-    // GiftedChat renders only the message list here (its built-in InputToolbar
-    // and internal KeyboardProvider are both disabled); the input bar below is
-    // ours, and `chatRoot` shrinks the whole column by the keyboard height.
-    <View style={[styles.flex, stylesHook.root, stylesHook.chatRoot]}>
-      <View style={styles.headerRow}>
-        <Pressable onPress={openDrawer} style={styles.gear} accessibilityLabel={loc.depin.contacts_title} testID="DepinContactsOpen">
-          <Icon name="menu" type="material" size={24} color={colors.foregroundColor} />
-        </Pressable>
-        <Pressable onPress={() => setSelectedAsset(null)} style={styles.backBtn}>
-          <Text style={[styles.title, stylesHook.text]} numberOfLines={1}>
-            {`# ${selectedAsset}`}
-          </Text>
-        </Pressable>
-        <Pressable onPress={openInfo} style={styles.gear} accessibilityLabel={loc.depin.info_title} testID="DepinChatInfo">
-          <Icon name="information-circle-outline" type="ionicons" size={22} color={colors.alternativeTextColor} />
-        </Pressable>
-        {gearButton}
-      </View>
-
-      <DepinChatInfoModal
-        onClose={() => setShowInfo(false)}
-        recipients={recipientList}
-        selectedAsset={selectedAsset}
-        serverInfo={serverInfo}
-        stats={stats}
-        stylesHook={stylesHook}
-        visible={showInfo}
-      />
-
-      <Pressable onPress={openDrawer} style={styles.activeConvRow} testID="DepinActiveConversation">
-        {activeTab === 'group' ? (
-          <Icon name="groups" type="material" size={18} color={colors.alternativeTextColor} />
-        ) : (
-          <View style={styles.onlineDot} />
-        )}
-        <Text style={[styles.activeConvText, stylesHook.text]} numberOfLines={1}>
-          {activeConvName}
-        </Text>
-        <Icon name="expand-more" type="material" size={18} color={colors.alternativeTextColor} />
-      </Pressable>
-
-      {revealBanner}
-      {error ? (
-        <View style={styles.statusRow}>
-          <ActivityIndicator size="small" />
-          <Text style={[styles.errorText, stylesHook.subtext]}>{`${error} — ${loc.depin.connection_retrying}`}</Text>
-        </View>
-      ) : !lastPoll ? (
-        <View style={styles.statusRow}>
-          <ActivityIndicator size="small" />
-          <Text style={[styles.errorText, stylesHook.subtext]}>{loc.depin.checking_server}</Text>
-        </View>
-      ) : null}
-
-      <View style={styles.flex}>
-        <GiftedChat
-          messages={messages}
-          user={{ _id: identity.address }}
-          isInverted={false}
-          renderInputToolbar={() => null}
-          // The type demands `children`, but GiftedChat itself supplies them
-          // when it spreads these props onto its internal KeyboardProvider.
-          keyboardProviderProps={{ enabled: false } as any}
-          messagesContainerRef={messagesListRef}
-          messagesContainerStyle={stylesHook.root}
-          renderAvatar={(p: any) => (
-            <View style={[styles.msgAvatar, stylesHook.chip]}>
-              <Text style={[styles.msgAvatarText, stylesHook.chipText]}>{p?.currentMessage?.user?.name ?? '?'}</Text>
-            </View>
-          )}
-        />
-      </View>
-
-      <View style={[styles.inputBar, stylesHook.inputBar]}>
-        <TextInput
-          style={[styles.inputField, stylesHook.inputField]}
-          value={draft}
-          onChangeText={setDraft}
-          placeholder={activeTab === 'group' ? loc.depin.input_placeholder : loc.depin.input_placeholder_private}
-          placeholderTextColor={colors.alternativeTextColor}
-          multiline
-          testID="DepinChatInput"
-        />
-        <Pressable
-          onPress={handleSend}
-          disabled={!draft.trim()}
-          style={[styles.sendBtn, !draft.trim() && styles.sendBtnDisabled]}
-          testID="DepinChatSend"
-        >
-          <Text style={styles.sendBtnGlyph}>➤</Text>
-        </Pressable>
-      </View>
-
-      <DepinChatContactsDrawer
-        activeTab={activeTab}
-        closeDrawer={closeDrawer}
-        drawerAnim={drawerAnim}
-        holderContacts={holderContacts}
-        identityAddress={identity.address}
-        privateTabs={privateTabs}
-        selectConversation={selectConversation}
-        stylesHook={stylesHook}
-        visible={drawerVisible}
-      />
-    </View>
+    <DepinChatConversationPanel
+      activeConversationName={activeConvName}
+      activeTab={activeTab}
+      draft={draft}
+      error={error}
+      gearButton={gearButton}
+      identityAddress={identity.address}
+      lastPoll={lastPoll}
+      messages={messages}
+      messagesListRef={messagesListRef}
+      onBack={() => setSelectedAsset(null)}
+      onChangeDraft={setDraft}
+      onOpenDrawer={openDrawer}
+      onOpenInfo={openInfo}
+      onSend={handleSend}
+      overlays={
+        <>
+          <DepinChatInfoModal
+            onClose={() => setShowInfo(false)}
+            recipients={recipientList}
+            selectedAsset={selectedAsset}
+            serverInfo={serverInfo}
+            stats={stats}
+            stylesHook={stylesHook}
+            visible={showInfo}
+          />
+          <DepinChatContactsDrawer
+            activeTab={activeTab}
+            closeDrawer={closeDrawer}
+            drawerAnim={drawerAnim}
+            holderContacts={holderContacts}
+            identityAddress={identity.address}
+            privateTabs={privateTabs}
+            selectConversation={selectConversation}
+            stylesHook={stylesHook}
+            visible={drawerVisible}
+          />
+        </>
+      }
+      placeholderColor={colors.alternativeTextColor}
+      revealBanner={revealBanner}
+      selectedAsset={selectedAsset}
+      stylesHook={stylesHook}
+    />
   );
 });
 
@@ -501,45 +441,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   scrollContent: { padding: 16, paddingBottom: 120 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 },
-  backBtn: { flex: 1, marginRight: 12 },
-  title: { fontSize: 18, fontWeight: '700' },
   gear: { padding: 8 },
   info: { fontSize: 15, textAlign: 'center', lineHeight: 22, paddingHorizontal: 8 },
-  activeConvRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, columnGap: 6 },
-  activeConvText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
-  onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' },
-  msgAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  msgAvatarText: { fontSize: 10, fontWeight: '700' },
-  errorText: { fontSize: 12, textAlign: 'center', paddingVertical: 6, flexShrink: 1 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', columnGap: 8, paddingHorizontal: 16 },
-  inputBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    columnGap: 8,
-  },
-  inputField: {
-    flex: 1,
-    minHeight: 40,
-    maxHeight: 120,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 15,
-  },
-  sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f97316',
-  },
-  sendBtnDisabled: { opacity: 0.4 },
-  sendBtnGlyph: { color: '#ffffff', fontSize: 18, fontWeight: '700' },
 });
 
 export default DePINChat;
