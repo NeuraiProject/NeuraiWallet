@@ -616,48 +616,55 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
         />
       )}
 
-      <FloatButtonsBottomFade />
-      <FContainer ref={walletActionButtonsRef}>
-        {wallet.allowReceive() && (
-          <FButton
-            testID="ReceiveButton"
-            text={loc.receive.header}
-            onPress={() => {
-              navigate('ReceiveDetails', { walletID });
-            }}
-            icon={
-              <View style={styles.iconContainer}>
-                <Icon
-                  name="arrow-down"
-                  size={buttonFontSize}
-                  type="font-awesome"
-                  color={colors.buttonTextColor}
-                  style={stylesHook.receiveIcon}
-                />
-              </View>
-            }
-          />
-        )}
-        {wallet.allowSend() && (
-          <FButton
-            onLongPress={sendButtonLongPress}
-            onPress={sendButtonPress}
-            text={loc.send.header}
-            testID="SendButton"
-            icon={
-              <View style={styles.iconContainer}>
-                <Icon
-                  name="arrow-down"
-                  size={buttonFontSize}
-                  type="font-awesome"
-                  color={colors.buttonTextColor}
-                  style={stylesHook.sendIcon}
-                />
-              </View>
-            }
-          />
-        )}
-      </FContainer>
+      {/* The DePIN chat owns the bottom of the screen (message input toolbar), so
+          hide the floating Send/Receive actions there — they'd overlap the input
+          and the latest messages. They remain on the Transactions/Assets tabs. */}
+      {!(showDepinTab && activeTab === 'depin') && (
+        <>
+          <FloatButtonsBottomFade />
+          <FContainer ref={walletActionButtonsRef}>
+            {wallet.allowReceive() && (
+              <FButton
+                testID="ReceiveButton"
+                text={loc.receive.header}
+                onPress={() => {
+                  navigate('ReceiveDetails', { walletID });
+                }}
+                icon={
+                  <View style={styles.iconContainer}>
+                    <Icon
+                      name="arrow-down"
+                      size={buttonFontSize}
+                      type="font-awesome"
+                      color={colors.buttonTextColor}
+                      style={stylesHook.receiveIcon}
+                    />
+                  </View>
+                }
+              />
+            )}
+            {wallet.allowSend() && (
+              <FButton
+                onLongPress={sendButtonLongPress}
+                onPress={sendButtonPress}
+                text={loc.send.header}
+                testID="SendButton"
+                icon={
+                  <View style={styles.iconContainer}>
+                    <Icon
+                      name="arrow-down"
+                      size={buttonFontSize}
+                      type="font-awesome"
+                      color={colors.buttonTextColor}
+                      style={stylesHook.sendIcon}
+                    />
+                  </View>
+                }
+              />
+            )}
+          </FContainer>
+        </>
+      )}
       {wallet.chain === Chain.ONCHAIN && wallet.getXpub && wallet.getXpub() ? (
         <HandOffComponent
           title={wallet.getLabel()}

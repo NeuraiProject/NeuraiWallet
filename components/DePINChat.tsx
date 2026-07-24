@@ -15,11 +15,12 @@
  * Mirrors the Neurai web wallet's `Chat.tsx` / `useDePINChat.ts`.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, InteractionManager, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { GiftedChat, IMessage } from 'react-native-gifted-chat';
-import { KeyboardProvider } from 'react-native-keyboard-controller';
+import { KeyboardAvoidingView, KeyboardProvider } from 'react-native-keyboard-controller';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getDepinRpcBackend, type NeuraiBackend, type NeuraiNetwork } from '../blue_modules/neurai';
 import { deriveDepinChatIdentity, type DepinChatIdentity, isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIdentity';
@@ -65,6 +66,7 @@ const normalizeAmount = (raw: unknown): number => {
 const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
   const { colors } = useTheme();
   const { navigate } = useExtendedNavigation();
+  const insets = useSafeAreaInsets();
   const wallet = useWalletSubscribe(walletID);
   const neurai = isNeuraiWallet(wallet) ? wallet : null;
 
@@ -117,6 +119,7 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
   const [revealing, setRevealing] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('group');
   const [showQr, setShowQr] = useState(false);
+  const [draft, setDraft] = useState('');
 
   const { groupMessages, privateConversations, error, sendMessage, checkAssetValidity, setIsPolling } = useDePINChat({
     rpc,
@@ -246,18 +249,20 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
         createdAt: new Date(m.timestamp * 1000),
         user: { _id: m.sender, name: shortAddr(m.sender) },
       }))
-      .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+      // Oldest first: paired with GiftedChat's `inverted={false}` below this
+      // renders top-to-bottom (first message at the top, newest at the bottom).
+      .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
   }, [activeTab, groupMessages, privateConversations]);
 
-  const onSend = useCallback(
-    (msgs: IMessage[] = []) => {
-      const text = (msgs[0]?.text ?? '').trim();
-      if (!text) return;
-      const payload = activeTab === 'group' ? text : `@${activeTab} ${text}`;
-      sendMessage(payload).catch((e: any) => presentAlert({ message: e?.message ?? loc.depin.send_failed }));
-    },
-    [activeTab, sendMessage],
-  );
+  // We render our own input bar (below) instead of GiftedChat's built-in
+  // InputToolbar, which proved unreliable to display in this embedded layout.
+  const handleSend = useCallback(() => {
+    const text = draft.trim();
+    if (!text) return;
+    const payload = activeTab === 'group' ? text : `@${activeTab} ${text}`;
+    sendMessage(payload).catch((e: any) => presentAlert({ message: e?.message ?? loc.depin.send_failed }));
+    setDraft('');
+  }, [draft, activeTab, sendMessage]);
 
   const stylesHook = {
     root: { backgroundColor: colors.background },
@@ -268,6 +273,8 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
     chipActive: { backgroundColor: colors.elevated, borderColor: colors.foregroundColor },
     chipText: { color: colors.foregroundColor },
     banner: { backgroundColor: colors.inputBackgroundColor, borderColor: colors.formBorder },
+    inputBar: { backgroundColor: colors.elevated, borderTopColor: colors.formBorder, paddingBottom: insets.bottom || 8 },
+    inputField: { color: colors.foregroundColor, backgroundColor: colors.inputBackgroundColor },
   };
 
   const gearButton = (
@@ -379,6 +386,9 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
   const privateTabs = Array.from(privateConversations.values()).sort((a, b) => b.lastMessageTime - a.lastMessageTime);
 
   return (
+    // We use GiftedChat only to render the message list (its built-in
+    // InputToolbar is disabled via renderInputToolbar) and provide our own
+    // KeyboardProvider so our custom input bar can keyboard-avoid on its own.
     <KeyboardProvider>
       <View style={[styles.flex, stylesHook.root]}>
         <View style={styles.headerRow}>
@@ -416,15 +426,34 @@ const DePINChat: React.FC<DePINChatProps> = ({ walletID }) => {
         <View style={styles.flex}>
           <GiftedChat
             messages={messages}
-            onSend={onSend}
             user={{ _id: identity.address }}
-            textInputProps={{
-              placeholder: activeTab === 'group' ? loc.depin.input_placeholder : loc.depin.input_placeholder_private,
-              placeholderTextColor: colors.alternativeTextColor,
-            }}
+            isInverted={false}
+            renderInputToolbar={() => null}
             messagesContainerStyle={stylesHook.root}
           />
         </View>
+
+        <KeyboardAvoidingView behavior="padding">
+          <View style={[styles.inputBar, stylesHook.inputBar]}>
+            <TextInput
+              style={[styles.inputField, stylesHook.inputField]}
+              value={draft}
+              onChangeText={setDraft}
+              placeholder={activeTab === 'group' ? loc.depin.input_placeholder : loc.depin.input_placeholder_private}
+              placeholderTextColor={colors.alternativeTextColor}
+              multiline
+              testID="DepinChatInput"
+            />
+            <Pressable
+              onPress={handleSend}
+              disabled={!draft.trim()}
+              style={[styles.sendBtn, !draft.trim() && styles.sendBtnDisabled]}
+              testID="DepinChatSend"
+            >
+              <Text style={styles.sendBtnGlyph}>➤</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
       </View>
     </KeyboardProvider>
   );
@@ -462,6 +491,33 @@ const styles = StyleSheet.create({
   revealBtn: { paddingVertical: 10, borderRadius: 10, borderWidth: 1, alignItems: 'center' },
   revealBtnText: { fontSize: 14, fontWeight: '700' },
   errorText: { fontSize: 12, textAlign: 'center', paddingVertical: 6 },
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    columnGap: 8,
+  },
+  inputField: {
+    flex: 1,
+    minHeight: 40,
+    maxHeight: 120,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+  },
+  sendBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f97316',
+  },
+  sendBtnDisabled: { opacity: 0.4 },
+  sendBtnGlyph: { color: '#ffffff', fontSize: 18, fontWeight: '700' },
 });
 
 export default DePINChat;
