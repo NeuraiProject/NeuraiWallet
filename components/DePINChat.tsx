@@ -18,10 +18,8 @@ import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo
 import {
   ActivityIndicator,
   Animated,
-  InteractionManager,
   Keyboard,
   LayoutAnimation,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -31,21 +29,15 @@ import {
 } from 'react-native';
 import { GiftedChat, IMessage } from 'react-native-gifted-chat';
 import Clipboard from '@react-native-clipboard/clipboard';
-import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import {
-  getDepinRpcBackend,
-  getDepinRpcConfig,
-  loadDepinRpcOverrides,
-  type NeuraiBackend,
-  type NeuraiNetwork,
-} from '../blue_modules/neurai';
+import type { NeuraiNetwork } from '../blue_modules/neurai';
 import { isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIdentity';
 import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
 import { useDePINChat, type RecipientInfo } from '../hooks/useDePINChat';
 import useDepinChatIdentity from '../hooks/useDepinChatIdentity';
 import useDepinChatReadyState from '../hooks/useDepinChatReadyState';
+import useDepinChatSetup from '../hooks/useDepinChatSetup';
 import useWalletSubscribe from '../hooks/useWalletSubscribe';
 import { useExtendedNavigation } from '../hooks/useExtendedNavigation';
 import loc from '../loc';
@@ -53,9 +45,10 @@ import presentAlert from './Alert';
 import Icon from './Icon';
 import QRCode from './QRCode';
 import { useTheme } from './themes';
-import { BURN_ADDRESS, FUND_AMOUNT_XNA, ONE_COIN, PUBKEY_POLL_MS, REVEAL_AMOUNT_XNA, REVEAL_RETRY_MS } from './depinChat/constants';
-import type { DePINChatHandle, DePINChatProps, DepinServerInfo } from './depinChat/types';
-import { normalizeAmount, parseRevealed, shortAddr } from './depinChat/utils';
+import { BURN_ADDRESS, FUND_AMOUNT_XNA, ONE_COIN, REVEAL_AMOUNT_XNA, REVEAL_RETRY_MS } from './depinChat/constants';
+import DepinChatInfoModal from './depinChat/DepinChatInfoModal';
+import type { DePINChatHandle, DePINChatProps } from './depinChat/types';
+import { shortAddr } from './depinChat/utils';
 
 export type { DePINChatHandle } from './depinChat/types';
 
@@ -74,31 +67,13 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   const passphrase = neurai?.passphrase ?? '';
   const identity = useDepinChatIdentity({ chainType, passphrase, secret, supported });
 
-  const backendRef = useRef<{ key: string; backend: NeuraiBackend } | null>(null);
-  const rpc = useMemo(() => {
-    if (!supported) return null;
-    return async <T = unknown,>(method: string, params: unknown[]): Promise<T> => {
-      // The user's DePIN RPC setting hydrates from disk asynchronously at app
-      // start. If the chat opens before that finishes, building the backend
-      // right away would target the DEFAULT server instead of the configured
-      // one — and caching it made that mistake permanent (the "works after
-      // exiting and re-entering" bug). So: await hydration, and key the cached
-      // backend by the effective config so settings edits apply live.
-      await loadDepinRpcOverrides();
-      const cfg = getDepinRpcConfig(network);
-      const key = `${cfg.url}|${cfg.username ?? ''}|${cfg.password ?? ''}`;
-      if (!backendRef.current || backendRef.current.key !== key) {
-        backendRef.current = { key, backend: getDepinRpcBackend(network) };
-      }
-      return backendRef.current.backend.rpc<T>(method, params);
-    };
-  }, [supported, network]);
-
-  const [chatAssets, setChatAssets] = useState<Record<string, number>>({});
-  const [loadingAssets, setLoadingAssets] = useState(false);
+  const { chatAssets, depinBalance, getBackend, loadingAssets, pubkeyRevealed, refreshServerInfo, rpc, serverInfo } = useDepinChatSetup({
+    identity,
+    network,
+    supported,
+  });
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
   const [recipientList, setRecipientList] = useState<RecipientInfo[]>([]);
-  const [pubkeyRevealed, setPubkeyRevealed] = useState<boolean | null>(null);
   const [revealing, setRevealing] = useState(false);
   const [revealPending, setRevealPending] = useState(false);
   const revealRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -114,8 +89,6 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   // experimental IoT area.
   const [activeSection, setActiveSection] = useState<'chat' | 'iot'>('chat');
   const [showInfo, setShowInfo] = useState(false);
-  const [serverInfo, setServerInfo] = useState<DepinServerInfo | null>(null);
-
   const lastKnownReady = useDepinChatReadyState({
     identity,
     pubkeyRevealed,
@@ -209,92 +182,8 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   const openInfo = useCallback(() => {
     setShowInfo(true);
     fetchStats();
-    rpc?.<DepinServerInfo>('depingetmsginfo', [])
-      .then(info => setServerInfo(info))
-      .catch(e => console.debug('DePINChat: depingetmsginfo failed', e));
-  }, [rpc, fetchStats]);
-
-  // Load the DePIN tokens held at the chat address. Also refreshes the server
-  // config (enabled + served token) that drives the Ready badge and the
-  // green/red access state of each token chip.
-  const loadAssets = useCallback(async () => {
-    if (!rpc || !identity) return;
-    setLoadingAssets(true);
-    rpc<DepinServerInfo>('depingetmsginfo', [])
-      .then(info => setServerInfo(info))
-      .catch(e => console.debug('DePINChat: depingetmsginfo failed', e));
-    try {
-      const balances = (await rpc('listassetbalancesbyaddress', [identity.address])) as Record<string, unknown> | null;
-      const next: Record<string, number> = {};
-      if (balances && typeof balances === 'object') {
-        for (const name of Object.keys(balances)) {
-          // Only DePIN assets ('&NAME') can gate a chat; skip XNA and any other
-          // asset types held at the address.
-          if (!name.startsWith('&')) continue;
-          const amount = normalizeAmount(balances[name]);
-          if (amount > 0) next[name] = amount;
-        }
-      }
-      setChatAssets(next);
-    } catch (e) {
-      console.debug('DePINChat: listassetbalancesbyaddress failed', e);
-    } finally {
-      setLoadingAssets(false);
-    }
-  }, [rpc, identity]);
-
-  useFocusEffect(
-    useCallback(() => {
-      const task = InteractionManager.runAfterInteractions(() => {
-        loadAssets();
-      });
-      return () => task.cancel();
-    }, [loadAssets]),
-  );
-
-  // Poll getpubkey(chatAddress) until the public key is revealed on-chain.
-  useEffect(() => {
-    if (!rpc || !identity || pubkeyRevealed === true) return;
-    let cancelled = false;
-    const checkOnce = async () => {
-      try {
-        const res = await rpc('getpubkey', [identity.address]);
-        if (!cancelled) setPubkeyRevealed(parseRevealed(res));
-      } catch {
-        if (!cancelled) setPubkeyRevealed(null);
-      }
-    };
-    checkOnce();
-    const interval = setInterval(checkOnce, PUBKEY_POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [rpc, identity, pubkeyRevealed]);
-
-  // XNA balance at the chat address — decides whether the reveal banner offers
-  // the burn directly or first routes through Send to fund the address.
-  const [depinBalance, setDepinBalance] = useState<number | null>(null);
-  useEffect(() => {
-    if (!identity || pubkeyRevealed !== false || !rpc) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const backend = backendRef.current?.backend ?? getDepinRpcBackend(network);
-        const utxos = await backend.getUtxos([identity.address]);
-        const sats = (utxos ?? [])
-          .filter(u => !u.assetName || u.assetName === 'XNA')
-          .reduce((sum, u) => sum + (Number(u.satoshis) || 0), 0);
-        if (!cancelled) setDepinBalance(sats / ONE_COIN);
-      } catch (e) {
-        console.debug('DePINChat: failed to load chat address balance', e);
-        if (!cancelled) setDepinBalance(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [identity, pubkeyRevealed, rpc, network]);
+    refreshServerInfo();
+  }, [fetchStats, refreshServerInfo]);
 
   // When a token is selected: load recipients + verify validity + start polling.
   const selectAsset = useCallback(
@@ -331,7 +220,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     if (!neurai || !identity || revealing || !rpc) return;
     setRevealing(true);
     try {
-      const backend = backendRef.current?.backend ?? getDepinRpcBackend(network);
+      const backend = getBackend();
       const utxos = await backend.getUtxos([identity.address]);
       const { signedHex } = await neurai.buildDepinPubkeyRevealTransaction({
         depinAddress: identity.address,
@@ -356,7 +245,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     } finally {
       setRevealing(false);
     }
-  }, [neurai, identity, revealing, rpc, network]);
+  }, [getBackend, identity, network, neurai, revealing, rpc]);
 
   const copyAddress = useCallback(() => {
     if (!identity) return;
@@ -660,46 +549,15 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
         {gearButton}
       </View>
 
-      <Modal visible={showInfo} transparent animationType="fade" onRequestClose={() => setShowInfo(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowInfo(false)}>
-          <Pressable style={[styles.infoCard, stylesHook.card]}>
-            <Text style={[styles.bannerTitle, stylesHook.text]} numberOfLines={1}>
-              {`${loc.depin.info_title} — ${selectedAsset}`}
-            </Text>
-            {(
-              [
-                [loc.depin.info_ttl, serverInfo?.messageexpiryhours != null ? `${serverInfo.messageexpiryhours} h` : null],
-                [loc.depin.info_max_pool, serverInfo?.maxpoolsizemb != null ? `${serverInfo.maxpoolsizemb} MB` : null],
-                [loc.depin.info_max_msg_size, serverInfo?.maxmessagesize != null ? `${serverInfo.maxmessagesize} B` : null],
-                [loc.depin.info_max_recipients, serverInfo?.maxrecipients ?? null],
-                [loc.depin.info_cipher, serverInfo?.cipher ?? null],
-                [loc.depin.info_total_messages, stats?.total_messages ?? null],
-                [loc.depin.info_expiring, stats?.expiring_in_24h ?? null],
-                [loc.depin.info_members, recipientList.length],
-              ] as Array<[string, string | number | null]>
-            ).map(([label, value]) =>
-              value == null ? null : (
-                <View style={styles.infoRow} key={label}>
-                  <Text style={[styles.infoLabel, stylesHook.subtext]}>{label}</Text>
-                  <Text style={[styles.infoValue, stylesHook.text]}>{String(value)}</Text>
-                </View>
-              ),
-            )}
-            {recipientList.length > 0 && (
-              <Text style={[styles.infoMembers, stylesHook.subtext]} numberOfLines={6}>
-                {recipientList.map(r => shortAddr(r.address)).join('   ')}
-              </Text>
-            )}
-            <Pressable
-              onPress={() => setShowInfo(false)}
-              style={[styles.revealBtn, stylesHook.chipActive, styles.infoClose]}
-              testID="DepinInfoClose"
-            >
-              <Text style={[styles.revealBtnText, stylesHook.text]}>{loc.depin.info_close}</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <DepinChatInfoModal
+        onClose={() => setShowInfo(false)}
+        recipients={recipientList}
+        selectedAsset={selectedAsset}
+        serverInfo={serverInfo}
+        stats={stats}
+        stylesHook={stylesHook}
+        visible={showInfo}
+      />
 
       <Pressable onPress={openDrawer} style={styles.activeConvRow} testID="DepinActiveConversation">
         {activeTab === 'group' ? (
@@ -939,13 +797,6 @@ const styles = StyleSheet.create({
   bannerDesc: { fontSize: 13, lineHeight: 19, marginBottom: 12 },
   revealBtn: { paddingVertical: 10, borderRadius: 10, borderWidth: 1, alignItems: 'center' },
   revealBtnDisabled: { opacity: 0.45 },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.55)', justifyContent: 'center', padding: 24 },
-  infoCard: { borderRadius: 14, borderWidth: 1, padding: 18 },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, columnGap: 12 },
-  infoLabel: { fontSize: 13 },
-  infoValue: { fontSize: 13, fontWeight: '600', flexShrink: 1, textAlign: 'right' },
-  infoMembers: { fontSize: 12, marginTop: 10, lineHeight: 18 },
-  infoClose: { marginTop: 16 },
   revealBtnText: { fontSize: 14, fontWeight: '700' },
   errorText: { fontSize: 12, textAlign: 'center', paddingVertical: 6, flexShrink: 1 },
   statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', columnGap: 8, paddingHorizontal: 16 },
