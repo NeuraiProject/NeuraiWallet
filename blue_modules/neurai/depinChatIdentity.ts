@@ -23,7 +23,12 @@ export type DepinChatNetwork = Extract<NeuraiChainType, 'xna' | 'xna-test'>;
 export interface DepinChatIdentity {
   /** DePIN chat address (Base58 `N…` mainnet / `t…` testnet). */
   address: string;
-  /** Private key in WIF format (used to sign/decrypt DePIN messages). */
+  /**
+   * Private key in WIF format (used to sign/decrypt DePIN messages locally).
+   * **Empty for device-backed identities** (hardware wallets never expose it):
+   * signing/decryption is routed to the device instead. Gate local-crypto paths
+   * on a truthy `wif` (or on `!deviceBacked`).
+   */
   wif: string;
   /** Compressed public key, 66 hex chars (33 bytes, `02`/`03` prefix). */
   publicKey: string;
@@ -32,6 +37,11 @@ export interface DepinChatIdentity {
   coinType: number;
   account: number;
   index: number;
+  /**
+   * True when this identity comes from a hardware device (no local `wif`);
+   * signing/decryption must be routed to the device. Absent/false = mnemonic.
+   */
+  deviceBacked?: boolean;
 }
 
 /**
@@ -98,4 +108,33 @@ export function deriveDepinChatIdentity(params: {
   if (publicKey.length !== 66) throw new Error('Failed to derive compressed public key for DePIN chat identity');
 
   return { address, wif, publicKey, path, coinType, account, index };
+}
+
+/**
+ * Build a device-backed DePIN chat identity from a hardware device's
+ * `get_depin_identity` response. There is no local `wif` — signing/decryption is
+ * routed to the device. Mirrors the fields of {@link deriveDepinChatIdentity} so
+ * the chat UI treats both the same, gating local crypto on the empty `wif`.
+ */
+export function deviceDepinChatIdentity(params: {
+  network: DepinChatNetwork;
+  address: string;
+  publicKey: string;
+  path: string;
+}): DepinChatIdentity {
+  const address = (params.address ?? '').trim();
+  const publicKey = compressPubKeyHex(params.publicKey ?? '');
+  const path = (params.path ?? '').trim();
+  const coinType = getCoinType(params.network);
+
+  if (!address) throw new Error('Device returned no DePIN chat address');
+  if (publicKey.length !== 66) throw new Error('Device returned an invalid DePIN chat public key');
+
+  // Parse account/index out of the device path (m/44'/coin'/account'/0/index)
+  // so the fields match the mnemonic path; fall back to the chat defaults.
+  const parts = path.split('/');
+  const account = Number(String(parts[3] ?? '').replace(/'$/, '')) || 100;
+  const index = Number(parts[5] ?? '') || 0;
+
+  return { address, wif: '', publicKey, path, coinType, account, index, deviceBacked: true };
 }

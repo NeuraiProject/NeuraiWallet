@@ -21,11 +21,13 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { NeuraiNetwork } from '../blue_modules/neurai';
-import { isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIdentity';
+import { isDepinChatSupportedNetwork, type DepinChatNetwork } from '../blue_modules/neurai/depinChatIdentity';
 import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
+import { NeuraiHardwareWallet } from '../class/wallets/neurai-hardware-wallet';
 import { useDePINChat } from '../hooks/useDePINChat';
 import useDepinChatAssetSelection from '../hooks/useDepinChatAssetSelection';
 import useDepinChatIdentity from '../hooks/useDepinChatIdentity';
+import { useDepinChatDeviceIdentity } from '../hooks/useDepinChatDeviceIdentity';
 import useDepinChatKeyboard from '../hooks/useDepinChatKeyboard';
 import useDepinChatReadyState from '../hooks/useDepinChatReadyState';
 import useDepinChatReveal from '../hooks/useDepinChatReveal';
@@ -59,9 +61,16 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   const chainType = neurai ? neurai.network : 'xna';
   const supported = !!neurai && isDepinChatSupportedNetwork(chainType);
 
+  // Hardware wallets never expose a mnemonic, so their DePIN identity comes from
+  // the device (get_depin_identity) instead of local derivation — otherwise the
+  // chat spins forever waiting for an identity that can't be derived.
+  const isHardware = neurai?.type === NeuraiHardwareWallet.type;
+
   const secret = neurai?.secret ?? '';
   const passphrase = neurai?.passphrase ?? '';
-  const identity = useDepinChatIdentity({ chainType, passphrase, secret, supported });
+  const mnemonicIdentity = useDepinChatIdentity({ chainType, passphrase, secret, supported: supported && !isHardware });
+  const deviceId = useDepinChatDeviceIdentity({ enabled: supported && isHardware, network: chainType as DepinChatNetwork });
+  const identity = isHardware ? deviceId.identity : mnemonicIdentity;
 
   const { chatAssets, depinBalance, getBackend, loadingAssets, pubkeyRevealed, refreshServerInfo, rpc, serverInfo } = useDepinChatSetup({
     identity,
@@ -265,6 +274,37 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   }
 
   if (!identity) {
+    // Hardware wallets: don't spin forever — offer to connect the device and
+    // reveal its DePIN identity (one on-device approval).
+    if (isHardware) {
+      const busy = deviceId.phase === 'connecting' || deviceId.phase === 'revealing';
+      return (
+        <View style={[styles.center, stylesHook.root]}>
+          {busy ? (
+            <>
+              <ActivityIndicator />
+              <Text style={[styles.info, stylesHook.subtext]}>
+                {deviceId.phase === 'revealing' ? loc.depin.device_confirm_reveal : loc.depin.device_connecting}
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text style={[styles.info, stylesHook.subtext]}>{loc.depin.device_connect_hint}</Text>
+              {deviceId.error ? <Text style={[styles.info, { color: colors.failedColor }]}>{deviceId.error}</Text> : null}
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  void deviceId.reveal();
+                }}
+                style={[styles.connectBtn, { backgroundColor: '#f97316' }]}>
+                <Text style={styles.connectBtnText}>{loc.depin.device_connect_button}</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+      );
+    }
+
     return (
       <View style={[styles.center, stylesHook.root]}>
         <ActivityIndicator />
@@ -395,6 +435,8 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 16, paddingBottom: 120 },
   gear: { padding: 8 },
   info: { fontSize: 15, textAlign: 'center', lineHeight: 22, paddingHorizontal: 8 },
+  connectBtn: { marginTop: 18, paddingVertical: 12, paddingHorizontal: 28, borderRadius: 10 },
+  connectBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
 });
 
 export default DePINChat;
