@@ -18,6 +18,9 @@ import NeuraiKey from '@neuraiproject/neurai-key';
 import { type IDelta, type IHistoryItem } from '@neuraiproject/neurai-history-list';
 import { createPaymentTransaction, createStandardAssetTransferTransaction } from '@neuraiproject/neurai-create-transaction';
 import { sign as signNeuraiTransaction } from '@neuraiproject/neurai-sign-transaction';
+import type { NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native';
+import * as bitcoin from 'bitcoinjs-lib';
+import { Buffer } from 'buffer';
 
 import {
   CHAIN_PARAMS,
@@ -1241,8 +1244,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     utxos: SpendableUtxo[];
     burnAddress: string;
     amountSats: number;
+    /** Hardware wallet: sign each input's sighash on the device (no local WIF). */
+    device?: NeuraiESP32 | null;
   }): Promise<{ signedHex: string; feeSats: number; changeSats: number }> {
-    const { depinAddress, depinWif, burnAddress, amountSats } = opts;
+    const { depinAddress, depinWif, burnAddress, amountSats, device } = opts;
     const utxos = opts.utxos.filter(u => (u.assetName === 'XNA' || !u.assetName) && u.satoshis > 0 && u.address === depinAddress);
     if (utxos.length === 0) throw new Error('No spendable XNA at the DePIN address');
     const totalIn = utxos.reduce((sum, u) => sum + u.satoshis, 0);
@@ -1269,18 +1274,60 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       payments,
     });
 
-    // The DePIN address is foreign to the engine, so supply its WIF directly.
-    const privateKeys: Record<string, unknown> = { [depinAddress]: depinWif };
-
-    const signedHex = signNeuraiTransaction(
-      this.network as Parameters<typeof signNeuraiTransaction>[0],
-      rawTx,
-      utxos as unknown as Parameters<typeof signNeuraiTransaction>[2],
-      privateKeys as Parameters<typeof signNeuraiTransaction>[3],
-    );
+    let signedHex: string;
+    if (!depinWif && device) {
+      // Hardware wallet: the DePIN key never leaves the device. Sign each legacy
+      // P2PKH sighash on-device (same `hashForSignature` primitive the signing
+      // library uses) and assemble the scriptSig from the DER sig + pubkey.
+      signedHex = await this.signDepinRevealWithDevice(rawTx, utxos, device);
+    } else {
+      // The DePIN address is foreign to the engine, so supply its WIF directly.
+      const privateKeys: Record<string, unknown> = { [depinAddress]: depinWif };
+      signedHex = signNeuraiTransaction(
+        this.network as Parameters<typeof signNeuraiTransaction>[0],
+        rawTx,
+        utxos as unknown as Parameters<typeof signNeuraiTransaction>[2],
+        privateKeys as Parameters<typeof signNeuraiTransaction>[3],
+      );
+    }
     if (!signedHex) throw new Error('Failed to sign the DePIN reveal transaction');
 
     return { signedHex, feeSats, changeSats };
+  }
+
+  /**
+   * Sign a legacy P2PKH DePIN-reveal transaction by routing each input's sighash
+   * to the device (which holds the account-100' key). Assembles the standard
+   * `<sig|SIGHASH_ALL> <pubkey>` scriptSig. The device confirms each signature
+   * physically. All inputs belong to the single DePIN address, so one pubkey
+   * signs them all.
+   */
+  private async signDepinRevealWithDevice(
+    rawTx: string,
+    utxos: SpendableUtxo[],
+    device: NeuraiESP32,
+  ): Promise<string> {
+    const tx = bitcoin.Transaction.fromHex(rawTx);
+    const byOutpoint = new Map(utxos.map(u => [`${u.txid}:${u.outputIndex}`, u]));
+    const SIGHASH_ALL = bitcoin.Transaction.SIGHASH_ALL;
+
+    for (let i = 0; i < tx.ins.length; i++) {
+      const input = tx.ins[i];
+      // `input.hash` is the txid in internal (reversed) byte order.
+      const prevTxid = Buffer.from(input.hash).reverse().toString('hex');
+      const u = byOutpoint.get(`${prevTxid}:${input.index}`);
+      if (!u) throw new Error('DePIN reveal: could not map an input to a DePIN UTXO');
+
+      const prevScript = Buffer.from(u.script, 'hex');
+      const sighash = tx.hashForSignature(i, prevScript, SIGHASH_ALL);
+      const { signature, pubkey } = await device.depinSignDigest(Buffer.from(sighash).toString('hex'));
+
+      const sigWithType = Buffer.concat([Buffer.from(signature, 'hex'), Buffer.from([SIGHASH_ALL])]);
+      const scriptSig = bitcoin.script.compile([sigWithType, Buffer.from(pubkey, 'hex')]);
+      tx.setInputScript(i, scriptSig);
+    }
+
+    return tx.toHex();
   }
 
   async broadcastTx(rawHex: string): Promise<string> {

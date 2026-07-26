@@ -17,16 +17,23 @@
  *     localStorage (hydrated into an in-memory map for synchronous lookups).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Buffer } from 'buffer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native';
 
 import {
+  assembleDepinMessage,
   buildDepinMessage,
+  buildDepinPreimage,
   decryptDepinReceiveEncryptedPayload,
   type DepinServerWrapResult,
   unwrapMessageFromServer,
   wrapMessageForServer,
 } from '../blue_modules/neurai/depinMsg';
 import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
+
+/** Decode a device `plaintext_b64` response to a UTF-8 string. */
+const b64ToUtf8 = (b64: string): string => Buffer.from(b64, 'base64').toString('utf8');
 
 const DEPIN_POLL_INTERVAL_MS = 5_000;
 const PRIVATE_MSG_PREFIX = 'depin_private_msg_';
@@ -136,8 +143,17 @@ export function useDePINChat(params: {
   selectedAsset: string | null;
   identity: DepinChatIdentity | null;
   recipientList: RecipientInfo[];
+  /** Connected NeuraiHW device — required when `identity.deviceBacked` (no local WIF). */
+  device?: NeuraiESP32 | null;
 }) {
-  const { rpc, selectedAsset, identity, recipientList } = params;
+  const { rpc, selectedAsset, identity, recipientList, device = null } = params;
+
+  // Device-backed identity (hardware wallet): sign/decrypt are routed to the
+  // device instead of a local WIF. The device must have an active DePIN session
+  // (opened per channel below) for depin_sign / depin_decrypt_payload.
+  const deviceBacked = !!identity?.deviceBacked;
+  // Can we perform local crypto (has a WIF) OR device crypto (session-backed)?
+  const canCrypt = !!identity?.wif || (deviceBacked && !!device);
 
   const [groupMessages, setGroupMessages] = useState<DePINMessage[]>([]);
   const [privateConversations, setPrivateConversations] = useState<Map<string, PrivateConversation>>(new Map());
@@ -267,6 +283,36 @@ export function useDePINChat(params: {
     if (selectedAsset) preloadRecipientPubkeys(selectedAsset);
   }, [selectedAsset, effectiveAddress, preloadRecipientPubkeys]);
 
+  // Device-backed session lifecycle: opening a channel authorizes the device to
+  // auto-sign/decrypt on THIS token (one physical approval), scoped to the
+  // canonical `&NAME`. The device signs/decrypts only while this is active; the
+  // session is revoked on channel close, unmount, disconnect, or timeout.
+  const deviceSessionTokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!deviceBacked || !device || !selectedAsset) {
+      deviceSessionTokenRef.current = null;
+      return;
+    }
+    const token = selectedAsset; // canonical '&NAME' — matches the signed message
+    let cancelled = false;
+    (async () => {
+      try {
+        await device.depinSessionBegin(token);
+        if (!cancelled) deviceSessionTokenRef.current = token;
+      } catch (e) {
+        if (!cancelled) {
+          deviceSessionTokenRef.current = null;
+          setError(describeRpcError(e) ?? 'Could not open the device DePIN session');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      deviceSessionTokenRef.current = null;
+      device.depinSessionEnd().catch(() => {});
+    };
+  }, [deviceBacked, device, selectedAsset]);
+
   const ingestItems = useCallback((items: DepinReceiveMsgItem[], myAddr: string, decrypted: DePINMessage[]) => {
     const newGroup: DePINMessage[] = [];
     const privateUpdates = new Map<string, DePINMessage[]>();
@@ -301,8 +347,19 @@ export function useDePINChat(params: {
   }, []);
 
   const pollOnce = useCallback(async () => {
-    if (!selectedAsset || !effectiveAddress || !identity?.wif || !rpc) return;
-    const recipientPrivateKey = String(identity.wif);
+    if (!selectedAsset || !effectiveAddress || !canCrypt || !rpc) return;
+    // ECIES decryption: local WIF, or routed to the device (bare-payload verb).
+    // Both `depinreceivemsg`'s per-item payload and the privacy-wrapped server
+    // envelope are the same ECIES format, so one path handles both.
+    const decryptEcies = async (encHex: string): Promise<string | null> => {
+      if (!encHex) return null;
+      if (deviceBacked) {
+        if (!device) return null;
+        const { plaintext_b64 } = await device.depinDecryptPayload(encHex);
+        return plaintext_b64 ? b64ToUtf8(plaintext_b64) : null;
+      }
+      return decryptDepinReceiveEncryptedPayload(encHex, String(identity!.wif));
+    };
 
     const callReceive = (token: string) => {
       const rpcParams: (string | number)[] = [token, effectiveAddress];
@@ -324,7 +381,7 @@ export function useDePINChat(params: {
     let items: DepinReceiveMsgItem[] = [];
     if (isEncryptedResult(result)) {
       try {
-        const json = await unwrapMessageFromServer(result.encrypted, recipientPrivateKey);
+        const json = await decryptEcies(result.encrypted);
         if (json) items = JSON.parse(json);
       } catch (e) {
         console.debug('useDePINChat: failed to parse decrypted server response', e);
@@ -344,7 +401,7 @@ export function useDePINChat(params: {
 
       let plaintext: string | null = null;
       try {
-        plaintext = await decryptDepinReceiveEncryptedPayload(String(item.encrypted_payload_hex ?? ''), recipientPrivateKey);
+        plaintext = await decryptEcies(String(item.encrypted_payload_hex ?? ''));
       } catch {
         plaintext = null;
       }
@@ -377,7 +434,7 @@ export function useDePINChat(params: {
     lastTimestampRef.current = maxTimestamp;
     if (decrypted.length > 0) ingestItems(items, effectiveAddress, decrypted);
     setLastPoll(new Date());
-  }, [rpc, selectedAsset, effectiveAddress, identity, getContactAddress, ingestItems]);
+  }, [rpc, selectedAsset, effectiveAddress, identity, getContactAddress, ingestItems, deviceBacked, device, canCrypt]);
 
   // Automatic polling every 5s while connected.
   useEffect(() => {
@@ -434,7 +491,7 @@ export function useDePINChat(params: {
 
   const sendMessage = useCallback(
     async (message: string) => {
-      if (!selectedAsset || !effectiveAddress || !identity?.wif || !identity?.publicKey) {
+      if (!selectedAsset || !effectiveAddress || !identity?.publicKey || !canCrypt) {
         throw new Error('DePIN chat not ready');
       }
       if (!rpc) throw new Error('No DePIN RPC backend');
@@ -444,7 +501,6 @@ export function useDePINChat(params: {
       const targetAddress = isPrivate ? privateMatch![1] : null;
       const cleaned = isPrivate ? privateMatch![2] : message;
 
-      const senderPrivateKey = String(identity.wif);
       const senderPubKey = String(identity.publicKey).trim().toLowerCase();
 
       const recipientPubKeys: string[] = [];
@@ -466,16 +522,51 @@ export function useDePINChat(params: {
       }
       if (recipientPubKeys.length === 0) throw new Error('No valid recipient public keys found');
 
-      const built = await buildDepinMessage({
-        token: serverTokenRef.current ?? selectedAsset,
-        senderAddress: effectiveAddress,
-        senderPubKey,
-        privateKey: senderPrivateKey,
-        timestamp: Math.floor(Date.now() / 1000),
-        message: cleaned,
-        recipientPubKeys,
-        messageType: isPrivate ? 'private' : 'group',
-      });
+      const messageType: 'private' | 'group' = isPrivate ? 'private' : 'group';
+      const timestamp = Math.floor(Date.now() / 1000);
+
+      let built;
+      if (deviceBacked) {
+        // Hardware wallet: encrypt host-side (no key), sign on the device, then
+        // assemble. The device session is scoped to the canonical `&NAME`, so we
+        // sign/assemble/submit with that same token (matches node verification).
+        if (!device) throw new Error('Device not connected');
+        const token = selectedAsset;
+        if (deviceSessionTokenRef.current !== token) {
+          throw new Error('Device DePIN session not active for this channel');
+        }
+        const pre = await buildDepinPreimage({
+          token,
+          senderAddress: effectiveAddress,
+          senderPubKey,
+          timestamp,
+          message: cleaned,
+          recipientPubKeys,
+          messageType,
+        });
+        const { signature } = await device.depinSign({
+          token,
+          sender: effectiveAddress,
+          timestamp,
+          messageType: pre.messageTypeByte,
+          encryptedPayload: pre.encryptedPayloadHex,
+        });
+        built = await assembleDepinMessage(
+          { token, senderAddress: effectiveAddress, timestamp, messageType, encryptedPayloadHex: pre.encryptedPayloadHex },
+          signature,
+        );
+      } else {
+        built = await buildDepinMessage({
+          token: serverTokenRef.current ?? selectedAsset,
+          senderAddress: effectiveAddress,
+          senderPubKey,
+          privateKey: String(identity.wif),
+          timestamp,
+          message: cleaned,
+          recipientPubKeys,
+          messageType,
+        });
+      }
 
       let payload: string | DepinServerWrapResult = built.hex;
       try {
@@ -495,7 +586,7 @@ export function useDePINChat(params: {
       }
       return result;
     },
-    [rpc, selectedAsset, effectiveAddress, identity, recipientList, resolveRecipientPubkey, rememberPrivateRecipient],
+    [rpc, selectedAsset, effectiveAddress, identity, recipientList, resolveRecipientPubkey, rememberPrivateRecipient, deviceBacked, device, canCrypt],
   );
 
   const checkAssetValidity = useCallback(async (): Promise<AssetValidity | null> => {

@@ -54,8 +54,32 @@ export interface DepinServerWrapResult {
   encrypted: string;
 }
 
+/** Signature-less half of a build: ECIES-encrypt only (for external signers). */
+export interface DepinPreimageResult {
+  /** The ECIES `encryptedPayload` as hex (feed to the device signer + assemble). */
+  encryptedPayloadHex: string;
+  messageType: 'private' | 'group';
+  /** Wire byte: 0x01 private, 0x02 group. */
+  messageTypeByte: number;
+  encryptedSize: number;
+  recipientCount: number;
+}
+
+/** Fields needed to finalize a message once an external signer returns the DER sig. */
+export interface DepinAssembleParams {
+  token: string;
+  senderAddress: string;
+  timestamp: number;
+  messageType: 'private' | 'group';
+  encryptedPayloadHex: string;
+}
+
 interface DepinMsgApi {
   buildDepinMessage(input: DepinBuildInput): Promise<DepinBuildResult>;
+  /** Encrypt-only (no private key). Pair with a device signer + {@link assembleDepinMessage}. */
+  buildDepinPreimage(input: Omit<DepinBuildInput, 'privateKey'>): Promise<DepinPreimageResult>;
+  /** Finalize a message from the preimage fields + an external DER signature (hex or bytes). */
+  assembleDepinMessage(params: DepinAssembleParams, signature: string | Uint8Array): Promise<DepinBuildResult>;
   decryptDepinReceiveEncryptedPayload(encryptedPayloadHex: string, recipientPrivateKey: string): Promise<string | null>;
   wrapMessageForServer(messageHex: string, serverPubKeyHex: string, senderAddress: string): Promise<DepinServerWrapResult>;
   unwrapMessageFromServer(encryptedHex: string, recipientPrivateKey: string): Promise<string | null>;
@@ -73,6 +97,14 @@ function api(): DepinMsgApi {
 
 /** Build, ECIES-encrypt and sign a DePIN message. Returns the hex for `depinsubmitmsg`. */
 export const buildDepinMessage = (input: DepinBuildInput): Promise<DepinBuildResult> => api().buildDepinMessage(input);
+
+/** ECIES-encrypt only (no private key) → preimage for an external signer (hardware wallet). */
+export const buildDepinPreimage = (input: Omit<DepinBuildInput, 'privateKey'>): Promise<DepinPreimageResult> =>
+  api().buildDepinPreimage(input);
+
+/** Finalize a CDepinMessage from preimage fields + an external DER signature. Returns the hex for `depinsubmitmsg`. */
+export const assembleDepinMessage = (params: DepinAssembleParams, signature: string | Uint8Array): Promise<DepinBuildResult> =>
+  api().assembleDepinMessage(params, signature);
 
 /** Decrypt an `encrypted_payload_hex` from `depinreceivemsg`. Returns plaintext or null if not for us / auth fails. */
 export const decryptDepinReceiveEncryptedPayload = (encryptedPayloadHex: string, recipientPrivateKey: string): Promise<string | null> =>

@@ -102,6 +102,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     network,
     rpc,
     wallet: neurai,
+    device: isHardware ? deviceId.device : null,
   });
 
   // Back handling is owned by WalletTransactions (which also owns the tab
@@ -135,6 +136,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     selectedAsset,
     identity,
     recipientList,
+    device: isHardware ? deviceId.device : null,
   });
 
   // Contacts drawer (mirrors the web wallet's left sidebar): Public Group,

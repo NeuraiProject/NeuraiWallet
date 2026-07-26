@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native';
+
 import type { NeuraiBackend, NeuraiNetwork } from '../blue_modules/neurai';
 import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
 import type { AbstractNeuraiWallet } from '../class/wallets/abstract-neurai-wallet';
@@ -14,10 +16,12 @@ interface UseDepinChatRevealParams {
   network: NeuraiNetwork;
   rpc: DepinRpc | null;
   wallet: Pick<AbstractNeuraiWallet, 'buildDepinPubkeyRevealTransaction'> | null;
+  /** Connected device — required to sign the reveal burn for a device-backed identity. */
+  device?: NeuraiESP32 | null;
 }
 
 /** Broadcasts the pubkey-reveal burn and guards against duplicate submissions. */
-const useDepinChatReveal = ({ getBackend, identity, network, rpc, wallet }: UseDepinChatRevealParams) => {
+const useDepinChatReveal = ({ getBackend, identity, network, rpc, wallet, device = null }: UseDepinChatRevealParams) => {
   const [revealing, setRevealing] = useState(false);
   const [revealPending, setRevealPending] = useState(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -31,6 +35,10 @@ const useDepinChatReveal = ({ getBackend, identity, network, rpc, wallet }: UseD
 
   const reveal = useCallback(async () => {
     if (!wallet || !identity || revealing || !rpc) return;
+    if (identity.deviceBacked && !device) {
+      presentAlert({ message: loc.depin.device_connect_hint });
+      return;
+    }
     setRevealing(true);
     try {
       const backend = getBackend();
@@ -41,6 +49,7 @@ const useDepinChatReveal = ({ getBackend, identity, network, rpc, wallet }: UseD
         utxos,
         burnAddress: BURN_ADDRESS[network],
         amountSats: Math.round(REVEAL_AMOUNT_XNA * ONE_COIN),
+        device,
       });
       await backend.broadcast(signedHex);
       setRevealPending(true);
@@ -58,7 +67,7 @@ const useDepinChatReveal = ({ getBackend, identity, network, rpc, wallet }: UseD
     } finally {
       setRevealing(false);
     }
-  }, [getBackend, identity, network, revealing, rpc, wallet]);
+  }, [getBackend, identity, network, revealing, rpc, wallet, device]);
 
   return { reveal, revealPending, revealing };
 };
