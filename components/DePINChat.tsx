@@ -137,6 +137,9 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     identity,
     recipientList,
     device: isHardware ? deviceId.device : null,
+    // The device rebooted or was unplugged: drop the dead handle so the screen
+    // falls back to the connect button instead of retrying a broken link.
+    onDeviceLost: isHardware ? deviceId.reset : undefined,
   });
 
   // Contacts drawer (mirrors the web wallet's left sidebar): Public Group,
@@ -298,7 +301,8 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
                 onPress={() => {
                   void deviceId.reveal();
                 }}
-                style={[styles.connectBtn, { backgroundColor: '#f97316' }]}>
+                style={styles.connectBtn}
+              >
                 <Text style={styles.connectBtnText}>{loc.depin.device_connect_button}</Text>
               </Pressable>
             </>
@@ -437,7 +441,7 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 16, paddingBottom: 120 },
   gear: { padding: 8 },
   info: { fontSize: 15, textAlign: 'center', lineHeight: 22, paddingHorizontal: 8 },
-  connectBtn: { marginTop: 18, paddingVertical: 12, paddingHorizontal: 28, borderRadius: 10 },
+  connectBtn: { marginTop: 18, paddingVertical: 12, paddingHorizontal: 28, borderRadius: 10, backgroundColor: '#f97316' },
   connectBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
 });
 

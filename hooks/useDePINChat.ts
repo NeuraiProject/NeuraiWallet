@@ -110,6 +110,17 @@ const touchDeviceSession = (): void => {
 
 const isSessionRequiredError = (e: unknown): boolean => /session_required/i.test(String((e as any)?.message ?? e));
 
+/**
+ * Possible transport-level failure: the USB write itself did not go through,
+ * which is what a rebooted or unplugged device looks like. Deliberately narrow
+ * — a response timeout is NOT included, because that is the signature of the
+ * library's transient response-pairing desync on a perfectly live device, and
+ * treating it as a disconnect tore down a working session. Always confirm with
+ * a ping before acting on it.
+ */
+const isDeviceGoneError = (e: unknown): boolean =>
+  /send failed|serial port not connected|ENODEV|EPIPE/i.test(String((e as any)?.message ?? e));
+
 /** A `depinreceivemsg` page: a bare array (no limit) or `{ messages, has_more }` (paginated). */
 const normalizePage = (parsed: unknown): { pageItems: DepinReceiveMsgItem[]; hasMore: boolean } => {
   if (Array.isArray(parsed)) return { pageItems: parsed as DepinReceiveMsgItem[], hasMore: false };
@@ -227,8 +238,10 @@ export function useDePINChat(params: {
   recipientList: RecipientInfo[];
   /** Connected NeuraiHW device — required when `identity.deviceBacked` (no local WIF). */
   device?: NeuraiESP32 | null;
+  /** Called when the USB link dies (device rebooted/unplugged) so the owner can reconnect. */
+  onDeviceLost?: () => void;
 }) {
-  const { rpc, selectedAsset, identity, recipientList, device = null } = params;
+  const { rpc, selectedAsset, identity, recipientList, device = null, onDeviceLost } = params;
 
   // Device-backed identity (hardware wallet): sign/decrypt are routed to the
   // device instead of a local WIF. The device must have an active DePIN session
@@ -270,6 +283,9 @@ export function useDePINChat(params: {
   // framing (the device answers "Invalid JSON") and mismatches responses, so
   // only one poll may be in flight at a time.
   const pollInFlightRef = useRef(false);
+  // Fingerprint of the server pool (`total_messages|newest_message`) at the last
+  // fetch, so an unchanged pool skips the device round-trip entirely.
+  const lastPoolSignatureRef = useRef<string | null>(null);
   const recipientPubKeyCacheRef = useRef<Map<string, string | null>>(new Map());
   // In-memory mirror of persisted private-message recipient mapping (hash -> address).
   const privateMsgRecipientsRef = useRef<Map<string, string>>(new Map());
@@ -409,6 +425,7 @@ export function useDePINChat(params: {
     serverTokenRef.current = null;
     // Message sizes differ per channel, so recalibrate the page budget.
     worstBytesPerMessageRef.current = 0;
+    lastPoolSignatureRef.current = null;
     setError(null);
     setLastPoll(null);
     recipientPubKeyCacheRef.current.clear();
@@ -459,6 +476,29 @@ export function useDePINChat(params: {
     if (effectiveAddress) clearDepinSession(effectiveAddress);
     setSessionEpoch(e => e + 1);
   }, [effectiveAddress]);
+
+  // Never tear a working session down on a hunch: ask the device directly.
+  // If it still answers, the failure was transient and we keep going.
+  const confirmDeviceGone = useCallback(async (): Promise<boolean> => {
+    if (!device) return true;
+    try {
+      await device.ping();
+      return false;
+    } catch {
+      return true;
+    }
+  }, [device]);
+
+  // The device vanished mid-use: forget the session (its RAM went with it),
+  // stop polling a dead link, and let the owner reconnect.
+  const handleDeviceLost = useCallback(() => {
+    deviceSession.current = null;
+    deviceSessionTokenRef.current = null;
+    setDeviceSessionActive(false);
+    if (effectiveAddress) clearDepinSession(effectiveAddress);
+    setIsPolling(false);
+    onDeviceLost?.();
+  }, [effectiveAddress, onDeviceLost]);
   useEffect(() => {
     if (!deviceBacked || !device) {
       deviceSessionTokenRef.current = null;
@@ -568,6 +608,27 @@ export function useDePINChat(params: {
 
   const pollOnce = useCallback(async () => {
     if (!selectedAsset || !effectiveAddress || !canCrypt || !rpc) return;
+
+    // On a hardware wallet every fetch costs a device decryption — and the
+    // server re-sends the newest message on each incremental poll, so an idle
+    // channel still burned one op every 5s (visible as the DePIN counter
+    // climbing on the ESP32). `depinpoolstats` is NOT privacy-wrapped, so we
+    // can ask the node whether the pool actually moved without involving the
+    // device at all, and only fetch when it did.
+    if (deviceBacked) {
+      try {
+        const pool = (await rpc('depinpoolstats', [])) as { total_messages?: unknown; newest_message?: unknown } | null;
+        const signature = `${String(pool?.total_messages ?? '')}|${String(pool?.newest_message ?? '')}`;
+        if (signature !== '|' && signature === lastPoolSignatureRef.current) {
+          setLastPoll(new Date());
+          return;
+        }
+        lastPoolSignatureRef.current = signature;
+      } catch (e) {
+        // Stats unavailable: fall through and fetch as usual.
+        console.debug('useDePINChat: pool stats check failed, fetching anyway', e);
+      }
+    }
     // ECIES decryption: local WIF, or routed to the device (bare-payload verb).
     // Both `depinreceivemsg`'s per-item payload and the privacy-wrapped server
     // envelope are the same ECIES format, so one path handles both.
@@ -583,6 +644,7 @@ export function useDePINChat(params: {
           // The firmware expired the session (inactivity): drop our record so a
           // single fresh approval is requested instead of failing forever.
           if (isSessionRequiredError(e)) renewDeviceSession();
+          else if (isDeviceGoneError(e) && (await confirmDeviceGone())) handleDeviceLost();
           // `not_for_us` is the device saying this identity isn't among the
           // recipients — routine for other members' traffic, not a failure. It
           // must not abort the poll (doing so stalled the whole channel and
@@ -740,6 +802,8 @@ export function useDePINChat(params: {
     canCrypt,
     deviceLimits,
     renewDeviceSession,
+    handleDeviceLost,
+    confirmDeviceGone,
   ]);
 
   // Automatic polling every 5s while connected.
@@ -761,6 +825,15 @@ export function useDePINChat(params: {
         }
       } catch (err: any) {
         console.warn('useDePINChat: poll failed:', describeRpcError(err) ?? err);
+        // A dead USB link never recovers by retrying: surface it so the chat
+        // offers to reconnect instead of counting failures against a ghost.
+        if (deviceBacked && isDeviceGoneError(err) && (await confirmDeviceGone())) {
+          if (active) {
+            setError(describeRpcError(err) ?? 'The device is no longer connected');
+            handleDeviceLost();
+          }
+          return;
+        }
         // The first poll right after selecting a token often races a cold RPC
         // connection; polling keeps retrying every 5s, so only surface an error
         // after it fails repeatedly (the UI shows a "checking…" state meanwhile).
@@ -786,7 +859,7 @@ export function useDePINChat(params: {
       active = false;
       clearInterval(interval);
     };
-  }, [rpc, selectedAsset, effectiveAddress, isPolling, pollOnce, deviceBacked, deviceSessionActive]);
+  }, [rpc, selectedAsset, effectiveAddress, isPolling, pollOnce, deviceBacked, deviceSessionActive, handleDeviceLost, confirmDeviceGone]);
 
   const refreshMessages = useCallback(async () => {
     try {
