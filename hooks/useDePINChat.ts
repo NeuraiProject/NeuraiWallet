@@ -27,7 +27,6 @@ import {
   buildDepinPreimage,
   decryptDepinReceiveEncryptedPayload,
   type DepinServerWrapResult,
-  unwrapMessageFromServer,
   wrapMessageForServer,
 } from '../blue_modules/neurai/depinMsg';
 import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
@@ -37,6 +36,60 @@ const b64ToUtf8 = (b64: string): string => Buffer.from(b64, 'base64').toString('
 
 const DEPIN_POLL_INTERVAL_MS = 5_000;
 const PRIVATE_MSG_PREFIX = 'depin_private_msg_';
+
+/**
+ * Hardware wallets have no local key, so the privacy-wrapped server envelope is
+ * forwarded to the device to decrypt — and a full pool dump can exceed what the
+ * device accepts (a ~19.6 KB envelope rebooted an ESP32 on older firmware).
+ * `depinreceivemsg` supports pagination, so a device-backed identity walks the
+ * `after_hash` cursor with a bounded page size, as the firmware's own contract
+ * requires ("larger server histories must be paginated by the host").
+ * Local-key identities decrypt host-side and still fetch in one shot.
+ */
+const DEVICE_PAGE_LIMIT = 1;
+/** Safety stop so a bogus `has_more` can't spin the cursor forever. */
+const MAX_PAGES_PER_POLL = 25;
+/** Upper bound for an adaptive page, so one request can't balloon unboundedly. */
+const MAX_DEVICE_PAGE_LIMIT = 50;
+/**
+ * The device reports its ECIES capacity as *decoded binary* bytes
+ * (`depin_max_decrypt_bytes` in the ping response). How much of that we can
+ * actually use depends on the wire encoding the library negotiates: with the
+ * `depin_bulk_decrypt_b64` capability it sends base64 (~4/3 expansion) and the
+ * full capacity is reachable; without it, payloads go as hex (2x) and the
+ * firmware's incoming-line cap binds first. Library ≥0.5.11 picks the encoding
+ * itself and raises RangeError past the limit, so this budget only has to keep
+ * pages comfortably below it.
+ */
+const DEVICE_LEGACY_HEX_CAP_BYTES = 24 * 1024 - 256;
+const DEVICE_BULK_B64_CAPABILITY = 'depin_bulk_decrypt_b64';
+const DEVICE_BUDGET_SAFETY = 0.7;
+/** Consecutive poll failures before polling stops, so a failing device isn't hammered every 5s. */
+const MAX_CONSECUTIVE_FAILURES = 4;
+
+/**
+ * Decrypted conversations kept per `address|token` for the lifetime of the app
+ * process, so leaving a channel and coming back does not re-decrypt everything
+ * (each message is a device round-trip on a hardware wallet). Deliberately
+ * in-memory: plaintext chat is never written to disk.
+ */
+interface CachedChannel {
+  groupMessages: DePINMessage[];
+  privateConversations: Map<string, PrivateConversation>;
+  lastTimestamp: number;
+  seenKeys: string[];
+}
+const channelCache = new Map<string, CachedChannel>();
+
+/** A `depinreceivemsg` page: a bare array (no limit) or `{ messages, has_more }` (paginated). */
+const normalizePage = (parsed: unknown): { pageItems: DepinReceiveMsgItem[]; hasMore: boolean } => {
+  if (Array.isArray(parsed)) return { pageItems: parsed as DepinReceiveMsgItem[], hasMore: false };
+  if (parsed && typeof parsed === 'object') {
+    const p = parsed as { messages?: unknown; has_more?: unknown };
+    if (Array.isArray(p.messages)) return { pageItems: p.messages as DepinReceiveMsgItem[], hasMore: p.has_more === true };
+  }
+  return { pageItems: [], hasMore: false };
+};
 
 /** The RPC client rejects with the raw JSON error object (no `.message`), so dig the real message out. */
 const describeRpcError = (err: any): string | null => {
@@ -164,14 +217,61 @@ export function useDePINChat(params: {
 
   const effectiveAddress = identity?.address ?? null;
 
+  // Mirrors of the message state, so the channel-switch cleanup can stash the
+  // latest values without re-running on every incoming message.
+  const groupMessagesRef = useRef<DePINMessage[]>([]);
+  const privateConversationsRef = useRef<Map<string, PrivateConversation>>(new Map());
+  useEffect(() => {
+    groupMessagesRef.current = groupMessages;
+  }, [groupMessages]);
+  useEffect(() => {
+    privateConversationsRef.current = privateConversations;
+  }, [privateConversations]);
+
   const lastTimestampRef = useRef<number>(0);
   const consecutiveFailuresRef = useRef<number>(0);
   // Token spelling the server actually accepts (learned via alternateTokenSpelling).
   const serverTokenRef = useRef<string | null>(null);
   const seenMessageKeysRef = useRef<Set<string>>(new Set());
+  // Largest envelope seen per message (decoded bytes), used to size the next
+  // page. Worst case rather than a mean, so one big message can't overflow it.
+  const worstBytesPerMessageRef = useRef<number>(0);
+  // A poll now spans many device round-trips and can outlast the 5s tick. Two
+  // overlapping polls interleave writes on the one serial line, which corrupts
+  // framing (the device answers "Invalid JSON") and mismatches responses, so
+  // only one poll may be in flight at a time.
+  const pollInFlightRef = useRef(false);
   const recipientPubKeyCacheRef = useRef<Map<string, string | null>>(new Map());
   // In-memory mirror of persisted private-message recipient mapping (hash -> address).
   const privateMsgRecipientsRef = useRef<Map<string, string>>(new Map());
+
+  // Ask the device how much ECIES it can take (`depin_max_decrypt_bytes`, ping).
+  // Firmware that predates capability reporting omits it — then we stay on the
+  // conservative one-message page instead of guessing.
+  const [deviceLimits, setDeviceLimits] = useState<{ maxBytes: number; base64: boolean } | null>(null);
+  useEffect(() => {
+    if (!deviceBacked || !device) {
+      setDeviceLimits(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        // The library's typings lag the firmware, which does report these.
+        const info = (await device.ping()) as { depin_max_decrypt_bytes?: unknown; capabilities?: unknown };
+        const maxBytes = Number(info?.depin_max_decrypt_bytes);
+        if (!cancelled && Number.isFinite(maxBytes) && maxBytes > 0) {
+          const base64 = Array.isArray(info?.capabilities) && info.capabilities.includes(DEVICE_BULK_B64_CAPABILITY);
+          setDeviceLimits({ maxBytes, base64 });
+        }
+      } catch (e) {
+        console.debug('useDePINChat: could not read device decrypt limits', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [deviceBacked, device]);
 
   // Hydrate the private-message recipient map from AsyncStorage once.
   useEffect(() => {
@@ -269,18 +369,44 @@ export function useDePINChat(params: {
     [],
   );
 
-  // Reset incremental polling + dedupe on token/address change; preload pubkeys.
+  // Switching channel: stash what we already decrypted and restore the channel
+  // we are entering. Every message costs a device round-trip to decrypt, so
+  // re-reading them on each visit made entering the chat slow for no reason.
   useEffect(() => {
-    lastTimestampRef.current = 0;
+    const key = effectiveAddress && selectedAsset ? `${effectiveAddress}|${selectedAsset}` : null;
+    const cached = key ? channelCache.get(key) : undefined;
+
     consecutiveFailuresRef.current = 0;
     serverTokenRef.current = null;
-    seenMessageKeysRef.current = new Set();
-    setGroupMessages([]);
-    setPrivateConversations(new Map());
+    // Message sizes differ per channel, so recalibrate the page budget.
+    worstBytesPerMessageRef.current = 0;
     setError(null);
     setLastPoll(null);
     recipientPubKeyCacheRef.current.clear();
+
+    if (cached) {
+      lastTimestampRef.current = cached.lastTimestamp;
+      seenMessageKeysRef.current = new Set(cached.seenKeys);
+      setGroupMessages(cached.groupMessages);
+      setPrivateConversations(new Map(cached.privateConversations));
+    } else {
+      lastTimestampRef.current = 0;
+      seenMessageKeysRef.current = new Set();
+      setGroupMessages([]);
+      setPrivateConversations(new Map());
+    }
+
     if (selectedAsset) preloadRecipientPubkeys(selectedAsset);
+
+    return () => {
+      if (!key) return;
+      channelCache.set(key, {
+        groupMessages: groupMessagesRef.current,
+        privateConversations: privateConversationsRef.current,
+        lastTimestamp: lastTimestampRef.current,
+        seenKeys: Array.from(seenMessageKeysRef.current),
+      });
+    };
   }, [selectedAsset, effectiveAddress, preloadRecipientPubkeys]);
 
   // Device-backed session lifecycle: opening a channel authorizes the device to
@@ -289,11 +415,16 @@ export function useDePINChat(params: {
   // session is revoked on channel close, unmount, disconnect, or timeout.
   const deviceSessionTokenRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!deviceBacked || !device || !selectedAsset) {
+    if (!deviceBacked || !device) {
       deviceSessionTokenRef.current = null;
       return;
     }
+    // Stepping back to the token picker keeps the session: it belongs to the
+    // channel, not to the screen, and re-opening it would ask the owner for
+    // another physical approval on every navigation.
+    if (!selectedAsset) return;
     const token = selectedAsset; // canonical '&NAME' — matches the signed message
+    if (deviceSessionTokenRef.current === token) return; // already authorized
     let cancelled = false;
     (async () => {
       try {
@@ -308,10 +439,19 @@ export function useDePINChat(params: {
     })();
     return () => {
       cancelled = true;
-      deviceSessionTokenRef.current = null;
-      device.depinSessionEnd().catch(() => {});
     };
   }, [deviceBacked, device, selectedAsset]);
+
+  // Revoke on the way out — leaving the DePIN section entirely (this hook
+  // unmounts) or swapping devices, not on in-section navigation.
+  useEffect(() => {
+    return () => {
+      if (device && deviceSessionTokenRef.current) {
+        deviceSessionTokenRef.current = null;
+        device.depinSessionEnd().catch(() => {});
+      }
+    };
+  }, [device]);
 
   const ingestItems = useCallback((items: DepinReceiveMsgItem[], myAddr: string, decrypted: DePINMessage[]) => {
     const newGroup: DePINMessage[] = [];
@@ -351,43 +491,97 @@ export function useDePINChat(params: {
     // ECIES decryption: local WIF, or routed to the device (bare-payload verb).
     // Both `depinreceivemsg`'s per-item payload and the privacy-wrapped server
     // envelope are the same ECIES format, so one path handles both.
-    const decryptEcies = async (encHex: string): Promise<string | null> => {
-      if (!encHex) return null;
+    const decryptEcies = async (encHex: string, what: string): Promise<{ text: string | null; notForUs: boolean }> => {
+      if (!encHex) return { text: null, notForUs: false };
       if (deviceBacked) {
-        if (!device) return null;
-        const { plaintext_b64 } = await device.depinDecryptPayload(encHex);
-        return plaintext_b64 ? b64ToUtf8(plaintext_b64) : null;
+        if (!device) return { text: null, notForUs: false };
+        try {
+          const { plaintext_b64 } = await device.depinDecryptPayload(encHex);
+          return { text: plaintext_b64 ? b64ToUtf8(plaintext_b64) : null, notForUs: false };
+        } catch (e) {
+          // `not_for_us` is the device saying this identity isn't among the
+          // recipients — routine for other members' traffic, not a failure. It
+          // must not abort the poll (doing so stalled the whole channel and
+          // tripped the failure backoff).
+          if (/not_for_us/i.test(String((e as any)?.message ?? e))) {
+            console.debug(`useDePINChat: ${what} not addressed to this identity, skipping`);
+            return { text: null, notForUs: true };
+          }
+          throw e;
+        }
       }
-      return decryptDepinReceiveEncryptedPayload(encHex, String(identity!.wif));
+      return { text: await decryptDepinReceiveEncryptedPayload(encHex, String(identity!.wif)), notForUs: false };
     };
 
-    const callReceive = (token: string) => {
-      const rpcParams: (string | number)[] = [token, effectiveAddress];
-      if (lastTimestampRef.current > 0) rpcParams.push(lastTimestampRef.current);
+    // `after_hash` / `limit` are positional args 4 and 5, so the timestamp must
+    // be sent too (0 = no filter, same as omitting it).
+    const callReceive = (token: string, afterHash: string, limit: number) => {
+      const rpcParams: (string | number)[] = [token, effectiveAddress, lastTimestampRef.current > 0 ? lastTimestampRef.current : 0];
+      if (limit > 0) rpcParams.push(afterHash, limit);
       return rpc('depinreceivemsg', rpcParams);
     };
 
-    let result: unknown;
-    try {
-      result = await callReceive(serverTokenRef.current ?? selectedAsset);
-    } catch (err) {
-      const alt = alternateTokenSpelling(selectedAsset, err);
-      if (!alt) throw err;
-      console.debug(`useDePINChat: adopting server token spelling '${alt}' for asset '${selectedAsset}'`);
-      serverTokenRef.current = alt;
-      result = await callReceive(alt);
-    }
+    // Envelope capacity for one command, in decoded binary bytes: base64
+    // firmware reaches its full advertised buffer, hex-only firmware is capped
+    // by the serial line instead.
+    const budgetBytes = deviceLimits
+      ? Math.floor(
+          (deviceLimits.base64 ? deviceLimits.maxBytes : Math.min(deviceLimits.maxBytes, DEVICE_LEGACY_HEX_CAP_BYTES)) *
+            DEVICE_BUDGET_SAFETY,
+        )
+      : 0;
+    // Local keys fetch everything at once (limit 0). A device pulls one message
+    // until it has measured one, then fits as many as the budget allows.
+    const nextPageLimit = (): number => {
+      if (!deviceBacked) return 0;
+      const perMessage = worstBytesPerMessageRef.current;
+      if (!budgetBytes || perMessage <= 0) return DEVICE_PAGE_LIMIT;
+      return Math.max(1, Math.min(MAX_DEVICE_PAGE_LIMIT, Math.floor(budgetBytes / perMessage)));
+    };
 
-    let items: DepinReceiveMsgItem[] = [];
-    if (isEncryptedResult(result)) {
+    const items: DepinReceiveMsgItem[] = [];
+    let afterHash = '';
+    let pageLimit = nextPageLimit();
+
+    for (let page = 0; page < MAX_PAGES_PER_POLL; page++) {
+      let result: unknown;
       try {
-        const json = await decryptEcies(result.encrypted);
-        if (json) items = JSON.parse(json);
-      } catch (e) {
-        console.debug('useDePINChat: failed to parse decrypted server response', e);
+        result = await callReceive(serverTokenRef.current ?? selectedAsset, afterHash, pageLimit);
+      } catch (err) {
+        const alt = alternateTokenSpelling(selectedAsset, err);
+        if (!alt) throw err;
+        console.debug(`useDePINChat: adopting server token spelling '${alt}' for asset '${selectedAsset}'`);
+        serverTokenRef.current = alt;
+        result = await callReceive(alt, afterHash, pageLimit);
       }
-    } else {
-      items = Array.isArray(result) ? (result as DepinReceiveMsgItem[]) : [];
+
+      let parsed: unknown = result;
+      let envelopeHexLen = 0;
+      if (isEncryptedResult(result)) {
+        envelopeHexLen = result.encrypted.length;
+        // Let a decryption failure propagate: with a hardware wallet it means the
+        // device rejected or died on the envelope, and the caller's failure
+        // counter must see it (swallowing it here looked like an empty pool and
+        // retried forever).
+        const envelope = await decryptEcies(result.encrypted, 'server envelope');
+        parsed = envelope.text ? JSON.parse(envelope.text) : null;
+      }
+
+      const { pageItems, hasMore } = normalizePage(parsed);
+      items.push(...pageItems);
+
+      // Calibrate from what this page actually cost, so the next one carries as
+      // many messages as the device's budget allows.
+      if (envelopeHexLen > 0 && pageItems.length > 0) {
+        // The envelope travels as hex here, so two chars per decoded byte.
+        worstBytesPerMessageRef.current = Math.max(worstBytesPerMessageRef.current, envelopeHexLen / 2 / pageItems.length);
+      }
+
+      if (pageLimit === 0 || !hasMore || pageItems.length === 0) break;
+      const cursor = String(pageItems[pageItems.length - 1]?.hash ?? '');
+      if (!cursor || cursor === afterHash) break;
+      afterHash = cursor;
+      pageLimit = nextPageLimit();
     }
 
     let maxTimestamp = lastTimestampRef.current;
@@ -400,10 +594,20 @@ export function useDePINChat(params: {
       if (!item?.hash || seen.has(key)) continue;
 
       let plaintext: string | null = null;
+      let notForUs = false;
       try {
-        plaintext = await decryptEcies(String(item.encrypted_payload_hex ?? ''));
+        const res = await decryptEcies(String(item.encrypted_payload_hex ?? ''), `message ${String(item.hash ?? '').slice(0, 8)}`);
+        plaintext = res.text;
+        notForUs = res.notForUs;
       } catch {
         plaintext = null;
+      }
+      // A message addressed to someone else never becomes readable, so retire it
+      // instead of re-decrypting it on the device every 5s. `seen` is cleared
+      // when the channel or identity changes, so this is not permanent.
+      if (notForUs) {
+        seen.add(key);
+        continue;
       }
       if (typeof plaintext !== 'string' || plaintext.length === 0) continue;
 
@@ -434,7 +638,7 @@ export function useDePINChat(params: {
     lastTimestampRef.current = maxTimestamp;
     if (decrypted.length > 0) ingestItems(items, effectiveAddress, decrypted);
     setLastPoll(new Date());
-  }, [rpc, selectedAsset, effectiveAddress, identity, getContactAddress, ingestItems, deviceBacked, device, canCrypt]);
+  }, [rpc, selectedAsset, effectiveAddress, identity, getContactAddress, ingestItems, deviceBacked, device, canCrypt, deviceLimits]);
 
   // Automatic polling every 5s while connected.
   useEffect(() => {
@@ -442,6 +646,8 @@ export function useDePINChat(params: {
     let active = true;
 
     const run = async () => {
+      if (pollInFlightRef.current) return; // previous cycle still talking to the device
+      pollInFlightRef.current = true;
       try {
         await pollOnce();
         if (active) {
@@ -457,6 +663,15 @@ export function useDePINChat(params: {
         if (active && consecutiveFailuresRef.current >= 2) {
           setError(describeRpcError(err) ?? 'Failed to fetch messages');
         }
+        // Give up after repeated failures instead of retrying forever: when the
+        // failure is a hardware wallet that can't answer, each retry hits the
+        // device again. Re-entering the channel restarts polling.
+        if (active && consecutiveFailuresRef.current >= MAX_CONSECUTIVE_FAILURES) {
+          console.warn('useDePINChat: polling stopped after repeated failures');
+          setIsPolling(false);
+        }
+      } finally {
+        pollInFlightRef.current = false;
       }
     };
 
@@ -586,7 +801,18 @@ export function useDePINChat(params: {
       }
       return result;
     },
-    [rpc, selectedAsset, effectiveAddress, identity, recipientList, resolveRecipientPubkey, rememberPrivateRecipient, deviceBacked, device, canCrypt],
+    [
+      rpc,
+      selectedAsset,
+      effectiveAddress,
+      identity,
+      recipientList,
+      resolveRecipientPubkey,
+      rememberPrivateRecipient,
+      deviceBacked,
+      device,
+      canCrypt,
+    ],
   );
 
   const checkAssetValidity = useCallback(async (): Promise<AssetValidity | null> => {
