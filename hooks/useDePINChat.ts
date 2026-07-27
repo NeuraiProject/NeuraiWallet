@@ -108,6 +108,15 @@ const touchDeviceSession = (): void => {
   if (deviceSession.current) deviceSession.current.lastUseMs = Date.now();
 };
 
+/**
+ * Only one poll may drive the serial port at a time — and the guard has to be
+ * shared across hook instances, not per component: navigating in and out
+ * remounts the chat while the previous poll is still running, and two loops
+ * writing to the one physical port interleave their chunks, which the device
+ * can only report as `Invalid JSON`.
+ */
+const pollLock = { current: false };
+
 const isSessionRequiredError = (e: unknown): boolean => /session_required/i.test(String((e as any)?.message ?? e));
 
 /**
@@ -282,7 +291,10 @@ export function useDePINChat(params: {
   // overlapping polls interleave writes on the one serial line, which corrupts
   // framing (the device answers "Invalid JSON") and mismatches responses, so
   // only one poll may be in flight at a time.
-  const pollInFlightRef = useRef(false);
+  // Set when this instance stops polling (unmount, channel change): an in-flight
+  // loop checks it between device round-trips and stops instead of finishing a
+  // long backlog nobody is waiting for.
+  const pollAbortRef = useRef(false);
   // Fingerprint of the server pool (`total_messages|newest_message`) at the last
   // fetch, so an unchanged pool skips the device round-trip entirely.
   const lastPoolSignatureRef = useRef<string | null>(null);
@@ -694,6 +706,7 @@ export function useDePINChat(params: {
       let maxTimestamp = lastTimestampRef.current;
 
       for (const item of pageItems) {
+        if (pollAbortRef.current) break;
         if (typeof item?.timestamp === 'number') maxTimestamp = Math.max(maxTimestamp, item.timestamp);
         const key = `${String(item?.hash ?? '')}|${String(item?.signature_hex ?? '')}`;
         if (!item?.hash || seen.has(key)) continue;
@@ -782,6 +795,7 @@ export function useDePINChat(params: {
 
       await ingestPage(pageItems);
 
+      if (pollAbortRef.current) break;
       if (pageLimit === 0 || !hasMore || pageItems.length === 0) break;
       const cursor = String(pageItems[pageItems.length - 1]?.hash ?? '');
       if (!cursor || cursor === afterHash) break;
@@ -813,10 +827,11 @@ export function useDePINChat(params: {
     // it waits for the owner's approval scrambles the response pairing.
     if (deviceBacked && !deviceSessionActive) return;
     let active = true;
+    pollAbortRef.current = false;
 
     const run = async () => {
-      if (pollInFlightRef.current) return; // previous cycle still talking to the device
-      pollInFlightRef.current = true;
+      if (pollLock.current) return; // another cycle (possibly a stale instance) owns the port
+      pollLock.current = true;
       try {
         await pollOnce();
         if (active) {
@@ -849,7 +864,7 @@ export function useDePINChat(params: {
           setIsPolling(false);
         }
       } finally {
-        pollInFlightRef.current = false;
+        pollLock.current = false;
       }
     };
 
@@ -857,6 +872,7 @@ export function useDePINChat(params: {
     const interval = setInterval(run, DEPIN_POLL_INTERVAL_MS);
     return () => {
       active = false;
+      pollAbortRef.current = true; // stop an in-flight loop from using the port
       clearInterval(interval);
     };
   }, [rpc, selectedAsset, effectiveAddress, isPolling, pollOnce, deviceBacked, deviceSessionActive, handleDeviceLost, confirmDeviceGone]);
