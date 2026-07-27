@@ -30,6 +30,7 @@ import {
   wrapMessageForServer,
 } from '../blue_modules/neurai/depinMsg';
 import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
+import { clearDepinSession, loadDepinSession, saveDepinSession } from '../blue_modules/neurai/depinSessionStore';
 
 /** Decode a device `plaintext_b64` response to a UTF-8 string. */
 const b64ToUtf8 = (b64: string): string => Buffer.from(b64, 'base64').toString('utf8');
@@ -455,8 +456,9 @@ export function useDePINChat(params: {
     deviceSession.current = null;
     deviceSessionTokenRef.current = null;
     setDeviceSessionActive(false);
+    if (effectiveAddress) clearDepinSession(effectiveAddress);
     setSessionEpoch(e => e + 1);
-  }, []);
+  }, [effectiveAddress]);
   useEffect(() => {
     if (!deviceBacked || !device) {
       deviceSessionTokenRef.current = null;
@@ -475,19 +477,48 @@ export function useDePINChat(params: {
       return;
     }
     let cancelled = false;
+    const markActive = (ttlSeconds: unknown) => {
+      deviceSession.current = {
+        token,
+        ttlMs: Number.isFinite(Number(ttlSeconds)) && Number(ttlSeconds) > 0 ? Number(ttlSeconds) * 1000 : 60_000,
+        lastUseMs: Date.now(),
+      };
+      if (!cancelled) {
+        deviceSessionTokenRef.current = token;
+        setDeviceSessionActive(true);
+      }
+    };
+
     (async () => {
       try {
-        const res = (await device.depinSessionBegin(token)) as { expires_in_s?: unknown };
-        const ttlSeconds = Number(res?.expires_in_s);
-        deviceSession.current = {
-          token,
-          ttlMs: Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds * 1000 : 60_000,
-          lastUseMs: Date.now(),
-        };
-        if (!cancelled) {
-          deviceSessionTokenRef.current = token;
-          setDeviceSessionActive(true);
+        // The app process may have restarted while the device stayed in DePIN
+        // mode. Restore the capability key we stored and let the device tell us
+        // whether it is still valid — that is what avoids a pointless approval.
+        const stored = effectiveAddress ? await loadDepinSession(effectiveAddress) : null;
+        if (!cancelled && stored && stored.token === token) {
+          device.setDepinSessionKey(stored.key);
+          let restored = false;
+          try {
+            const status = await device.depinSessionStatus();
+            if (status?.active && status.token === token) {
+              markActive(status.expires_in_s);
+              restored = true;
+            }
+          } catch (e) {
+            console.debug('useDePINChat: session status check failed', e);
+          }
+          if (restored) return;
+          // Expired or rejected: forget it and ask the owner once.
+          device.setDepinSessionKey(null);
+          if (effectiveAddress) await clearDepinSession(effectiveAddress);
         }
+        if (cancelled) return;
+
+        const res = (await device.depinSessionBegin(token)) as { expires_in_s?: unknown };
+        markActive(res?.expires_in_s);
+        // Persist the key the library cached, so the next app start can reuse it.
+        const key = device.getDepinSessionKey();
+        if (key && effectiveAddress) await saveDepinSession(effectiveAddress, { key, token });
       } catch (e) {
         if (!cancelled) {
           deviceSession.current = null;
@@ -500,7 +531,7 @@ export function useDePINChat(params: {
     return () => {
       cancelled = true;
     };
-  }, [deviceBacked, device, selectedAsset, sessionEpoch]);
+  }, [deviceBacked, device, selectedAsset, sessionEpoch, effectiveAddress]);
 
   const ingestItems = useCallback((items: DepinReceiveMsgItem[], myAddr: string, decrypted: DePINMessage[]) => {
     const newGroup: DePINMessage[] = [];

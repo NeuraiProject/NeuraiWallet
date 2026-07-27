@@ -26,7 +26,19 @@ export interface UseNeuraiHwDevice {
   disconnect: () => Promise<void>;
 }
 
-export function useNeuraiHwDevice(): UseNeuraiHwDevice {
+export interface UseNeuraiHwDeviceOptions {
+  /**
+   * Leave the USB link open when this hook unmounts. Off by default: a signing
+   * or pairing screen is done with the device when it goes away. The DePIN chat
+   * opts in, because its screen mounts and unmounts as the user navigates and
+   * reconnecting each time would mean another permission prompt and another
+   * on-device approval. The caller then owns closing it (`disconnect`).
+   */
+  keepAliveOnUnmount?: boolean;
+}
+
+export function useNeuraiHwDevice(options: UseNeuraiHwDeviceOptions = {}): UseNeuraiHwDevice {
+  const { keepAliveOnUnmount = false } = options;
   const supported = isUsbSupported();
   const [status, setStatus] = useState<NeuraiHwStatus>(supported ? 'idle' : 'unsupported');
   const [error, setError] = useState<string | null>(null);
@@ -38,11 +50,12 @@ export function useNeuraiHwDevice(): UseNeuraiHwDevice {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      if (keepAliveOnUnmount) return; // caller keeps the link and closes it itself
       // Best-effort close on unmount.
       deviceRef.current?.disconnect().catch(() => {});
       deviceRef.current = null;
     };
-  }, []);
+  }, [keepAliveOnUnmount]);
 
   const disconnect = useCallback(async () => {
     const current = deviceRef.current;
