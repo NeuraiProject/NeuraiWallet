@@ -29,9 +29,11 @@ import {
   type DepinServerWrapResult,
   wrapMessageForServer,
 } from '../blue_modules/neurai/depinMsg';
+import type { NeuraiNetwork } from '../blue_modules/neurai';
 import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
 import { clearDepinSession, loadDepinSession, saveDepinSession } from '../blue_modules/neurai/depinSessionStore';
 import { withDevice } from '../blue_modules/neurai-hw/deviceQueue';
+import { isMeaningfulSignature, markPoolSeen, poolSignature } from '../blue_modules/neurai/depinPoolSeen';
 
 /** Decode a device `plaintext_b64` response to a UTF-8 string. */
 const b64ToUtf8 = (b64: string): string => Buffer.from(b64, 'base64').toString('utf8');
@@ -248,12 +250,14 @@ export function useDePINChat(params: {
   recipientList: RecipientInfo[];
   /** Conversation currently on screen ('group' or a contact address) — its arrivals are already read. */
   activeTab?: string;
+  /** Network of the configured DePIN node, for the shared "already seen" marker. */
+  network: NeuraiNetwork;
   /** Connected NeuraiHW device — required when `identity.deviceBacked` (no local WIF). */
   device?: NeuraiESP32 | null;
   /** Called when the USB link dies (device rebooted/unplugged) so the owner can reconnect. */
   onDeviceLost?: () => void;
 }) {
-  const { rpc, selectedAsset, identity, recipientList, activeTab = 'group', device = null, onDeviceLost } = params;
+  const { rpc, selectedAsset, identity, recipientList, activeTab = 'group', network, device = null, onDeviceLost } = params;
   // The visible conversation is read by definition; keep it in a ref so message
   // ingestion can consult it without re-creating the polling callbacks.
   const activeTabRef = useRef(activeTab);
@@ -660,19 +664,21 @@ export function useDePINChat(params: {
     // climbing on the ESP32). `depinpoolstats` is NOT privacy-wrapped, so we
     // can ask the node whether the pool actually moved without involving the
     // device at all, and only fetch when it did.
-    if (deviceBacked) {
-      try {
-        const pool = (await rpc('depinpoolstats', [])) as { total_messages?: unknown; newest_message?: unknown } | null;
-        const signature = `${String(pool?.total_messages ?? '')}|${String(pool?.newest_message ?? '')}`;
-        if (signature !== '|' && signature === lastPoolSignatureRef.current) {
-          setLastPoll(new Date());
-          return;
-        }
-        lastPoolSignatureRef.current = signature;
-      } catch (e) {
-        // Stats unavailable: fall through and fetch as usual.
-        console.debug('useDePINChat: pool stats check failed, fetching anyway', e);
+    try {
+      const pool = (await rpc('depinpoolstats', [])) as { total_messages?: unknown; newest_message?: unknown } | null;
+      const signature = poolSignature(pool);
+      // Opening the chat is what marks the channel as read, so record the state
+      // we are about to display — this is what clears the wallet's new-message
+      // dot without any decryption.
+      if (isMeaningfulSignature(signature)) markPoolSeen(network, signature);
+      if (isMeaningfulSignature(signature) && signature === lastPoolSignatureRef.current) {
+        setLastPoll(new Date());
+        return;
       }
+      lastPoolSignatureRef.current = signature;
+    } catch (e) {
+      // Stats unavailable: fall through and fetch as usual.
+      console.debug('useDePINChat: pool stats check failed, fetching anyway', e);
     }
     // ECIES decryption: local WIF, or routed to the device (bare-payload verb).
     // Both `depinreceivemsg`'s per-item payload and the privacy-wrapped server
@@ -851,6 +857,7 @@ export function useDePINChat(params: {
     renewDeviceSession,
     handleDeviceLost,
     confirmDeviceGone,
+    network,
   ]);
 
   // Automatic polling every 5s while connected.

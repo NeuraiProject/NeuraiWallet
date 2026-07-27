@@ -42,6 +42,7 @@ import { Transaction } from '../../class/wallets/types';
 import getWalletTransactionsOptions, { WalletTransactionsRouteProps } from '../../navigation/helpers/getWalletTransactionsOptions';
 import useMenuElements from '../../hooks/useMenuElements';
 import useWalletSubscribe from '../../hooks/useWalletSubscribe';
+import useDepinPoolWatch from '../../hooks/useDepinPoolWatch';
 import { getClipboardContent } from '../../blue_modules/clipboard';
 import HandOffComponent from '../../components/HandOffComponent';
 import { HandOffActivityType } from '../../components/types';
@@ -86,6 +87,14 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const MAX_FAILURES = 3;
   const flatListRef = useRef<FlatList<Transaction>>(null);
   const depinChatRef = useRef<DePINChatHandle>(null);
+
+  // Cheap "new messages" marker: polls only the unencrypted pool stats once a
+  // minute, so it never needs an identity, a session or the hardware wallet.
+  // Decryption still happens only when the user opens the chat.
+  const { hasNewMessages: hasNewDepinMessages } = useDepinPoolWatch({
+    enabled: showDepinTab,
+    network: isNeuraiWallet(wallet) ? wallet.getNeuraiNetwork() : 'mainnet',
+  });
 
   // On the DePIN tab, back (hardware button or header arrow) walks one level
   // at a time instead of leaving the screen: open token chat → token picker
@@ -559,6 +568,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
                       />
                     )}
                     <Text style={[styles.tabLabel, active ? stylesHook.tabLabelActive : stylesHook.tabLabelInactive]}>{label}</Text>
+                    {tab === 'depin' && hasNewDepinMessages && <View style={styles.depinUnreadDot} testID="DepinTabUnreadDot" />}
                   </Pressable>
                 );
               })}
@@ -589,6 +599,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       showAssetsTab,
       showDepinTab,
       activeTab,
+      hasNewDepinMessages,
     ],
   );
 
@@ -713,6 +724,8 @@ const styles = StyleSheet.create({
   activityIndicator: { marginVertical: 20 },
   listHeaderTextRow: { flex: 1, marginHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between' },
   tabsBar: { flexDirection: 'row', marginHorizontal: 16, marginTop: 2, columnGap: 8 },
+  // Same green marker the chat uses for unread conversations.
+  depinUnreadDot: { position: 'absolute', top: 8, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' },
   tab: {
     flex: 1,
     alignItems: 'center',

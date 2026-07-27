@@ -139,6 +139,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     identity,
     recipientList,
     activeTab,
+    network,
     device: isHardware ? deviceId.device : null,
     // The device rebooted or was unplugged: drop the dead handle so the screen
     // falls back to the connect button instead of retrying a broken link.
