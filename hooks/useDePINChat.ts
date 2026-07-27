@@ -539,7 +539,65 @@ export function useDePINChat(params: {
       return Math.max(1, Math.min(MAX_DEVICE_PAGE_LIMIT, Math.floor(budgetBytes / perMessage)));
     };
 
-    const items: DepinReceiveMsgItem[] = [];
+    // Decrypt one page's messages and publish them right away, so a backlog
+    // fills the screen as it arrives instead of after the whole poll — every
+    // message is a device round-trip, so the wait is otherwise very visible.
+    const ingestPage = async (pageItems: DepinReceiveMsgItem[]) => {
+      const decrypted: DePINMessage[] = [];
+      const seen = seenMessageKeysRef.current;
+      let maxTimestamp = lastTimestampRef.current;
+
+      for (const item of pageItems) {
+        if (typeof item?.timestamp === 'number') maxTimestamp = Math.max(maxTimestamp, item.timestamp);
+        const key = `${String(item?.hash ?? '')}|${String(item?.signature_hex ?? '')}`;
+        if (!item?.hash || seen.has(key)) continue;
+
+        let plaintext: string | null = null;
+        let notForUs = false;
+        try {
+          const res = await decryptEcies(String(item.encrypted_payload_hex ?? ''), `message ${String(item.hash ?? '').slice(0, 8)}`);
+          plaintext = res.text;
+          notForUs = res.notForUs;
+        } catch {
+          plaintext = null;
+        }
+        // A message addressed to someone else never becomes readable, so retire
+        // it instead of re-decrypting it on the device every 5s. `seen` is
+        // cleared when the channel or identity changes, so this is not permanent.
+        if (notForUs) {
+          seen.add(key);
+          continue;
+        }
+        if (typeof plaintext !== 'string' || plaintext.length === 0) continue;
+
+        seen.add(key);
+        const ts = typeof item.timestamp === 'number' ? item.timestamp : Math.floor(Date.now() / 1000);
+        const messageHash = String(item.hash ?? '');
+        const sender = String(item.sender ?? '');
+        // Some clients send private messages as plain "@recipient text" without
+        // tagging message_type — route those to the private conversation (and
+        // strip the prefix) instead of showing them raw in the group chat.
+        const privMatch = plaintext.match(/^@(N[a-zA-Z0-9]{33,34}|t[a-zA-Z0-9]{33,34})\s+([\s\S]*)$/);
+        const messageType = privMatch ? 'private' : item.message_type;
+        let contactAddress = getContactAddress(messageHash, sender, effectiveAddress, messageType);
+        if (privMatch && sender === effectiveAddress) contactAddress = privMatch[1];
+        decrypted.push({
+          recipient: effectiveAddress,
+          sender,
+          message: privMatch ? privMatch[2] : plaintext,
+          timestamp: ts,
+          date: new Date(ts * 1000).toLocaleString(),
+          expires: '',
+          messageHash,
+          messageType,
+          contactAddress,
+        });
+      }
+
+      lastTimestampRef.current = maxTimestamp;
+      if (decrypted.length > 0) ingestItems(pageItems, effectiveAddress, decrypted);
+    };
+
     let afterHash = '';
     let pageLimit = nextPageLimit();
 
@@ -568,7 +626,6 @@ export function useDePINChat(params: {
       }
 
       const { pageItems, hasMore } = normalizePage(parsed);
-      items.push(...pageItems);
 
       // Calibrate from what this page actually cost, so the next one carries as
       // many messages as the device's budget allows.
@@ -577,6 +634,8 @@ export function useDePINChat(params: {
         worstBytesPerMessageRef.current = Math.max(worstBytesPerMessageRef.current, envelopeHexLen / 2 / pageItems.length);
       }
 
+      await ingestPage(pageItems);
+
       if (pageLimit === 0 || !hasMore || pageItems.length === 0) break;
       const cursor = String(pageItems[pageItems.length - 1]?.hash ?? '');
       if (!cursor || cursor === afterHash) break;
@@ -584,59 +643,6 @@ export function useDePINChat(params: {
       pageLimit = nextPageLimit();
     }
 
-    let maxTimestamp = lastTimestampRef.current;
-    const decrypted: DePINMessage[] = [];
-    const seen = seenMessageKeysRef.current;
-
-    for (const item of items) {
-      if (typeof item?.timestamp === 'number') maxTimestamp = Math.max(maxTimestamp, item.timestamp);
-      const key = `${String(item?.hash ?? '')}|${String(item?.signature_hex ?? '')}`;
-      if (!item?.hash || seen.has(key)) continue;
-
-      let plaintext: string | null = null;
-      let notForUs = false;
-      try {
-        const res = await decryptEcies(String(item.encrypted_payload_hex ?? ''), `message ${String(item.hash ?? '').slice(0, 8)}`);
-        plaintext = res.text;
-        notForUs = res.notForUs;
-      } catch {
-        plaintext = null;
-      }
-      // A message addressed to someone else never becomes readable, so retire it
-      // instead of re-decrypting it on the device every 5s. `seen` is cleared
-      // when the channel or identity changes, so this is not permanent.
-      if (notForUs) {
-        seen.add(key);
-        continue;
-      }
-      if (typeof plaintext !== 'string' || plaintext.length === 0) continue;
-
-      seen.add(key);
-      const ts = typeof item.timestamp === 'number' ? item.timestamp : Math.floor(Date.now() / 1000);
-      const messageHash = String(item.hash ?? '');
-      const sender = String(item.sender ?? '');
-      // Some clients send private messages as plain "@recipient text" without
-      // tagging message_type — route those to the private conversation (and
-      // strip the prefix) instead of showing them raw in the group chat.
-      const privMatch = plaintext.match(/^@(N[a-zA-Z0-9]{33,34}|t[a-zA-Z0-9]{33,34})\s+([\s\S]*)$/);
-      const messageType = privMatch ? 'private' : item.message_type;
-      let contactAddress = getContactAddress(messageHash, sender, effectiveAddress, messageType);
-      if (privMatch && sender === effectiveAddress) contactAddress = privMatch[1];
-      decrypted.push({
-        recipient: effectiveAddress,
-        sender,
-        message: privMatch ? privMatch[2] : plaintext,
-        timestamp: ts,
-        date: new Date(ts * 1000).toLocaleString(),
-        expires: '',
-        messageHash,
-        messageType,
-        contactAddress,
-      });
-    }
-
-    lastTimestampRef.current = maxTimestamp;
-    if (decrypted.length > 0) ingestItems(items, effectiveAddress, decrypted);
     setLastPoll(new Date());
   }, [rpc, selectedAsset, effectiveAddress, identity, getContactAddress, ingestItems, deviceBacked, device, canCrypt, deviceLimits]);
 
