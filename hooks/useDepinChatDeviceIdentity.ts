@@ -4,6 +4,7 @@ import type { NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native'
 
 import { deviceDepinChatIdentity, type DepinChatIdentity, type DepinChatNetwork } from '../blue_modules/neurai/depinChatIdentity';
 import { useNeuraiHwDevice } from '../blue_modules/neurai-hw/useNeuraiHwDevice';
+import { withDevice } from '../blue_modules/neurai-hw/deviceQueue';
 
 export type DepinDeviceIdentityPhase = 'idle' | 'connecting' | 'revealing' | 'ready' | 'error';
 
@@ -68,13 +69,13 @@ export function useDepinChatDeviceIdentity(params: { enabled: boolean; network: 
       deviceRef.current = device;
 
       // Feature-detect: old firmware has no DePIN identity support.
-      const { capabilities = [] } = await device.ping();
+      const { capabilities = [] } = await withDevice(() => device.ping());
       if (!capabilities.includes('depin_identity')) {
         throw new Error('This firmware does not support DePIN chat — please update it');
       }
 
       setPhase('revealing');
-      const res = await device.getDepinIdentity(); // device prompts "REVEAL IDENTITY?"
+      const res = await withDevice(() => device.getDepinIdentity()); // device prompts "REVEAL IDENTITY?"
       const built = deviceDepinChatIdentity({
         network,
         address: res.address,
@@ -111,7 +112,7 @@ export function useDepinChatDeviceIdentity(params: { enabled: boolean; network: 
     const restored = liveDevice.current.device;
     (async () => {
       try {
-        await restored.ping();
+        await withDevice(() => restored.ping());
       } catch {
         if (cancelled) return;
         liveDevice.current = null;

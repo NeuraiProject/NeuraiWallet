@@ -31,6 +31,7 @@ import {
 } from '../blue_modules/neurai/depinMsg';
 import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
 import { clearDepinSession, loadDepinSession, saveDepinSession } from '../blue_modules/neurai/depinSessionStore';
+import { withDevice } from '../blue_modules/neurai-hw/deviceQueue';
 
 /** Decode a device `plaintext_b64` response to a UTF-8 string. */
 const b64ToUtf8 = (b64: string): string => Buffer.from(b64, 'base64').toString('utf8');
@@ -315,7 +316,7 @@ export function useDePINChat(params: {
     (async () => {
       try {
         // The library's typings lag the firmware, which does report these.
-        const info = (await device.ping()) as { depin_max_decrypt_bytes?: unknown; capabilities?: unknown };
+        const info = (await withDevice(() => device.ping())) as { depin_max_decrypt_bytes?: unknown; capabilities?: unknown };
         const maxBytes = Number(info?.depin_max_decrypt_bytes);
         if (!cancelled && Number.isFinite(maxBytes) && maxBytes > 0) {
           const base64 = Array.isArray(info?.capabilities) && info.capabilities.includes(DEVICE_BULK_B64_CAPABILITY);
@@ -494,7 +495,7 @@ export function useDePINChat(params: {
   const confirmDeviceGone = useCallback(async (): Promise<boolean> => {
     if (!device) return true;
     try {
-      await device.ping();
+      await withDevice(() => device.ping());
       return false;
     } catch {
       return true;
@@ -551,7 +552,7 @@ export function useDePINChat(params: {
           device.setDepinSessionKey(stored.key);
           let restored = false;
           try {
-            const status = await device.depinSessionStatus();
+            const status = await withDevice(() => device.depinSessionStatus());
             if (status?.active && status.token === token) {
               markActive(status.expires_in_s);
               restored = true;
@@ -566,7 +567,7 @@ export function useDePINChat(params: {
         }
         if (cancelled) return;
 
-        const res = (await device.depinSessionBegin(token)) as { expires_in_s?: unknown };
+        const res = (await withDevice(() => device.depinSessionBegin(token))) as { expires_in_s?: unknown };
         markActive(res?.expires_in_s);
         // Persist the key the library cached, so the next app start can reuse it.
         const key = device.getDepinSessionKey();
@@ -649,7 +650,7 @@ export function useDePINChat(params: {
       if (deviceBacked) {
         if (!device) return { text: null, notForUs: false };
         try {
-          const { plaintext_b64 } = await device.depinDecryptPayload(encHex);
+          const { plaintext_b64 } = await withDevice(() => device.depinDecryptPayload(encHex));
           touchDeviceSession();
           return { text: plaintext_b64 ? b64ToUtf8(plaintext_b64) : null, notForUs: false };
         } catch (e) {
@@ -953,13 +954,15 @@ export function useDePINChat(params: {
           recipientPubKeys,
           messageType,
         });
-        const { signature } = await device.depinSign({
-          token,
-          sender: effectiveAddress,
-          timestamp,
-          messageType: pre.messageTypeByte,
-          encryptedPayload: pre.encryptedPayloadHex,
-        });
+        const { signature } = await withDevice(() =>
+          device.depinSign({
+            token,
+            sender: effectiveAddress,
+            timestamp,
+            messageType: pre.messageTypeByte,
+            encryptedPayload: pre.encryptedPayloadHex,
+          }),
+        );
         built = await assembleDepinMessage(
           { token, senderAddress: effectiveAddress, timestamp, messageType, encryptedPayloadHex: pre.encryptedPayloadHex },
           signature,
