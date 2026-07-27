@@ -81,6 +81,34 @@ interface CachedChannel {
 }
 const channelCache = new Map<string, CachedChannel>();
 
+/**
+ * The device's DePIN session outlives this hook: `depin_session_begin` always
+ * asks the owner for a physical approval (it is not idempotent) and the
+ * firmware offers no way to query whether a session is open, so we remember it
+ * here — module scope, so leaving and re-entering the DePIN section reuses the
+ * authorization the owner already gave instead of prompting again. The firmware
+ * expires it on inactivity; if it turns out to be gone, a device command fails
+ * with `session_required` and we re-authorize once, on demand.
+ */
+interface ActiveDeviceSession {
+  token: string;
+  ttlMs: number;
+  lastUseMs: number;
+}
+const deviceSession: { current: ActiveDeviceSession | null } = { current: null };
+
+const deviceSessionIsLive = (token: string): boolean => {
+  const s = deviceSession.current;
+  return !!s && s.token === token && Date.now() - s.lastUseMs < s.ttlMs;
+};
+
+/** Slide the session deadline after a successful device operation. */
+const touchDeviceSession = (): void => {
+  if (deviceSession.current) deviceSession.current.lastUseMs = Date.now();
+};
+
+const isSessionRequiredError = (e: unknown): boolean => /session_required/i.test(String((e as any)?.message ?? e));
+
 /** A `depinreceivemsg` page: a bare array (no limit) or `{ messages, has_more }` (paginated). */
 const normalizePage = (parsed: unknown): { pageItems: DepinReceiveMsgItem[]; hasMore: boolean } => {
   if (Array.isArray(parsed)) return { pageItems: parsed as DepinReceiveMsgItem[], hasMore: false };
@@ -414,6 +442,21 @@ export function useDePINChat(params: {
   // canonical `&NAME`. The device signs/decrypts only while this is active; the
   // session is revoked on channel close, unmount, disconnect, or timeout.
   const deviceSessionTokenRef = useRef<string | null>(null);
+  // State mirror of the ref: polling must not send a single device command
+  // before the session is open. `depin_session_begin` blocks on a physical
+  // approval, and any command issued meanwhile is answered out of order by the
+  // library's FIFO response matching — which desynced the queue and left a
+  // command waiting out its full 35s timeout.
+  const [deviceSessionActive, setDeviceSessionActive] = useState(false);
+  // Bumped when the device reports `session_required`, to re-run the effect
+  // below and ask for a fresh authorization exactly once.
+  const [sessionEpoch, setSessionEpoch] = useState(0);
+  const renewDeviceSession = useCallback(() => {
+    deviceSession.current = null;
+    deviceSessionTokenRef.current = null;
+    setDeviceSessionActive(false);
+    setSessionEpoch(e => e + 1);
+  }, []);
   useEffect(() => {
     if (!deviceBacked || !device) {
       deviceSessionTokenRef.current = null;
@@ -424,15 +467,32 @@ export function useDePINChat(params: {
     // another physical approval on every navigation.
     if (!selectedAsset) return;
     const token = selectedAsset; // canonical '&NAME' — matches the signed message
-    if (deviceSessionTokenRef.current === token) return; // already authorized
+    // Reuse the approval the owner already gave: the device keeps DePIN mode
+    // active until it times out, so re-entering must not prompt again.
+    if (deviceSessionIsLive(token)) {
+      deviceSessionTokenRef.current = token;
+      setDeviceSessionActive(true);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
-        await device.depinSessionBegin(token);
-        if (!cancelled) deviceSessionTokenRef.current = token;
+        const res = (await device.depinSessionBegin(token)) as { expires_in_s?: unknown };
+        const ttlSeconds = Number(res?.expires_in_s);
+        deviceSession.current = {
+          token,
+          ttlMs: Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds * 1000 : 60_000,
+          lastUseMs: Date.now(),
+        };
+        if (!cancelled) {
+          deviceSessionTokenRef.current = token;
+          setDeviceSessionActive(true);
+        }
       } catch (e) {
         if (!cancelled) {
+          deviceSession.current = null;
           deviceSessionTokenRef.current = null;
+          setDeviceSessionActive(false);
           setError(describeRpcError(e) ?? 'Could not open the device DePIN session');
         }
       }
@@ -440,18 +500,7 @@ export function useDePINChat(params: {
     return () => {
       cancelled = true;
     };
-  }, [deviceBacked, device, selectedAsset]);
-
-  // Revoke on the way out — leaving the DePIN section entirely (this hook
-  // unmounts) or swapping devices, not on in-section navigation.
-  useEffect(() => {
-    return () => {
-      if (device && deviceSessionTokenRef.current) {
-        deviceSessionTokenRef.current = null;
-        device.depinSessionEnd().catch(() => {});
-      }
-    };
-  }, [device]);
+  }, [deviceBacked, device, selectedAsset, sessionEpoch]);
 
   const ingestItems = useCallback((items: DepinReceiveMsgItem[], myAddr: string, decrypted: DePINMessage[]) => {
     const newGroup: DePINMessage[] = [];
@@ -497,8 +546,12 @@ export function useDePINChat(params: {
         if (!device) return { text: null, notForUs: false };
         try {
           const { plaintext_b64 } = await device.depinDecryptPayload(encHex);
+          touchDeviceSession();
           return { text: plaintext_b64 ? b64ToUtf8(plaintext_b64) : null, notForUs: false };
         } catch (e) {
+          // The firmware expired the session (inactivity): drop our record so a
+          // single fresh approval is requested instead of failing forever.
+          if (isSessionRequiredError(e)) renewDeviceSession();
           // `not_for_us` is the device saying this identity isn't among the
           // recipients — routine for other members' traffic, not a failure. It
           // must not abort the poll (doing so stalled the whole channel and
@@ -644,11 +697,26 @@ export function useDePINChat(params: {
     }
 
     setLastPoll(new Date());
-  }, [rpc, selectedAsset, effectiveAddress, identity, getContactAddress, ingestItems, deviceBacked, device, canCrypt, deviceLimits]);
+  }, [
+    rpc,
+    selectedAsset,
+    effectiveAddress,
+    identity,
+    getContactAddress,
+    ingestItems,
+    deviceBacked,
+    device,
+    canCrypt,
+    deviceLimits,
+    renewDeviceSession,
+  ]);
 
   // Automatic polling every 5s while connected.
   useEffect(() => {
     if (!selectedAsset || !effectiveAddress || !isPolling || !rpc) return;
+    // Hold off until the device has authorized the channel: talking to it while
+    // it waits for the owner's approval scrambles the response pairing.
+    if (deviceBacked && !deviceSessionActive) return;
     let active = true;
 
     const run = async () => {
@@ -687,7 +755,7 @@ export function useDePINChat(params: {
       active = false;
       clearInterval(interval);
     };
-  }, [rpc, selectedAsset, effectiveAddress, isPolling, pollOnce]);
+  }, [rpc, selectedAsset, effectiveAddress, isPolling, pollOnce, deviceBacked, deviceSessionActive]);
 
   const refreshMessages = useCallback(async () => {
     try {
