@@ -123,6 +123,8 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   const {
     groupMessages,
     privateConversations,
+    totalUnread,
+    groupUnread,
     error,
     lastPoll,
     stats,
@@ -136,6 +138,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     selectedAsset,
     identity,
     recipientList,
+    activeTab,
     device: isHardware ? deviceId.device : null,
     // The device rebooted or was unplugged: drop the dead handle so the screen
     // falls back to the connect button instead of retrying a broken link.
@@ -399,6 +402,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
       onBack={() => setSelectedAsset(null)}
       onChangeDraft={setDraft}
       onOpenDrawer={openDrawer}
+      unreadCount={totalUnread}
       onOpenInfo={openInfo}
       onSend={handleSend}
       overlays={
@@ -416,6 +420,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
             activeTab={activeTab}
             closeDrawer={closeDrawer}
             drawerAnim={drawerAnim}
+            groupUnread={groupUnread}
             holderContacts={holderContacts}
             identityAddress={identity.address}
             privateTabs={privateTabs}

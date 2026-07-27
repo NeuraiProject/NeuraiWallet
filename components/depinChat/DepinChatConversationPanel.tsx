@@ -18,6 +18,8 @@ interface DepinChatConversationPanelProps {
   onBack: () => void;
   onChangeDraft: (draft: string) => void;
   onOpenDrawer: () => void;
+  /** Unread across all conversations — shows a dot on the contacts button. */
+  unreadCount: number;
   onOpenInfo: () => void;
   onSend: () => void;
   overlays: ReactNode;
@@ -40,6 +42,7 @@ const DepinChatConversationPanel = ({
   onBack,
   onChangeDraft,
   onOpenDrawer,
+  unreadCount,
   onOpenInfo,
   onSend,
   overlays,
@@ -52,6 +55,7 @@ const DepinChatConversationPanel = ({
     <View style={styles.headerRow}>
       <Pressable onPress={onOpenDrawer} style={styles.gear} accessibilityLabel={loc.depin.contacts_title} testID="DepinContactsOpen">
         <Icon name="menu" type="material" size={24} color={stylesHook.text.color} />
+        {unreadCount > 0 && <View style={styles.unreadDot} testID="DepinUnreadDot" />}
       </Pressable>
       <Pressable onPress={onBack} style={styles.backBtn}>
         <Text style={[styles.title, stylesHook.text]} numberOfLines={1}>
@@ -136,6 +140,17 @@ const styles = StyleSheet.create({
   backBtn: { flex: 1, marginRight: 12 },
   title: { fontSize: 18, fontWeight: '700' },
   gear: { padding: 8 },
+  // Small green dot pinned to the contacts button's corner: unread traffic is
+  // worth noticing but not worth a number at this size.
+  unreadDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#22c55e',
+  },
   activeConvRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, columnGap: 6 },
   activeConvText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' },

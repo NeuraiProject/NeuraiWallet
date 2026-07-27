@@ -8,6 +8,8 @@ import { shortAddr } from './utils';
 
 interface DepinChatContactsDrawerProps {
   activeTab: string;
+  /** Unread arrivals in the public group. */
+  groupUnread: number;
   closeDrawer: () => void;
   drawerAnim: Animated.Value;
   holderContacts: RecipientInfo[];
@@ -20,6 +22,7 @@ interface DepinChatContactsDrawerProps {
 
 const DepinChatContactsDrawer = ({
   activeTab,
+  groupUnread,
   closeDrawer,
   drawerAnim,
   holderContacts,
@@ -58,6 +61,7 @@ const DepinChatContactsDrawer = ({
               <Text style={[styles.drawerItemName, stylesHook.text]}>{loc.depin.tab_group}</Text>
               <Text style={[styles.drawerItemSub, stylesHook.subtext]}>{loc.depin.contacts_everyone}</Text>
             </View>
+            {groupUnread > 0 && <View style={styles.unreadDot} />}
           </Pressable>
 
           {privateTabs.map(conversation => (
@@ -73,6 +77,7 @@ const DepinChatContactsDrawer = ({
                 <Text style={[styles.drawerItemName, stylesHook.text]}>{conversation.displayName}</Text>
                 <Text style={[styles.drawerItemSub, stylesHook.subtext]}>{shortAddr(conversation.address)}</Text>
               </View>
+              {conversation.unreadCount > 0 && <View style={styles.unreadDot} />}
             </Pressable>
           ))}
 
@@ -117,6 +122,8 @@ const styles = StyleSheet.create({
   drawerItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, columnGap: 12 },
   drawerAvatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   drawerItemInfo: { flex: 1 },
+  // Same green marker as the contacts button, so the two read as one signal.
+  unreadDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#22c55e' },
   drawerItemName: { fontSize: 14, fontWeight: '600' },
   drawerItemSub: { fontSize: 12, marginTop: 1 },
   drawerSection: { fontSize: 12, fontWeight: '700', paddingHorizontal: 14, paddingTop: 14, paddingBottom: 4, textTransform: 'uppercase' },

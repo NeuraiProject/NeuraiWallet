@@ -246,12 +246,20 @@ export function useDePINChat(params: {
   selectedAsset: string | null;
   identity: DepinChatIdentity | null;
   recipientList: RecipientInfo[];
+  /** Conversation currently on screen ('group' or a contact address) — its arrivals are already read. */
+  activeTab?: string;
   /** Connected NeuraiHW device — required when `identity.deviceBacked` (no local WIF). */
   device?: NeuraiESP32 | null;
   /** Called when the USB link dies (device rebooted/unplugged) so the owner can reconnect. */
   onDeviceLost?: () => void;
 }) {
-  const { rpc, selectedAsset, identity, recipientList, device = null, onDeviceLost } = params;
+  const { rpc, selectedAsset, identity, recipientList, activeTab = 'group', device = null, onDeviceLost } = params;
+  // The visible conversation is read by definition; keep it in a ref so message
+  // ingestion can consult it without re-creating the polling callbacks.
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
 
   // Device-backed identity (hardware wallet): sign/decrypt are routed to the
   // device instead of a local WIF. The device must have an active DePIN session
@@ -265,6 +273,24 @@ export function useDePINChat(params: {
   const [isPolling, setIsPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<PoolStats | null>(null);
+  /** Unread arrivals in the public group (private ones live in each conversation). */
+  const [groupUnread, setGroupUnread] = useState(0);
+
+  // Opening a conversation reads it: clear its badge as soon as it is on screen.
+  useEffect(() => {
+    if (activeTab === 'group') {
+      setGroupUnread(0);
+      return;
+    }
+    setPrivateConversations(prev => {
+      const conversation = prev.get(activeTab);
+      if (!conversation || conversation.unreadCount === 0) return prev;
+      const updated = new Map(prev);
+      updated.set(activeTab, { ...conversation, unreadCount: 0 });
+      return updated;
+    });
+  }, [activeTab, privateConversations]);
+
   const [lastPoll, setLastPoll] = useState<Date | null>(null);
 
   const effectiveAddress = identity?.address ?? null;
@@ -599,6 +625,9 @@ export function useDePINChat(params: {
     }
     if (newGroup.length > 0) {
       setGroupMessages(prev => [...prev, ...newGroup].sort((a, b) => a.timestamp - b.timestamp));
+      // Only count what the user is not looking at, and never your own echo.
+      const unseen = activeTabRef.current === 'group' ? 0 : newGroup.filter(m => m.sender !== myAddr).length;
+      if (unseen > 0) setGroupUnread(prev => prev + unseen);
     }
     if (privateUpdates.size > 0) {
       setPrivateConversations(prev => {
@@ -606,10 +635,13 @@ export function useDePINChat(params: {
         for (const [contact, msgs] of privateUpdates.entries()) {
           const existing = updated.get(contact);
           const all = existing ? [...existing.messages, ...msgs].sort((a, b) => a.timestamp - b.timestamp) : msgs;
+          // Messages landing in the open conversation are read on arrival, and
+          // your own outgoing ones never count.
+          const unseen = activeTabRef.current === contact ? 0 : msgs.filter(m => m.sender !== myAddr).length;
           updated.set(contact, {
             address: contact,
             displayName: contact === myAddr ? 'Me' : shortAddr(contact),
-            unreadCount: (existing?.unreadCount || 0) + msgs.length,
+            unreadCount: (existing?.unreadCount || 0) + unseen,
             lastMessageTime: Math.max(...all.map(m => m.timestamp)),
             messages: all,
           });
@@ -1043,6 +1075,9 @@ export function useDePINChat(params: {
   return {
     groupMessages,
     privateConversations,
+    groupUnread,
+    /** Unread across every conversation — drives the badge on the contacts button. */
+    totalUnread: groupUnread + Array.from(privateConversations.values()).reduce((sum, c) => sum + c.unreadCount, 0),
     isPolling,
     setIsPolling,
     error,
