@@ -26,8 +26,13 @@ import {
   subscribePoolSeen,
 } from '../blue_modules/neurai/depinPoolSeen';
 
-/** Deliberately slow: this only drives a marker, and the chat itself polls far more often when open. */
-const POOL_WATCH_INTERVAL_MS = 60_000;
+/**
+ * A few hundred bytes per check, shared across every card on the same network
+ * and never touching the device, so this can be brisk enough to feel live.
+ * Polling is the stopgap: once the node offers a WSS feed this whole hook
+ * becomes a subscription and the interval disappears.
+ */
+const POOL_WATCH_INTERVAL_MS = 15_000;
 
 /** Latest pool state per network, shared by every card watching that node. */
 const latest = new Map<NeuraiNetwork, { signature: string; at: number }>();
