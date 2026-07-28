@@ -31,6 +31,8 @@ import { BlurredBalanceView } from './BlurredBalanceView';
 import { useTheme } from './themes';
 import { Transaction, TWallet } from '../class/wallets/types';
 import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
+import { isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIdentity';
+import useDepinPoolWatch from '../hooks/useDepinPoolWatch';
 import { isTestnetChain } from '../blue_modules/neurai/networkConfig';
 import { BlueSpacing10 } from './BlueSpacing';
 import { useLocale } from '@react-navigation/native';
@@ -289,6 +291,11 @@ const iStyles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.5,
   },
+  // Sits under the asset count when that one is present; takes its slot when not.
+  depinBadgeStacked: { top: 66 },
+  depinBadgeStackedCompact: { top: 52 },
+  // Green label = the channel has messages this wallet has not read.
+  depinBadgeTextNew: { color: '#4ade80' },
   hwBadge: {
     position: 'absolute',
     bottom: 10,
@@ -391,6 +398,15 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
     // Count of Neurai assets (tokens) this wallet holds, read from the persisted
     // cache (no network / engine cost). Shown as a small badge on the card.
     const assetCount = isNeuraiWallet(item) ? item.getHeldAssetsCached().length : 0;
+    // DePIN chat availability + whether its channel moved since this wallet
+    // last read it. The check only talks to the configured node (never the
+    // hardware wallet) and is shared across cards on the same network.
+    const showDepinBadge = isNeuraiWallet(item) && !isPlaceHolder && isDepinChatSupportedNetwork(item.network);
+    const { hasNewMessages: depinHasNews } = useDepinPoolWatch({
+      enabled: showDepinBadge,
+      network: isNeuraiWallet(item) ? item.getNeuraiNetwork() : 'mainnet',
+      walletID: item.getID?.() ?? '',
+    });
 
     const animatePressScale = useCallback(
       (toValue: number) => {
@@ -533,6 +549,18 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
               {isNeuraiWallet(item) && !isPlaceHolder && assetCount > 0 && (
                 <View style={[iStyles.assetBadge, isCompact && iStyles.assetBadgeCompact]}>
                   <Text style={iStyles.assetBadgeText}>{loc.formatString(loc.assets.list_count, { count: assetCount })}</Text>
+                </View>
+              )}
+              {showDepinBadge && (
+                <View
+                  style={[
+                    iStyles.assetBadge,
+                    isCompact && iStyles.assetBadgeCompact,
+                    assetCount > 0 ? iStyles.depinBadgeStacked : null,
+                    assetCount > 0 && isCompact ? iStyles.depinBadgeStackedCompact : null,
+                  ]}
+                >
+                  <Text style={[iStyles.assetBadgeText, depinHasNews && iStyles.depinBadgeTextNew]}>{loc.depin.title}</Text>
                 </View>
               )}
               <View style={[iStyles.gradContent, isCompact && iStyles.gradContentCompact]}>

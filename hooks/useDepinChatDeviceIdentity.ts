@@ -95,12 +95,24 @@ export function useDepinChatDeviceIdentity(params: { enabled: boolean; network: 
     }
   }, [enabled, hw, network]);
 
-  // Tear the connection down if the feature gets disabled (e.g. wallet switch).
+  // Viewing another wallet only means this screen has nothing to show — it does
+  // not mean the owner is done with the device. Drop the local state but keep
+  // the link and the revealed identity cached, so coming back does not ask for
+  // the USB permission and another on-device approval. `reset()` stays for the
+  // explicit cases (device lost, user disconnects).
   useEffect(() => {
     if (!enabled) {
-      void reset();
+      setIdentity(null);
+      setPhase('idle');
+      setError(null);
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Enabled again with a link we still own: restore rather than re-ask.
+    if (liveDevice.current) {
+      deviceRef.current = liveDevice.current.device;
+      setIdentity(liveDevice.current.identity);
+      setPhase('ready');
+    }
   }, [enabled]);
 
   // A restored connection may be stale (device unplugged while we were away).

@@ -10,6 +10,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+
+import { withDevice } from './deviceQueue';
 import { createNeuraiESP32OverUsb, type NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native';
 import { createUsbSerialDriver, ensureUsbPermission, isUsbSupported, listNeuraiHwDevices } from './usbSerialDriver';
 
@@ -37,6 +39,13 @@ export interface UseNeuraiHwDeviceOptions {
   keepAliveOnUnmount?: boolean;
 }
 
+/**
+ * The one open link to the device, shared by every consumer. Only one handle to
+ * a USB serial port can be used safely: a second `connect()` while the DePIN
+ * chat holds the port would either fail or interleave traffic with signing.
+ */
+const sharedDevice: { current: NeuraiESP32 | null } = { current: null };
+
 export function useNeuraiHwDevice(options: UseNeuraiHwDeviceOptions = {}): UseNeuraiHwDevice {
   const { keepAliveOnUnmount = false } = options;
   const supported = isUsbSupported();
@@ -51,7 +60,14 @@ export function useNeuraiHwDevice(options: UseNeuraiHwDeviceOptions = {}): UseNe
     return () => {
       mounted.current = false;
       if (keepAliveOnUnmount) return; // caller keeps the link and closes it itself
-      // Best-effort close on unmount.
+      // The link is shared: closing it here would cut off whoever else is still
+      // using it (the DePIN chat holds one across navigation). Only drop our
+      // reference; the port closes on an explicit `disconnect` or when the
+      // device stops answering.
+      if (deviceRef.current && deviceRef.current === sharedDevice.current) {
+        deviceRef.current = null;
+        return;
+      }
       deviceRef.current?.disconnect().catch(() => {});
       deviceRef.current = null;
     };
@@ -60,6 +76,7 @@ export function useNeuraiHwDevice(options: UseNeuraiHwDeviceOptions = {}): UseNe
   const disconnect = useCallback(async () => {
     const current = deviceRef.current;
     deviceRef.current = null;
+    if (sharedDevice.current === current) sharedDevice.current = null;
     if (current) {
       try {
         await current.disconnect();
@@ -79,6 +96,19 @@ export function useNeuraiHwDevice(options: UseNeuraiHwDeviceOptions = {}): UseNe
       setStatus('unsupported');
       setError('USB serial is only available on Android');
       return null;
+    }
+
+    // Reuse a link another screen already opened, if it still answers.
+    if (sharedDevice.current) {
+      try {
+        await withDevice(() => sharedDevice.current!.ping());
+        deviceRef.current = sharedDevice.current;
+        setDevice(sharedDevice.current);
+        setStatus('connected');
+        return sharedDevice.current;
+      } catch {
+        sharedDevice.current = null; // stale — fall through and open a fresh one
+      }
     }
 
     setStatus('connecting');
@@ -106,6 +136,7 @@ export function useNeuraiHwDevice(options: UseNeuraiHwDeviceOptions = {}): UseNe
       }
 
       deviceRef.current = esp32;
+      sharedDevice.current = esp32;
       setDevice(esp32);
       setStatus('connected');
       return esp32;

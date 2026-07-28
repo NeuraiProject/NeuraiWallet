@@ -13,19 +13,19 @@
  * The marker therefore means "this channel has new messages", which may include
  * messages you will not be able to read.
  *
- * The signature is stored per network (the pool belongs to the configured node,
- * not to an address), so it works before any wallet identity is available.
+ * The signature is stored per wallet, not per node: two wallets can watch the
+ * same channel, and reading it in one must not silence the marker in the other.
+ * A wallet id is available without touching the device, which a DePIN address
+ * is not on a hardware wallet.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-import type { NeuraiNetwork } from './networkConfig';
 
 const KEY_PREFIX = 'depin_pool_seen_';
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
 /** In-memory mirror so reads are synchronous after the first hydration. */
-const seen = new Map<NeuraiNetwork, string>();
+const seen = new Map<string, string>();
 
 /** Fingerprint of a pool state: `total_messages|newest_message`. */
 export const poolSignature = (stats: { total_messages?: unknown; newest_message?: unknown } | null | undefined): string =>
@@ -34,26 +34,26 @@ export const poolSignature = (stats: { total_messages?: unknown; newest_message?
 /** An empty pool answer carries no information — do not treat it as a state. */
 export const isMeaningfulSignature = (signature: string): boolean => signature !== '|';
 
-export async function loadSeenSignature(network: NeuraiNetwork): Promise<string | null> {
-  if (seen.has(network)) return seen.get(network) ?? null;
+export async function loadSeenSignature(walletID: string): Promise<string | null> {
+  if (seen.has(walletID)) return seen.get(walletID) ?? null;
   try {
-    const stored = await AsyncStorage.getItem(KEY_PREFIX + network);
-    if (stored) seen.set(network, stored);
+    const stored = await AsyncStorage.getItem(KEY_PREFIX + walletID);
+    if (stored) seen.set(walletID, stored);
     return stored;
   } catch {
     return null;
   }
 }
 
-export function getSeenSignature(network: NeuraiNetwork): string | null {
-  return seen.get(network) ?? null;
+export function getSeenSignature(walletID: string): string | null {
+  return seen.get(walletID) ?? null;
 }
 
 /** Record the channel as read up to this pool state and wake any watcher. */
-export function markPoolSeen(network: NeuraiNetwork, signature: string): void {
-  if (!isMeaningfulSignature(signature) || seen.get(network) === signature) return;
-  seen.set(network, signature);
-  AsyncStorage.setItem(KEY_PREFIX + network, signature).catch(() => {});
+export function markPoolSeen(walletID: string, signature: string): void {
+  if (!walletID || !isMeaningfulSignature(signature) || seen.get(walletID) === signature) return;
+  seen.set(walletID, signature);
+  AsyncStorage.setItem(KEY_PREFIX + walletID, signature).catch(() => {});
   listeners.forEach(listener => listener());
 }
 

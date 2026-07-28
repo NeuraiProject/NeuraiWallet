@@ -94,6 +94,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const { hasNewMessages: hasNewDepinMessages } = useDepinPoolWatch({
     enabled: showDepinTab,
     network: isNeuraiWallet(wallet) ? wallet.getNeuraiNetwork() : 'mainnet',
+    walletID,
   });
 
   // On the DePIN tab, back (hardware button or header arrow) walks one level

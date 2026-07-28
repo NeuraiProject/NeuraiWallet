@@ -8,10 +8,14 @@
  * decryption (and the device round-trips it costs) still happens only when the
  * user opens the chat.
  *
+ * The wallet list renders one card per wallet and they all watch the same node,
+ * so the fetch is shared per network and only the comparison is per wallet —
+ * ten cards still make one request.
+ *
  * The marker means "the channel has new traffic" — whether a given message is
  * addressed to this wallet can only be known by decrypting it.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { getDepinRpcBackend, loadDepinRpcOverrides, type NeuraiNetwork } from '../blue_modules/neurai';
 import {
@@ -22,25 +26,50 @@ import {
   subscribePoolSeen,
 } from '../blue_modules/neurai/depinPoolSeen';
 
-/** Deliberately slow: this only drives a dot, and the chat itself polls far more often when open. */
+/** Deliberately slow: this only drives a marker, and the chat itself polls far more often when open. */
 const POOL_WATCH_INTERVAL_MS = 60_000;
 
-export function useDepinPoolWatch(params: { enabled: boolean; network: NeuraiNetwork }): { hasNewMessages: boolean } {
-  const { enabled, network } = params;
+/** Latest pool state per network, shared by every card watching that node. */
+const latest = new Map<NeuraiNetwork, { signature: string; at: number }>();
+const inFlight = new Map<NeuraiNetwork, Promise<void>>();
+const watchers = new Set<() => void>();
+
+async function refreshLatest(network: NeuraiNetwork): Promise<void> {
+  const cached = latest.get(network);
+  if (cached && Date.now() - cached.at < POOL_WATCH_INTERVAL_MS - 1_000) return;
+  const pending = inFlight.get(network);
+  if (pending) return pending;
+
+  const request = (async () => {
+    try {
+      await loadDepinRpcOverrides();
+      const stats = await getDepinRpcBackend(network).rpc<{ total_messages?: unknown; newest_message?: unknown }>('depinpoolstats', []);
+      latest.set(network, { signature: poolSignature(stats), at: Date.now() });
+      watchers.forEach(notify => notify());
+    } catch {
+      // Node unreachable: keep the previous state rather than clearing markers.
+    }
+  })().finally(() => inFlight.delete(network));
+
+  inFlight.set(network, request);
+  return request;
+}
+
+export function useDepinPoolWatch(params: { enabled: boolean; network: NeuraiNetwork; walletID: string }): { hasNewMessages: boolean } {
+  const { enabled, network, walletID } = params;
   const [hasNewMessages, setHasNewMessages] = useState(false);
-  const latestSignatureRef = useRef<string | null>(null);
 
   const evaluate = useCallback(() => {
-    const latest = latestSignatureRef.current;
-    if (!latest || !isMeaningfulSignature(latest)) {
+    const current = latest.get(network)?.signature;
+    if (!current || !isMeaningfulSignature(current)) {
       setHasNewMessages(false);
       return;
     }
-    const seen = getSeenSignature(network);
+    const seen = getSeenSignature(walletID);
     // Nothing seen yet: treat the current state as the baseline rather than
-    // greeting a first-time user with a permanent dot.
-    setHasNewMessages(seen != null && seen !== latest);
-  }, [network]);
+    // greeting a first-time user with a permanent marker.
+    setHasNewMessages(seen != null && seen !== current);
+  }, [network, walletID]);
 
   useEffect(() => {
     if (!enabled) {
@@ -49,33 +78,29 @@ export function useDepinPoolWatch(params: { enabled: boolean; network: NeuraiNet
     }
     let cancelled = false;
 
-    const check = async () => {
-      try {
-        await loadDepinRpcOverrides();
-        const stats = await getDepinRpcBackend(network).rpc<{ total_messages?: unknown; newest_message?: unknown }>('depinpoolstats', []);
-        if (cancelled) return;
-        latestSignatureRef.current = poolSignature(stats);
-        evaluate();
-      } catch {
-        // Node unreachable: leave the marker as it is rather than clearing it.
-      }
+    const tick = () => {
+      refreshLatest(network).then(() => {
+        if (!cancelled) evaluate();
+      });
     };
 
     (async () => {
-      await loadSeenSignature(network);
-      if (!cancelled) check();
+      await loadSeenSignature(walletID);
+      if (!cancelled) tick();
     })();
 
-    const interval = setInterval(check, POOL_WATCH_INTERVAL_MS);
+    const interval = setInterval(tick, POOL_WATCH_INTERVAL_MS);
+    watchers.add(evaluate);
     // Reading the chat updates the stored signature — reflect it immediately
     // instead of waiting out the next tick.
     const unsubscribe = subscribePoolSeen(evaluate);
     return () => {
       cancelled = true;
       clearInterval(interval);
+      watchers.delete(evaluate);
       unsubscribe();
     };
-  }, [enabled, network, evaluate]);
+  }, [enabled, network, walletID, evaluate]);
 
   return { hasNewMessages };
 }

@@ -29,7 +29,6 @@ import {
   type DepinServerWrapResult,
   wrapMessageForServer,
 } from '../blue_modules/neurai/depinMsg';
-import type { NeuraiNetwork } from '../blue_modules/neurai';
 import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
 import { clearDepinSession, loadDepinSession, saveDepinSession } from '../blue_modules/neurai/depinSessionStore';
 import { withDevice } from '../blue_modules/neurai-hw/deviceQueue';
@@ -250,14 +249,14 @@ export function useDePINChat(params: {
   recipientList: RecipientInfo[];
   /** Conversation currently on screen ('group' or a contact address) — its arrivals are already read. */
   activeTab?: string;
-  /** Network of the configured DePIN node, for the shared "already seen" marker. */
-  network: NeuraiNetwork;
+  /** Wallet showing the chat, for the per-wallet "already seen" marker. */
+  walletID: string;
   /** Connected NeuraiHW device — required when `identity.deviceBacked` (no local WIF). */
   device?: NeuraiESP32 | null;
   /** Called when the USB link dies (device rebooted/unplugged) so the owner can reconnect. */
   onDeviceLost?: () => void;
 }) {
-  const { rpc, selectedAsset, identity, recipientList, activeTab = 'group', network, device = null, onDeviceLost } = params;
+  const { rpc, selectedAsset, identity, recipientList, activeTab = 'group', walletID, device = null, onDeviceLost } = params;
   // The visible conversation is read by definition; keep it in a ref so message
   // ingestion can consult it without re-creating the polling callbacks.
   const activeTabRef = useRef(activeTab);
@@ -670,7 +669,7 @@ export function useDePINChat(params: {
       // Opening the chat is what marks the channel as read, so record the state
       // we are about to display — this is what clears the wallet's new-message
       // dot without any decryption.
-      if (isMeaningfulSignature(signature)) markPoolSeen(network, signature);
+      if (isMeaningfulSignature(signature)) markPoolSeen(walletID, signature);
       if (isMeaningfulSignature(signature) && signature === lastPoolSignatureRef.current) {
         setLastPoll(new Date());
         return;
@@ -857,7 +856,7 @@ export function useDePINChat(params: {
     renewDeviceSession,
     handleDeviceLost,
     confirmDeviceGone,
-    network,
+    walletID,
   ]);
 
   // Automatic polling every 5s while connected.
@@ -1034,6 +1033,17 @@ export function useDePINChat(params: {
       if (isPrivate && targetAddress) {
         rememberPrivateRecipient(built.messageHash, targetAddress);
         if (typeof result === 'string' && result !== built.messageHash) rememberPrivateRecipient(result, targetAddress);
+      }
+
+      // Sending changes the pool too. Record the new state right away, otherwise
+      // leaving the chat before the next poll leaves the wallet flagging the
+      // user's own message as unread.
+      try {
+        const pool = (await rpc('depinpoolstats', [])) as { total_messages?: unknown; newest_message?: unknown } | null;
+        const signature = poolSignature(pool);
+        if (isMeaningfulSignature(signature)) markPoolSeen(walletID, signature);
+      } catch {
+        // Non-fatal: the next poll will catch up.
       }
       return result;
     },
