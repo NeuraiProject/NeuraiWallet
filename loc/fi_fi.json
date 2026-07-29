@@ -212,7 +212,6 @@
     "about_free": "NeuraiWallet on ilmainen ja avoimen lähdekoodin projekti. Bitcoin käyttäjien tekemä.",
     "about_license": "MIT-lisenssi",
     "about_release_notes": "Julkaisutiedot",
-    "about_review": "Jätä meille arvostelu",
     "performance_score": "Suorituskykypisteet: {num}",
     "run_performance_test": "Testin suorituskyky",
     "about_selftest": "Suorita itsetestaus",
@@ -298,8 +297,6 @@
     "privacy_quickactions": "Lompakon Pikanäppäimet",
     "privacy_quickactions_explanation": "Kosketa ja pidä Aloitusnäytön NeuraiWallet-sovelluskuvaketta nähdäksesi nopeasti lompakon saldon.",
     "privacy_clipboard_explanation": "Toimita pikakuvakkeet, jos leikepöydältä löytyy osoite tai lasku.",
-    "privacy_do_not_track": "Poista analytiikka käytöstä",
-    "privacy_do_not_track_explanation": "Suorituskyky- ja luotettavuustietoja ei lähtetä analysoitavaksi.",
     "rate": "Vaihtokurssi",
     "push_notifications_explanation": "Kun otat ilmoitukset käyttöön, laitetunnuksesi lähetetään palvelimelle yhdessä lompakkojen osoitteiden ja tapahtumatunnusten kanssa kaikille ilmoitusten käyttöönoton jälkeen tehdyille lompakoille ja tapahtumille. Laitetunnusta käytetään ilmoitusten lähettämiseen, ja lompakkotietojen avulla voimme ilmoittaa sinulle saapuvista Bitcoineista tai tapahtumavahvistuksista.\n\nVain ilmoitusten käyttöönoton jälkeiset tiedot lähetetään – mitään sitä edeltävältä ajalta ei kerätä.\n\nIlmoitusten poistaminen käytöstä poistaa kaikki nämä tiedot palvelimelta. Lisäksi lompakon poistaminen sovelluksesta poistaa myös siihen liittyvät tiedot palvelimelta.",
     "selfTest": "Itsetestaus ",
@@ -374,8 +371,6 @@
     "custom_fee_warning_title": "Varoitus"
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Yksinkertainen ja tehokas Bitcoin-lompakko",
     "add_create": "Luo",
     "total_balance": "Kokonaissaldo",
     "add_entropy_reset_title": "Nollaa Entropia",
@@ -386,8 +381,6 @@
     "add_entropy_provide": "Hanki entropia nopanheiton kautta",
     "add_entropy_remain": "{gen} tavua luotua entropiaa. Jäljellä olevat {rem} tavut saadaan Järjestelmän satunnaislukugeneraattorilta.",
     "add_import_wallet": "Tuo lompakko",
-    "add_lightning": "Salama",
-    "add_lightning_explain": "Käytetään välittömiin siirtotapahtumiin",
     "add_lndhub": "Yhdistä omaan LNDhubiin",
     "add_lndhub_placeholder": "solmusi osoite",
     "add_placeholder": "minun lompakkoni",
@@ -495,9 +488,7 @@
     "explanation": "Näe kaikkien lompakkojen yhteenlasketun saldon yleiskatsausnäytössä."
   },
   "multisig": {
-    "multisig_vault": "Multisig Vault",
     "default_label": "Multisig Vault",
-    "multisig_vault_explain": "Paras turvallisuus suurille summille",
     "provide_signature": "Toimita allekirjoitus",
     "provide_signature_next_steps": "Skannaa tai tuo allekirjoitettu siirtotapahtuma",
     "vault_key": "Vault-avain {number}",

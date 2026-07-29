@@ -207,7 +207,6 @@
     "about_free": "NeuraiWallet é um projeto de código aberto e gratuito. Criado por usuários de Bitcoin.",
     "about_license": "Licença MIT",
     "about_release_notes": "Notas de versão",
-    "about_review": "Avalie a gente",
     "performance_score": "Pontuação de performance: {num}",
     "run_performance_test": "Teste de performance",
     "about_selftest": "Executar autoteste",
@@ -292,8 +291,6 @@
     "privacy_quickactions": "Atalhos da carteira",
     "privacy_quickactions_explanation": "Toque e segure o ícone do aplicativo NeuraiWallet para visualizar rapidamente o saldo da sua carteira.",
     "privacy_clipboard_explanation": "Fornece atalhos se endereços ou faturas são encontrados na área de transferência.",
-    "privacy_do_not_track": "Desativar analítica",
-    "privacy_do_not_track_explanation": "Informações de confiabilidade e desempenho não serão enviadas para análise.",
     "rate": "Taxa",
     "push_notifications_explanation": "Ao habilitar as notificações, o token do seu dispositivo será enviado ao servidor, junto com endereços de carteira e IDs de transação para todas as carteiras e transações feitas após habilitar as notificações. O token do dispositivo é usado para enviar notificações, e as informações da carteira nos permitem notificá-lo sobre Bitcoins recebidos ou confirmações de transações.\n\nSomente informações após você habilitar as notificações são transmitidas — nada anterior é coletado..\n\nDesabilitar notificações removerá todas essas informações do servidor. Além disso, excluir uma carteira do aplicativo também removerá suas informações associadas do servidor.",
     "selfTest": "Autoteste",
@@ -370,8 +367,6 @@
     "watchOnlyWarningDescription": "Tenha cuidado com golpistas que costumam usar carteiras “watch-only (somente para assistir)” para enganar os usuários. Essas carteiras não permitem controlar ou enviar fundos; eles apenas permitem que você visualize o saldo."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Carteira Bitcoin simples e poderosa",
     "add_create": "Criar",
     "total_balance": "Saldo total",
     "add_entropy_reset_title": "Resetar Entropia",
@@ -382,8 +377,6 @@
     "add_entropy_provide": "Fornecer entropia por meio da rolagem de dados",
     "add_entropy_remain": "{gen} bytes de entropia gerada. Os bytes {rem} restantes serão obtidos do gerador de números aleatórios do Sistema.",
     "add_import_wallet": "Importar carteira",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Para gastar com transações instantâneas",
     "add_lndhub": "Conectar ao seu LNDHub",
     "add_lndhub_error": "O endereço do nó fornecido é um nó LNDHub inválido",
     "add_lndhub_placeholder": "Seu endereço de nó",
@@ -493,9 +486,7 @@
     "explanation": "Veja o saldo total de todas as suas carteiras na tela pricinpal."
   },
   "multisig": {
-    "multisig_vault": "Cofre Multisig",
     "default_label": "Cofre Multisig",
-    "multisig_vault_explain": "Melhor segurança para grandes valores",
     "provide_signature": "Fornecer assinatura",
     "provide_signature_details": "Use seu dispositivo e carteira onde a chave está localizada para assinar esta transação",
     "provide_signature_details_bluewallet": "Na NeuraiWallet, vá a tela de Enviar e selecione",

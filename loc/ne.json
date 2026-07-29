@@ -166,7 +166,6 @@
     "about_backup": "सधैं आफ्नो सांचो सेव गर्नुहोस !",
     "about_free": "NeuraiWallet एक बिटकोइन प्रयोगकर्ताहरू द्वारा बनाईएको नि:शुल्क र खुला स्रोत परियोजना हो।",
     "about_release_notes": "नोटहरू जारी गर्नुहोस्",
-    "about_review": "हामीलाई एक विश्लेषण छोड्नुहोस्",
     "performance_score": "प्रदर्शन स्कोर: {num}",
     "run_performance_test": "परीक्षा प्रदर्शन",
     "about_selftest": "आत्म परीक्षण गर्नुहोस्",
@@ -231,13 +230,10 @@
     "status_cancel": "लेनदेन क्यान्सिल "
   },
   "wallets": {
-    "add_bitcoin": "बिटकोइन",
-    "add_bitcoin_explain": "सजिलो र शक्तिशाली बिटकोइन वालेट",
     "add_create": "सिर्जना गर्नुहोस्",
     "total_balance": "पूरा रकम",
     "add_entropy": "एन्ट्रोपी",
     "add_import_wallet": "वालेट आयात गर्नुहोस्",
-    "add_lightning": "लाइटनिङ",
     "add_placeholder": "मेरो पहिलो वालेट",
     "add_title": "वालेट थप्नुहोस्",
     "add_wallet_name": "नाम",

@@ -188,7 +188,6 @@
     "about_free": "NeuraiWallet è un progetto libero ed open-source. Realizzato da utenti Bitcoin.",
     "about_license": "Licenza MIT",
     "about_release_notes": "Note di rilascio",
-    "about_review": "Lasciaci una recensione",
     "performance_score": "Punteggio prestazioni: {num}",
     "run_performance_test": "Testa le prestazioni",
     "about_selftest": "Esegui auto-test",
@@ -245,8 +244,6 @@
     "privacy_system_settings": "Impostazioni di sistema",
     "privacy_quickactions": "Scorciatoie Wallet",
     "privacy_clipboard_explanation": "Fornisci scorciatoie se viene rilevato un indirizzo o una ricevuta nella tua clipboard.",
-    "privacy_do_not_track": "Disattiva Analytics",
-    "privacy_do_not_track_explanation": "Le informazioni circa la performance e l'affidabilità non saranno inviati per l'analisi.",
     "rate": "Tariffa",
     "selfTest": "Auto-Test",
     "save": "Salva",
@@ -305,8 +302,6 @@
     "updating": "Aggiornamento..."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Portafoglio Bitcoin semplice e potente",
     "add_create": "Crea",
     "total_balance": "Saldo totale",
     "add_entropy": "Entropia",
@@ -314,8 +309,6 @@
     "add_entropy_provide": "Fornisci entropia con dei lanci di dadi",
     "add_entropy_remain": "{gen} byte di entropia generata. I restanti {rem} byte saranno ottenuti da generatore di numeri casuali del sistema operativo.",
     "add_import_wallet": "Importa Portafoglio",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Per invio con transazioni istantanee",
     "add_lndhub_placeholder": "L'indirizzo del tuo nodo",
     "add_placeholder": "Il mio primo wallet",
     "add_title": "Aggiungi Portafoglio",
@@ -389,9 +382,7 @@
     "title": "Saldo totale"
   },
   "multisig": {
-    "multisig_vault": "Cassaforte Multisig",
     "default_label": "Cassaforte Multisig",
-    "multisig_vault_explain": "La miglior sicurezza per grossi importi",
     "provide_signature": "Fornisci la firma",
     "vault_key": "chiave Vault {number}",
     "required_keys_out_of_total": "Chiavi richieste sul totale",

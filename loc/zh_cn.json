@@ -215,7 +215,6 @@
     "about_free": "NeuraiWallet 是一个自由且开源的项目，由比特币用户打造。",
     "about_license": "麻省理工学院许可证",
     "about_release_notes": "更新日志",
-    "about_review": "给我们写个评价",
     "performance_score": "性能评分：{num}",
     "run_performance_test": "测试性能",
     "about_selftest": "运行自检",
@@ -309,8 +308,6 @@
     "privacy_quickactions": "钱包快捷方式",
     "privacy_quickactions_explanation": "长按 NeuraiWallet 应用程序图标即可快速查看钱包余额。",
     "privacy_clipboard_explanation": "如果在剪贴板中发现地址或发票，则提供快捷方式。",
-    "privacy_do_not_track": "禁用数据分析功能",
-    "privacy_do_not_track_explanation": "性能和可靠性信息将不会被提交用于数据分析。",
     "rate": "汇率",
     "push_notifications_explanation": "启用通知后，您的设备令牌将被发送到服务器，同时还会发送启用通知后所有钱包及交易的地址和交易 ID。设备令牌用于发送通知，而钱包信息则用于通知您比特币到账或交易确认情况。\n\n仅会传输您启用通知之后的信息——启用之前的信息不会被收集。\n\n禁用通知将从服务器中删除所有这些信息。此外，从应用中删除钱包也会删除该钱包在服务器上的相关信息。",
     "selfTest": "自检",
@@ -390,8 +387,6 @@
     "custom_fee_warning_description": "低于 1 聪/字节的矿工费是有效的，但可能由于节点政策而无法被转发。 "
   },
   "wallets": {
-    "add_bitcoin": "比特币",
-    "add_bitcoin_explain": "简洁而强大的比特币钱包",
     "add_create": "创建",
     "total_balance": "总余额",
     "add_entropy_reset_title": "重置熵",
@@ -402,8 +397,6 @@
     "add_entropy_provide": "通过掷骰子提供熵",
     "add_entropy_remain": "已生成 {gen} 字节熵。剩余 {rem} 字节将由系统随机数生成器提供。",
     "add_import_wallet": "导入钱包",
-    "add_lightning": "闪电网络",
-    "add_lightning_explain": "用于即时交易支出",
     "add_lndhub": "连接到您的闪电网络守护节点集线器（LNDhub）",
     "add_lndhub_error": "提供的节点地址是无效的闪电网络守护节点集线器（LNDhub）节点。",
     "add_lndhub_placeholder": "您的节点地址",
@@ -514,9 +507,7 @@
     "explanation": "在总览界面查看所有钱包的总余额。"
   },
   "multisig": {
-    "multisig_vault": "多重签名金库",
     "default_label": "多重签名金库",
-    "multisig_vault_explain": "大额资金的最佳安全保障",
     "provide_signature": "提供签名",
     "provide_signature_details": "使用存储密钥的设备和钱包对交易进行签名 ",
     "provide_signature_details_bluewallet": "在 NeuraiWallet 中，前往“发送”界面菜单并选择 ",

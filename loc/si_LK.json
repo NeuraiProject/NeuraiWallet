@@ -162,7 +162,6 @@
     "about_free": "බ්ලූවොලට් යනු නිදහස් හා විවෘත මූලාශ්‍ර ව්‍යාපෘතියකි. බිට්කොයින් භාවිත කරන්නන් විසින් සකස් කරන ලදි.",
     "about_license": "එම්.අයි.ටී බලපත්‍රය",
     "about_release_notes": "මුදා හැරීමේ සටහන්",
-    "about_review": "අපට සමාලෝචනයක් තබන්න",
     "about_selftest": "ස්වයං පරීක්‍ෂණයක් කරන්න",
     "about_selftest_electrum_disabled": "ඉලෙක්ට්‍රෝම් නොබැඳි මාදිලිය සමඟ ස්වයං පරීක්‍ෂා කිරීම නොමැත. කරුණාකර නොබැඳි ප්‍රකාරය අක්‍රිය කර නැවත උත්සාහ කරන්න.",
     "about_selftest_ok": "සියලුම අභ්‍යන්තර පරීක්‍ෂණ සාර්ථකව සමත් වී ඇත. පසුම්බිය හොඳින් ක්‍රියා කරයි.",
@@ -217,8 +216,6 @@
     "privacy_system_settings": "පද්ධති සැකසීම්",
     "privacy_quickactions": "පසුම්බි කෙටිමං",
     "privacy_clipboard_explanation": "ඔබේ පසුරු පුවරුවේ ලිපිනයක් හෝ ඉන්වොයිසියක් හමු වුවහොත් කෙටිමං ලබා දෙන්න.",
-    "privacy_do_not_track": "විශ්ලේෂණ අක්‍රීය කරන්න",
-    "privacy_do_not_track_explanation": "විශ්ලේෂණය සඳහා කාර්ය සාධනය සහ විශ්වසනීයත්ව තොරතුරු ඉදිරිපත් නොකෙරේ.",
     "rate": "අනුපාතය",
     "selfTest": "ස්වයං පරීක්ෂණය",
     "save": "සුරකින්න",
@@ -275,8 +272,6 @@
     "updating": "යාවත්කාලීන කරමින් ..."
   },
   "wallets": {
-    "add_bitcoin": "බිට්කොයින්",
-    "add_bitcoin_explain": "සරල හා බලවත් බිට්කොයින් පසුම්බිය",
     "add_create": "සාදන්න",
     "total_balance": "මුළු ශේෂය",
     "add_entropy": "එන්ට්‍රොපි",
@@ -284,8 +279,6 @@
     "add_entropy_provide": "Provide entropy via dice rolls",
     "add_entropy_remain": "උත්පාදනය කරන ලද එන්ට්‍රොපි බයිට් {gen}. ඉතිරි {rem} බයිට් පද්ධති අහඹු අංක උත්පාදක යන්ත්‍රයෙන් ලබා ගනු ඇත.",
     "add_import_wallet": "මුදල් පසුම්බිය ආනයනය කරන්න",
-    "add_lightning": "ලයිට්නින්",
-    "add_lightning_explain": "ක්‍ෂණික ගනුදෙනු සමඟ වියදම් කිරීම සඳහා",
     "add_lndhub_placeholder": "ඔබේ නෝඩ් ලිපිනය",
     "add_placeholder": "මගේ පළමු මුදල් පසුම්බිය",
     "add_title": "පසුම්බිය එකතු කරන්න",
@@ -358,9 +351,7 @@
     "title": "මුළු ශේෂය"
   },
   "multisig": {
-    "multisig_vault": "බහු සිග් සුරක්ෂිතාගාරය",
     "default_label": "බහු සිග් සුරක්ෂිතාගාරය",
-    "multisig_vault_explain": "විශාල ප්‍රමාණයක් සඳහා හොඳම ආරක්‍ෂාව",
     "provide_signature": "අත්සන ලබා දෙන්න",
     "vault_key": "සුරක්ෂිතාගාර යතුර {number}",
     "required_keys_out_of_total": "යතුරු එකතුවෙන් අවශ්‍ය යතුරු",

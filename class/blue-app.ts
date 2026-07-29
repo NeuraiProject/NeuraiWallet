@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sha256 } from '@noble/hashes/sha256';
-import DefaultPreference from 'react-native-default-preference';
 import RNFS from 'react-native-fs';
 import Keychain from 'react-native-keychain';
 import RNSecureKeyStore, { ACCESSIBLE } from 'react-native-secure-key-store';
@@ -50,12 +49,11 @@ const isReactNative = typeof navigator !== 'undefined' && navigator?.product ===
 
 export class BlueApp {
   static FLAG_ENCRYPTED = 'data_encrypted';
-  static DO_NOT_TRACK = 'donottrack';
   static HANDOFF_STORAGE_KEY = 'HandOff';
 
   private static _instance: BlueApp | null = null;
 
-  static keys2migrate = [BlueApp.HANDOFF_STORAGE_KEY, BlueApp.DO_NOT_TRACK];
+  static keys2migrate = [BlueApp.HANDOFF_STORAGE_KEY];
 
   public cachedPassword?: false | string;
   public tx_metadata: TTXMetadata;
@@ -686,31 +684,6 @@ export class BlueApp {
 
   setIsHandoffEnabled = async (value: boolean): Promise<void> => {
     await AsyncStorage.setItem(BlueApp.HANDOFF_STORAGE_KEY, value ? '1' : '');
-  };
-
-  isDoNotTrackEnabled = async (): Promise<boolean> => {
-    try {
-      const keyExists = await AsyncStorage.getItem(BlueApp.DO_NOT_TRACK);
-      if (keyExists !== null) {
-        const doNotTrackValue = !!keyExists;
-        if (doNotTrackValue) {
-          await DefaultPreference.set(BlueApp.DO_NOT_TRACK, '1');
-          AsyncStorage.removeItem(BlueApp.DO_NOT_TRACK);
-        } else {
-          return Boolean(await DefaultPreference.get(BlueApp.DO_NOT_TRACK));
-        }
-      }
-    } catch (_) {}
-    const doNotTrackValue = await DefaultPreference.get(BlueApp.DO_NOT_TRACK);
-    return doNotTrackValue === '1' || false;
-  };
-
-  setDoNotTrack = async (value: boolean) => {
-    if (value) {
-      await DefaultPreference.set(BlueApp.DO_NOT_TRACK, '1');
-    } else {
-      await DefaultPreference.clear(BlueApp.DO_NOT_TRACK);
-    }
   };
 
   /**

@@ -165,7 +165,6 @@
     "about_free": "NeuraiWallet er et gratis og åpent kildekode-prosjekt. Laget av Bitcoin-brukere.",
     "about_license": "MIT License",
     "about_release_notes": "Versjonsmerknader",
-    "about_review": "Gi oss en anmeldelse",
     "about_selftest": "Kjør selvtest",
     "about_selftest_electrum_disabled": "Selvtesting er ikke tilgjengelig med Electrum Offline Mode. Deaktiver offline-modus og prøv igjen.",
     "about_selftest_ok": "Alle interne tester har bestått. Lommeboken fungerer bra.",
@@ -220,8 +219,6 @@
     "privacy_system_settings": "Systeminnstillinger",
     "privacy_quickactions": "Lommebok-snarveier",
     "privacy_clipboard_explanation": "Oppgi snarveier hvis en adresse eller faktura er funnet i utklippstavlen.",
-    "privacy_do_not_track": "Deaktiver Analyse",
-    "privacy_do_not_track_explanation": "Informasjon om ytelse og pålitelighet vil ikke bli sendt inn for analyse.",
     "rate": "Rate",
     "selfTest": "Selvtest",
     "save": "Lagre",
@@ -279,8 +276,6 @@
     "updating": "Oppdaterer..."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Enkel og kraftig Bitcoin-lommebok",
     "add_create": "Opprett",
     "total_balance": "Total balanse",
     "add_entropy": "Entropi",
@@ -288,8 +283,6 @@
     "add_entropy_provide": "Gi entropi via terningkast",
     "add_entropy_remain": "{gen} bytes med generert entropi. Gjenværende {rem} bytes vil bli hentet fra systemet sin tilfeldige tallgenerator.",
     "add_import_wallet": "Importer lommebok",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "For betaling med umiddelbare transaksjoner",
     "add_lndhub_placeholder": "Din nodeadresse",
     "add_placeholder": "min første lommebok",
     "add_title": "Legg til lommebok",
@@ -362,9 +355,7 @@
     "title": "Total balanse"
   },
   "multisig": {
-    "multisig_vault": "Multisig Vault",
     "default_label": "Multisig Vault",
-    "multisig_vault_explain": "Beste sikkerhet for store beløp",
     "provide_signature": "Skriv signatur",
     "vault_key": "Vault-nøkkel {number}",
     "required_keys_out_of_total": "Nødvendige nøkler av totalen",

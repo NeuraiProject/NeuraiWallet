@@ -197,7 +197,6 @@
     "about_backup": "همیشه ز کیلیتا خوتۉݩ نوسخه لادرار بگیرین!",
     "about_license": "پروانه ام آی تی",
     "about_release_notes": "ویرداشتا انتشار",
-    "about_review": "سی ایما یه واجۊری بنین",
     "performance_score": "امتیاز کارکرد: {num}",
     "run_performance_test": "واجۊری کارکرد",
     "about_selftest": "ره وندن خوس آزمایی",
@@ -259,7 +258,6 @@
     "privacy_read_clipboard": "خوندن ویرگه",
     "privacy_system_settings": "سامووا دسگا",
     "privacy_quickactions": "ر نهنگا کیف پیل",
-    "privacy_do_not_track": "قیر فعال کردن تئلیل",
     "rate": "نرخ",
     "selfTest": "خوس ازمایی",
     "save": "زفت کردن",
@@ -292,7 +290,6 @@
     "open_url_error": "نا مووفق منه گۊشیڌن لینگ وا گشت گر پؽش فرز. گشت گر پؽش فرز خوته آلشت کوݩ ۉ ز نۊ تفره کو."
   },
   "wallets": {
-    "add_bitcoin": "بیت کوین",
     "add_create": "وورکل",
     "total_balance": "پوی مۉجۊدی",
     "add_entropy": "آنتروپی",

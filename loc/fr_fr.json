@@ -212,7 +212,6 @@
     "about_free": "NeuraiWallet est un projet gratuit et ouvert. Réalisé par des utilisateurs de Bitcoin.",
     "about_license": "License MIT",
     "about_release_notes": "Notes de version",
-    "about_review": "Laissez-nous votre avis",
     "performance_score": "Score performance: {num}",
     "run_performance_test": "Test performance",
     "about_selftest": "Effectuer un auto-test",
@@ -299,8 +298,6 @@
     "privacy_quickactions": "Raccourci Portefeuille",
     "privacy_quickactions_explanation": "Touchez et maintenez l'icone NeuraiWallet sur votre écran d'accueil pour voir rapidement le solde de vos portefeuilles.",
     "privacy_clipboard_explanation": "Fourni un raccourci si une adresse ou une facture est trouvée dans le presse-papier.",
-    "privacy_do_not_track": "Désactiver l'analyse des données",
-    "privacy_do_not_track_explanation": "Les informations de performance et de fiabilité ne seront pas soumises pour analyse.",
     "rate": "Taux",
     "push_notifications_explanation": "En activant les notifications, le jeton de votre appareil sera envoyé au serveur, ainsi que les adresses de portefeuille et les identifiants de transaction pour tous les portefeuilles et transactions effectuées après l'activation des notifications. Le jeton de l'appareil est utilisé pour envoyer des notifications, et les informations du portefeuille nous permettent de vous informer des Bitcoins entrants ou des confirmations de transaction. Seules les informations provenant d'une fois que vous avez activé les notifications sont transmises ; rien d'avant n'est collecté.La désactivation des notifications supprimera tout de ces informations depuis le serveur. De plus, la suppression d'un portefeuille de l'application supprimera également les informations associées du serveur.",
     "selfTest": "Auto-test",
@@ -377,8 +374,6 @@
     "watchOnlyWarningDescription": "Méfiez-vous des fraudeurs qui utilisent souvent des portefeuilles « lecture seul» pour tromper les utilisateurs. Ces portefeuilles ne vous permettent pas de contrôler ou d’envoyer des fonds ; ils vous permettent uniquement de consulter le solde."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Portefeuille Bitcoin simple et puissant",
     "add_create": "Créer",
     "total_balance": "Solde total",
     "add_entropy_reset_title": "Réinitialiser l'entropie",
@@ -389,8 +384,6 @@
     "add_entropy_provide": "Créer de l'entropie par des jets de dé",
     "add_entropy_remain": "{gen} octets d'entropie générée. Les {rem} octets restants seront obtenus auprès du générateur de nombres aléatoires du système.",
     "add_import_wallet": "Importer un portefeuille",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Pour payer avec des transactions instantanées",
     "add_lndhub": "Connectez-vous à votre LNDhub",
     "add_lndhub_error": "L'adresse de nœud fournie est un nœud LNDhub non valide.",
     "add_lndhub_placeholder": "l'adresse de votre noeud",
@@ -501,9 +494,7 @@
     "explanation": "Consultez le solde total de tous vos portefeuilles dans l'écran d'aperçu."
   },
   "multisig": {
-    "multisig_vault": "Coffre-fort multi-signature",
     "default_label": "Coffre-fort multi-signature",
-    "multisig_vault_explain": "Meilleur sécurité pour les gros montants",
     "provide_signature": "Fournir la signature",
     "provide_signature_details": "Utilisez votre appareil et votre portefeuille où se trouve la clé pour signer cette transaction",
     "provide_signature_details_bluewallet": "Dans NeuraiWallet, accédez au menu de l'écran Envoyer et sélectionnez",

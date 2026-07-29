@@ -148,7 +148,6 @@
     "about_free": "NeuraiWallet是一個免費的開源項目，由比特幣用戶製作。",
     "about_license": "麻省理工學院許可證",
     "about_release_notes": "發佈說明",
-    "about_review": "給我們評論",
     "about_selftest": "運行自我檢查",
     "about_selftest_ok": "所有內部測試均已成功通過，錢包運作良好。",
     "about_sm_github": "GitHub",
@@ -236,8 +235,6 @@
     "updating": "更新中..."
   },
   "wallets": {
-    "add_bitcoin": "比特幣",
-    "add_bitcoin_explain": "簡單而強大的比特幣錢包",
     "add_create": "建立",
     "total_balance": "結餘",
     "add_entropy": "熵",
@@ -245,8 +242,6 @@
     "add_entropy_provide": "通過擲骰子提供熵",
     "add_entropy_remain": "產生熵的{gen}個字節。 剩餘的{rem}字節將從系統隨機數生成器中獲得。",
     "add_import_wallet": "匯入錢包",
-    "add_lightning": "閃電",
-    "add_lightning_explain": "用於即時交易的花費",
     "add_lndhub_placeholder": "您的節點地址",
     "add_placeholder": "我的第一個錢包",
     "add_title": "新增錢包",
@@ -310,9 +305,7 @@
     "title": "結餘"
   },
   "multisig": {
-    "multisig_vault": "多重簽名保管庫",
     "default_label": "多重簽名保管庫",
-    "multisig_vault_explain": "大金額需要的最佳安全性",
     "provide_signature": "提供簽名",
     "vault_key": "保管庫密鑰 {number}",
     "required_keys_out_of_total": "總數中所需的密鑰",

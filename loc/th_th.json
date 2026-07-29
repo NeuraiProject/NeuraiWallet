@@ -137,7 +137,6 @@
     "about_backup": "ท่านควรบันทึกคีย์ของท่านเสมอ",
     "about_free": "NeuraiWallet คือโปรเจ็คโอเพนซอร์ส ไม่มีการคิดค่าใช้จ่าย สร้างโดยผู้ใช้บิตคอยน์",
     "about_release_notes": "บันทึกของโปรแกรมนี้",
-    "about_review": "กรุณาแสดงความเห็น",
     "about_selftest": "ทำการทดสอบ",
     "about_sm_github": "กิตฮับ",
     "about_sm_telegram": "เทเลแกรมแช็ท",
@@ -201,13 +200,10 @@
     "transactions_count": "จำนวนธุรกรรม"
   },
   "wallets": {
-    "add_bitcoin": "บิตคอยน์",
-    "add_bitcoin_explain": "กระเป๋าเงินบิตคอยน์ที่เรียบง่ายและทรงพลัง",
     "add_create": "สร้าง",
     "total_balance": "ยอดรวม",
     "add_entropy": "เอนโทรปี",
     "add_import_wallet": "นำเข้ากระเป๋าสตางค์",
-    "add_lightning": "ไลท์นิง",
     "add_lndhub_placeholder": "แอดเดรสของโหนดของท่าน",
     "add_title": "เพิ่มกระเป๋าสตางค์",
     "add_wallet_name": "ชื่อกระเป๋าสตางค์",
@@ -258,9 +254,7 @@
     "title": "ยอดรวม"
   },
   "multisig": {
-    "multisig_vault": "ห้องนิรภัยหลายลายเซ็น",
     "default_label": "ห้องนิรภัยหลายลายเซ็น",
-    "multisig_vault_explain": "ความปลอดภัยที่ดีที่สุดสำหรับเงินจำนวนมาก",
     "provide_signature": "ใส่ลายเซ็น",
     "required_keys_out_of_total": "กุญแจที่ต้องการจากทั้งหมด",
     "fee": "ค่าธรรมเนียม: {number}",

@@ -154,7 +154,6 @@
     "about_free": "NeuraiWallet ialah satu projek sumber terbuka dan percuma. Hasil seni pengguna Bitcoin.",
     "about_license": "Lesen MIT",
     "about_release_notes": "Nota pelepasan",
-    "about_review": "Berikan kami ulasan anda",
     "about_selftest": "Jalankan swaujian",
     "about_selftest_electrum_disabled": "Swaujian tidak hadir dengan Mod Luar Talian Electrum. Sila matikan mod luar talian dan cuba lagi.",
     "about_selftest_ok": "Semua ujian dalaman berjaya. Dompet ini berfungsi dengan baik.",
@@ -207,8 +206,6 @@
     "privacy_system_settings": "Tetapan Sistem",
     "privacy_quickactions": "Pintasan Dompet",
     "privacy_clipboard_explanation": "Memberikan pintasan jika alamat atau invois dijumpai pada papan sepit anda.",
-    "privacy_do_not_track": "Lumpuhkan Penyelidik",
-    "privacy_do_not_track_explanation": "Maklumat pencapaian dan keandalan tidak akan dihantar untuk kaji selidik.",
     "selfTest": "Swaujian",
     "save": "Simpan",
     "saved": "Disimpan",
@@ -258,8 +255,6 @@
     "updating": "Mengemas kini..."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Dompet Bitcoin yang mudah dan berkuasa",
     "add_create": "Cipta",
     "total_balance": "Jumlah Baki",
     "add_entropy": "Entropi",
@@ -267,8 +262,6 @@
     "add_entropy_provide": "Berikan entropi melalui lemparan dadu",
     "add_entropy_remain": "{gen} bait entropi telah terjana. Lebihan {rem} bait akan diperoleh dari penjana nombor rawak milik Sistem.",
     "add_import_wallet": "Pindah masuk dompet",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Untuk perbelanjaan dengan urusan sepantas kilat",
     "add_lndhub_placeholder": "Alamat Nod Anda",
     "add_title": "Tambah Dompet",
     "add_wallet_name": "Nama",
@@ -333,9 +326,7 @@
     "title": "Jumlah Baki"
   },
   "multisig": {
-    "multisig_vault": "Bilik Kebal Tandamai",
     "default_label": "Bilik Kebal Tandamai",
-    "multisig_vault_explain": "Keselamatan terbaik untuk jumlah wang yang besar",
     "provide_signature": "Berikan tandatangan",
     "vault_key": "Kunci Bilik Kebal {number}",
     "required_keys_out_of_total": "Anak kunci diperlukan daripada jumlah keseluruhan",

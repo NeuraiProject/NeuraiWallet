@@ -171,7 +171,6 @@
     "about_free": "A NeuraiWallet alkalmazás ingyenes és nyílt forráskódú. Bitcoin használók fejleszteték. ",
     "about_license": "MIT Licensz",
     "about_release_notes": "Verzió megjegyzések",
-    "about_review": "Írj értékelést",
     "about_selftest": "Önellenőrző teszt indítása",
     "about_selftest_electrum_disabled": "Az öntesztelés nem elérhető az Electrum Offline móddal. Kérjük, kapcsolja ki az offline módot, és próbálkozzon újra.",
     "about_selftest_ok": "Minden belső teszt sikeres. A tárca megfelelően működik.",
@@ -228,8 +227,6 @@
     "privacy_quickactions": "tárca gyorsbillentyűk",
     "privacy_quickactions_explanation": "Érintsd meg és tartsd nyomva a NeuraiWallet alkalmazás ikont a képernyőn a tárca egyenleg gyors megtekintéséhez.",
     "privacy_clipboard_explanation": "Jelentsen meg opciókat, ha cím vagy számla található a vágólapon. ",
-    "privacy_do_not_track": "Analitika kikapcsolása",
-    "privacy_do_not_track_explanation": "A teljesítményre és a megbízhatóságra vonatkozó információk nem lessznek beküldve elemzésre.",
     "rate": "Ráta",
     "selfTest": "Önteszt",
     "save": "Ment",
@@ -288,8 +285,6 @@
     "updating": "Frissítés..."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Egyszerű és masszív Bitcoin tárca",
     "add_create": "Létrehoz",
     "total_balance": "Teljes egyenleg",
     "add_entropy": "Entrópia",
@@ -297,8 +292,6 @@
     "add_entropy_provide": "Entrópia megadása véletlenszerűen ",
     "add_entropy_remain": "{gen} byte generálva entrópiával. A megmaradt {rem} byte a rendszer véletlenszám generátorával készül.",
     "add_import_wallet": "Tárca importálása",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Költés azonnali tranzakcióval",
     "add_lndhub_placeholder": "a te node címed",
     "add_placeholder": "az első tárcám",
     "add_title": "új tárca",
@@ -379,9 +372,7 @@
     "title": "Teljes egyenleg"
   },
   "multisig": {
-    "multisig_vault": "Multisig Tárca",
     "default_label": "Multisig Tárca",
-    "multisig_vault_explain": "Legnagyobb biztonság nagy összegekhez",
     "provide_signature": "Aláírás végrehajtása ",
     "vault_key": "Trezor kulcs {number}",
     "required_keys_out_of_total": "Szükséges kulcsok az összessből",

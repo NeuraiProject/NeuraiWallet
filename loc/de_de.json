@@ -215,7 +215,6 @@
     "about_free": "NeuraiWallet ist kostenlose Open Source Software. Produziert von Bitcoin-Benutzern.",
     "about_license": "MIT-Lizenz",
     "about_release_notes": "Versionshinweise",
-    "about_review": "Bewertung hinterlassen",
     "performance_score": "Leistungskennzahl: {num}",
     "run_performance_test": "Leistung testen",
     "about_selftest": "Selbsttest ausführen",
@@ -304,8 +303,6 @@
     "privacy_quickactions": "Walletverknüpfungen",
     "privacy_quickactions_explanation": "Auf dem Startbildschirm das NeuraiWallet App-Symbol gedrückt halten, um rasch den Saldo zu sehen.",
     "privacy_clipboard_explanation": "Nutzt Rechnungen und Adressen in der Zwischenablage zum Senden.",
-    "privacy_do_not_track": "Diagnosedaten ausschalten",
-    "privacy_do_not_track_explanation": "Leistungs- und Zuverlässigkeitsinformationen nicht zur Analyse einreichen.",
     "rate": "Kurs",
     "push_notifications_explanation": "Durch das Aktivieren von Benachrichtigungen wird das Gerätetoken zusammen mit den Wallet-Adressen inkl. künftigen Transaktions-IDs, an den Benachrichtigungsdienst gesendet. Das Gerätetoken erlaubt Benachrichtigungen an das Gerät zu adressieren, die Wallet-Informationen ermöglichen, eingehende Transaktionen und Bestätigungen zu notifizieren.\n\nNach der Aktivierung werden nur künftige, nicht aber vergangene Transaktions-IDs übertragen.\n\nMit der Deaktivierung, werden alle diese Informationen wieder vom Server entfernt. Das Gleiche passiert beim löschen der Wallet-App.",
     "selfTest": "Selbsttest",
@@ -384,8 +381,6 @@
     "custom_fee_warning_description": "Gebühren unter 1 sat/vB sind gültig, aber werden ggf. nicht weitergeleitet."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Einfache und leistungsstarke Bitcoin Wallet",
     "add_create": "Erstellen",
     "total_balance": "Gesamtes Guthaben",
     "add_entropy_reset_title": "Entropie zurücksetzten",
@@ -396,8 +391,6 @@
     "add_entropy_provide": "Entropie selbst erzeugen",
     "add_entropy_remain": "{gen} Bytes an generierter Entropie. Die restlichen {rem} Bytes werden vom Zufallsgenerator des Systems ergänzt.",
     "add_import_wallet": "Wallet importieren",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Für Ausgaben mit sofortigen Transaktionen",
     "add_lndhub": "Ihren LNDhub verbinden",
     "add_lndhub_error": "Die Adresse verweist auf einen ungültigen LNDhub-Knoten.",
     "add_lndhub_placeholder": "Bitcoin Knoten-Adresse",
@@ -508,9 +501,7 @@
     "explanation": "Auf dem Übersichtsbildschirm den Gesamtsaldo aller Wallets anzeigen."
   },
   "multisig": {
-    "multisig_vault": "Multisignatur Tresor",
     "default_label": "Multisignatur Tresor",
-    "multisig_vault_explain": "Höchste Sicherheit für große Beträge",
     "provide_signature": "Schlüssel eingeben",
     "provide_signature_details": "Mit Ihrem Gerät und der Wallet, in der der Schlüssel ist, die Transaktion signieren.",
     "provide_signature_details_bluewallet": "Zum Menü des Senden-Bildschirms gehen, dort auswählen",

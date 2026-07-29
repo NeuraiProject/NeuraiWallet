@@ -176,7 +176,6 @@
     "about_free": "برنامهٔ NeuraiWallet پروژه‌ای رایگان و متن‌باز است. ساخته‌شده توسط کاربران بیت‌کوین.",
     "about_license": "پروانهٔ ام‌آی‌تی",
     "about_release_notes": "یادداشت‌های انتشار",
-    "about_review": "برای ما یک بررسی بگذارید",
     "performance_score": "امتیاز کارکرد: {num}",
     "run_performance_test": "بررسی کارکرد",
     "about_selftest": "اجرای خودآزمایی",
@@ -235,8 +234,6 @@
     "privacy_quickactions": "میان‌برهای کیف پول",
     "privacy_quickactions_explanation": "آیکون برنامهٔ NeuraiWallet را در صفحهٔ اصلی لمس کرده و نگه دارید تا موجودی کیف پول خود را سریع مشاهده کنید.",
     "privacy_clipboard_explanation": "اگر آدرس یا صورت‌حسابی در کلیپ‌بورد شما پیدا شد، میان‌بر ارائه می‌دهد.",
-    "privacy_do_not_track": "غیرفعال‌کردن تحلیل",
-    "privacy_do_not_track_explanation": "اطلاعات کارایی و پایداری جهت تحلیل ارسال نخواهد شد.",
     "rate": "نرخ",
     "selfTest": "خودآزمایی",
     "save": "ذخیره",
@@ -295,8 +292,6 @@
     "updating": "درحال به‌روزرسانی…"
   },
   "wallets": {
-    "add_bitcoin": "بیت‌کوین",
-    "add_bitcoin_explain": "کیف پول ساده و قدرتمند بیت‌کوین",
     "add_create": "ایجاد",
     "total_balance": "موجودی کل",
     "add_entropy": "آنتروپی",
@@ -304,8 +299,6 @@
     "add_entropy_provide": "فراهم‌کردن آنتروپی از طریق انداختن تاس",
     "add_entropy_remain": "{gen} بایت از آنتروپی تولیدشده. {rem} بایت باقی‌مانده از تولیدکنندهٔ اعداد تصادفی سیستم گرفته خواهد شد.",
     "add_import_wallet": "واردکردن کیف پول",
-    "add_lightning": "لایتنینگ",
-    "add_lightning_explain": "برای خرج‌کردن با تراکنش‌های آنی",
     "add_lndhub_placeholder": "آدرس گره شما",
     "add_placeholder": "کیف پول اول من",
     "add_title": "افزودن کیف پول",
@@ -384,9 +377,7 @@
     "title": "موجودی کل"
   },
   "multisig": {
-    "multisig_vault": "گاوصندوق چندامضایی",
     "default_label": "گاوصندوق چندامضایی",
-    "multisig_vault_explain": "بالاترین امنیت برای مقادیر زیاد",
     "provide_signature": "ارائهٔ امضا",
     "vault_key": "کلید گاوصندوق {number}",
     "required_keys_out_of_total": "کلیدهای موردنیاز از کل",

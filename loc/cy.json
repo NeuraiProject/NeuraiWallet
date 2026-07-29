@@ -142,12 +142,9 @@
     "transaction": "Trafodyn"
   },
   "wallets": {
-    "add_bitcoin_explain": "Waled Bitcoin syml a cryf",
     "add_create": "Creu",
     "total_balance": "Balans Llawn",
     "add_import_wallet": "Mewnforio waled",
-    "add_lightning": "Mellten",
-    "add_lightning_explain": "Er mwyn gwario yn syth",
     "add_title": "Adio waled",
     "add_wallet_name": "Enw",
     "add_wallet_type": "Math",

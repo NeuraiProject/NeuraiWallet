@@ -215,7 +215,6 @@
     "about_free": "NeuraiWallet es un proyecto libre y de código abierto. Elaborado por usuarios de Bitcoin.",
     "about_license": "Licencia MIT",
     "about_release_notes": "Notas de lanzamiento",
-    "about_review": "Déjanos un comentario",
     "performance_score": "Puntuación de rendimiento: {num}",
     "run_performance_test": "Prueba de rendimiento",
     "about_selftest": "Ejecutar auto-prueba",
@@ -313,8 +312,6 @@
     "privacy_quickactions": "Atajos de la Billetera",
     "privacy_quickactions_explanation": "Mantén pulsado el icono de la aplicación NeuraiWallet para ver rápidamente el saldo de tu cartera.",
     "privacy_clipboard_explanation": "Proporciona atajos si encuentras una dirección o factura en tu portapapeles.",
-    "privacy_do_not_track": "Desactivar análisis",
-    "privacy_do_not_track_explanation": "La información de rendimiento y confiabilidad no se enviará para su análisis.",
     "rate": "Tasa",
     "push_notifications_explanation": "Al habilitar las notificaciones, el token de tu dispositivo se enviará al servidor, junto con las direcciones de la billetera y los identificadores de transacciones de todas las billeteras y transacciones realizadas después de habilitar las notificaciones. El token del dispositivo se utiliza para enviar notificaciones, y la información de la billetera nos permite notificarte sobre la llegada de Bitcoin o las confirmaciones de transacciones.\n\nSolo se transmite la información que se recibe después de habilitar las notificaciones; no se recopila nada anterior.\n\nSi deshabilitas las notificaciones, se eliminará toda esta información del servidor. Además, si eliminas una billetera de la aplicación, también se eliminará la información asociada a ella del servidor.",
     "selfTest": "Auto-Test",
@@ -394,8 +391,6 @@
     "custom_fee_warning_description": "Las tarifas inferiores a 1 sat/vB son válidas, pero puede que no se retransmitan debido a las políticas de los nodos."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Billetera Bitcoin simple y potente",
     "add_create": "Crear",
     "total_balance": "Balance Total",
     "add_entropy_reset_title": "Restablecer la entropía",
@@ -406,8 +401,6 @@
     "add_entropy_provide": "Entropía mediante el lanzamiento de dados",
     "add_entropy_remain": "{gen} bytes de entropía generada. Los {rem} bytes restantes se obtendrán del generador de números aleatorios del sistema.",
     "add_import_wallet": "Importar billetera",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Para gastar con transacciones instantáneas",
     "add_lndhub": "Conéctate a tu LNDhub",
     "add_lndhub_error": "La dirección de nodo proporcionada es un nodo LNDhub no válido.",
     "add_lndhub_placeholder": "Tu Dirección de Nodo",
@@ -518,9 +511,7 @@
     "explanation": "Ve el saldo total de todas tus billeteras en la pantalla de descripción general."
   },
   "multisig": {
-    "multisig_vault": "Bóveda Multifirma",
     "default_label": "Bóveda Multifirma",
-    "multisig_vault_explain": "La mejor seguridad para grandes cantidades",
     "provide_signature": "Proporcionar firma",
     "provide_signature_details": "Usa tu dispositivo y billetera donde reside la llave para firmar esta transacción",
     "provide_signature_details_bluewallet": "En NeuraiWallet, ve al menú de la pantalla Enviar y selecciona",

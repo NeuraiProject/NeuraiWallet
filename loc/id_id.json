@@ -188,7 +188,6 @@
     "about_free": "NeuraiWallet adalah proyek terbuka dan gratis. Dibuat oleh pengguna Bitcoin.",
     "about_license": "Izin MIT",
     "about_release_notes": "Catatan rilisan",
-    "about_review": "Tinggalkan ulasan",
     "performance_score": "Skor hasil: {num}",
     "run_performance_test": "Uji hasil",
     "about_selftest": "Jalankan tes sendiri",
@@ -233,7 +232,6 @@
     "privacy_read_clipboard": "Baca Clipboard",
     "privacy_system_settings": "Pengaturan sistem",
     "privacy_quickactions": "Jalan Pintas Dompet",
-    "privacy_do_not_track": "Nonaktifkan Analitik",
     "save": "simpan",
     "saved": "Tersimpan",
     "total_balance": "Total saldo",
@@ -270,7 +268,6 @@
     "updating": "Memperbaharui..."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
     "add_create": "Buat",
     "total_balance": "Total saldo",
     "add_entropy": "Entropi",
@@ -327,7 +324,6 @@
     "title": "Total saldo"
   },
   "multisig": {
-    "multisig_vault_explain": "Keamanan terbaik untuk nominal besar",
     "provide_signature": "Berikan tanda tangan",
     "vault_key": "Kunci Brankas {number}",
     "fee": "Tarif: {number}",

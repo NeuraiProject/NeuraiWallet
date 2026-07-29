@@ -215,7 +215,6 @@
     "about_free": "NeuraiWallet er ein fræls verkætlan har gjøgnumskygda frumforritið er alment tøkt. Ment av Bitcoin nýtarum.",
     "about_license": "MIT loyvið",
     "about_release_notes": "Sleppingarskriv",
-    "about_review": "Gev okkum eitt ummæli",
     "performance_score": "Avriksstig: {num}",
     "run_performance_test": "Koyr avriksroynd",
     "about_selftest": "Koyr sjálvkanning",
@@ -309,8 +308,6 @@
     "privacy_quickactions": "Mappu-snarknappar",
     "privacy_quickactions_explanation": "Halt á NeuraiWallet app ímyndini, vel síðani mappu fyri at síggja salduna á mappuni.",
     "privacy_clipboard_explanation": "Virkjar snarknappar, ið fall ein adressa ella gjaldsumbøn verður funnin í setiborðinum.",
-    "privacy_do_not_track": "Óvirkja greiningar",
-    "privacy_do_not_track_explanation": "Ritbúnaðar avriks- og dygdarupplýsingar verða ikki innsendir til greiningar.",
     "rate": "Gjaldoyrakostnaður",
     "push_notifications_explanation": "Verða fráboðanir virkjaðar, so verður eindar-eyðmerkið sent til ambætaran, saman við mappu-adressum og flytingar-eyðmerkjum, tilhoyrandi allar mappur, fremdar eftir at fráboðanir eru virkjaðar. Eindar-eyðmerkið verður brúkt til at senda fráboðanina, og mappu-upplýsingarnir gera ambætaran føran fyri at nágreina og fráboða tær um tíni inngjøld og váttanir.\n\nHettar hevur ikki afturvirkandi kraft. Upplýsingar verða einans sendir, frá tí at fráboðanir verða virkjaðar.\n\nÓvirkjan av fráboðanum elvir til at allar omanfyrinevndu upplýsingar verða strikaðar frá ambætaranum. Umframt tað verða tilhoyrandi upplýsingar eisini strikaðar frá ambætaranum, tá ein mappa verður strika úr appini.",
     "selfTest": "Sjálvkanning",
@@ -390,8 +387,6 @@
     "custom_fee_warning_description": "Avgjøld undir 1 sat/tB eru gildig, men verða ikki neyðturviliga framsend vegnað knútapolitikk."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Einføld og dugnalig Bitcoin mappa",
     "add_create": "Ger mappu",
     "total_balance": "Samlað salda",
     "add_entropy_reset_title": "Tómstilla entropi",
@@ -402,8 +397,6 @@
     "add_entropy_provide": "Veit entropi við terningakøstum",
     "add_entropy_remain": "{gen} být av entropi eru framleidd. {rem} írestandi být verða útvegað frá stýrikervis-tilvildartalframleiðaranum.",
     "add_import_wallet": "Innles mappu",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Til stundisligar flytingar",
     "add_lndhub": "Sambind í tín LNDhub",
     "add_lndhub_error": "Inntøppaða adressan vísur ikki til ein gildigan LNDhub knút.",
     "add_lndhub_placeholder": "Adressan til tín knút",
@@ -514,9 +507,7 @@
     "explanation": "Vís samlaðu salduna av øllum tínum mappum á yvirlit skíggjamyndini."
   },
   "multisig": {
-    "multisig_vault": "Fjølundirritanarvirðisgoymsla",
     "default_label": "Fjølundirritanarvirðisgoymsla",
-    "multisig_vault_explain": "Tryggast fyri stórar upphæddir",
     "provide_signature": "Útvega undirskrift",
     "provide_signature_details": "Undirrita flytingina við eindini og mappuni ið privati lykilin liggur á",
     "provide_signature_details_bluewallet": "Í NeuraiWallet, far inná Útgjald og vel ",

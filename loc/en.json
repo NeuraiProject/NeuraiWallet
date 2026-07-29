@@ -193,7 +193,6 @@
     "about_free": "NeuraiWallet is a free and open-source project. Crafted by Neurai users.",
     "about_license": "MIT License",
     "about_release_notes": "Release notes",
-    "about_review": "Leave us a review",
     "performance_score": "Performance score: {num}",
     "run_performance_test": "Test performance",
     "about_selftest": "Run self-test",
@@ -266,7 +265,6 @@
     "network_broadcast": "Broadcast Transaction",
     "network_broadcast_explanation": "Will be relayed through the default Neurai {network} RPC node.",
     "network_backend": "Neurai Backend",
-    "network_backend_description": "RPC (active) — ElectrumX coming later",
     "network_backend_status_title": "Live RPC status",
     "network_backend_height": "OK — block height {height}",
     "network_backend_retest": "Test again",
@@ -296,8 +294,6 @@
     "privacy_quickactions": "Wallet Shortcuts",
     "privacy_quickactions_explanation": "Touch and hold the NeuraiWallet app icon to quickly view your wallet’s balance.",
     "privacy_clipboard_explanation": "Provide shortcuts if an address or invoice is found in your clipboard.",
-    "privacy_do_not_track": "Disable Analytics",
-    "privacy_do_not_track_explanation": "Performance and reliability information will not be submitted for analysis.",
     "pq_address_reuse": "Reuse PQ address",
     "pq_address_reuse_explanation": "Always show the same Post-Quantum address when receiving. Disable to generate a new PQ address each time (better privacy, less convenient).",
     "rate": "Rate",
@@ -357,8 +353,6 @@
     "watchOnlyWarningDescription": "Be cautious of scammers who often use “watch-only” wallets to deceive users. These wallets do not allow you to control or send funds; they only let you view the balance."
   },
   "wallets": {
-    "add_bitcoin": "Neurai HD",
-    "add_bitcoin_explain": "Simple and powerful Neurai wallet (BIP44)",
     "add_neurai_legacy": "Neurai Legacy",
     "add_neurai_legacy_explain": "Standard ECDSA addresses (BIP44)",
     "add_neurai_pq": "Neurai Post-Quantum",
@@ -413,8 +407,6 @@
     "add_entropy": "Entropy",
     "add_entropy_provide": "Provide entropy via dice rolls",
     "add_import_wallet": "Import wallet",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "For spending with instant transactions",
     "add_placeholder": "my first wallet",
     "add_title": "Add Wallet",
     "add_wallet_name": "Name",
@@ -494,8 +486,6 @@
     "explanation": "View the total balance of all your wallets in the overview screen."
   },
   "multisig": {
-    "multisig_vault": "Multisig Vault",
-    "multisig_vault_explain": "Best security for large amounts",
     "view": "View",
     "co_sign_transaction": "Sign a transaction"
   },

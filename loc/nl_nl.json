@@ -170,7 +170,6 @@
     "about_free": "NeuraiWallet is een gratis en open-source project. Gemaakt door Bitcoin gebruikers.",
     "about_license": "MIT Licentie",
     "about_release_notes": "Release-opmerkingen",
-    "about_review": "Laat een review achter",
     "about_selftest": "Voer een zelftest uit",
     "about_selftest_electrum_disabled": "Het zelf testen is niet beschikbaar met Electrum offline modus. Zet alsjeblieft de offline modus uit en probeer het opnieuw.",
     "about_selftest_ok": "Alle interne tests zijn geslaagd. De wallet werkt.",
@@ -225,8 +224,6 @@
     "privacy_system_settings": "Systeeminstellingen",
     "privacy_quickactions": "Wallet snelkoppelingen",
     "privacy_clipboard_explanation": "Bied snelkoppelingen aan als een adres of factuur op uw klembord staat.",
-    "privacy_do_not_track": "Analyses Uitschakelen",
-    "privacy_do_not_track_explanation": "Informatie over de prestatie en betrouwbaarheid zal niet worden opgegeven voor analyse.",
     "rate": "Rate",
     "selfTest": "Zelf-Test",
     "save": "Opslaan",
@@ -280,8 +277,6 @@
     "updating": "Updaten..."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Eenvoudige en krachtige Bitcoin-wallet",
     "add_create": "Aanmaken",
     "total_balance": "Totaalbalans",
     "add_entropy": "Entropy",
@@ -289,8 +284,6 @@
     "add_entropy_provide": "Zorg voor entropie via dobbelstenen",
     "add_entropy_remain": "{gen} bytes gegenereerde entropie. Resterende {rem} bytes zullen worden verkregen uit het systeem voor willekeurige getallen.",
     "add_import_wallet": "Wallet importeren",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Voor uitgaven met directe transacties",
     "add_lndhub_placeholder": "Uw node adres",
     "add_placeholder": "Mijn eerste wallet",
     "add_title": "Wallet toevoegen",
@@ -363,9 +356,7 @@
     "title": "Totaalbalans"
   },
   "multisig": {
-    "multisig_vault": "Multisig Kluis",
     "default_label": "Multisig Kluis",
-    "multisig_vault_explain": "Beste beveiliging voor grote bedragen",
     "provide_signature": "Geef een handtekening",
     "vault_key": "Kluissleutel {number}",
     "required_keys_out_of_total": "Vereiste sleutels uit het totaal",

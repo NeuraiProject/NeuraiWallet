@@ -151,7 +151,6 @@
     "about": "Sobre nosaltres",
     "about_backup": "Feu sempre còpies de seguretat de les vostres claus!",
     "about_license": "Llicència MIT",
-    "about_review": "Deixa'ns una ressenya",
     "about_selftest": "Executa l'autotest",
     "about_sm_github": "GitHub",
     "about_sm_telegram": "Canal de Telegram",
@@ -212,13 +211,10 @@
     "updating": "Actualitzant..."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Moneder de Bitcoin senzill i potent",
     "add_create": "Crear",
     "total_balance": "Saldo total",
     "add_entropy": "Entropia",
     "add_import_wallet": "Importar moneder",
-    "add_lightning": "Lightning",
     "add_title": "Afegir moneder",
     "add_wallet_name": "nom del moneder",
     "add_wallet_type": "tipus de moneder",

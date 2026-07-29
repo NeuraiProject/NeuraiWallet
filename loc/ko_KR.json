@@ -215,7 +215,6 @@
     "about_free": "NeuraiWallet은 비트코인 이용자들이 만든 오픈 소스 프로젝트입니다. ",
     "about_license": "MIT 라이선스",
     "about_release_notes": "릴리즈 노트",
-    "about_review": "리뷰를 남겨주세요.",
     "performance_score": "성능 점수: {num}",
     "run_performance_test": "성능 테스트",
     "about_selftest": "자가 테스트",
@@ -309,8 +308,6 @@
     "privacy_quickactions": "지갑 단축경로",
     "privacy_quickactions_explanation": "NeuraiWallet 앱 아이콘을 길게 눌러 지갑의 잔액을 빠르게 확인하세요.",
     "privacy_clipboard_explanation": "클립보드에 주소나 청구서가 보이면 단축경로를 제공하세요",
-    "privacy_do_not_track": "분석을 사용불가로",
-    "privacy_do_not_track_explanation": "성능과 신뢰성 정보는 분석하는 데 제출되지 않을 것 입니다.",
     "rate": "환율",
     "push_notifications_explanation": "알림을 활성화하면, 지갑 주소와 트랜잭션 ID를 포함한 기기 토큰이 서버로 전송됩니다. 이는 비트코인 수신이나 트랜잭션 확정과 같은 알림을 보내기 위함입니다.\n\n알림을 활성화한 이후의 정보만 전송되며, 이전 데이터는 수집되지 않습니다.\n\n알림을 비활성화하면 이 정보는 서버에서 삭제됩니다. 또한, 앱에서 지갑을 삭제하면 해당 지갑과 관련된 정보도 함께 서버에서 제거됩니다.",
     "selfTest": "자가 테스트",
@@ -390,8 +387,6 @@
     "custom_fee_warning_description": "1 sat/vB 이하의 수수료도 유효하지만, 노드의 정책에 따라 트랜잭션이 릴레이되지 않을 수 있습니다."
   },
   "wallets": {
-    "add_bitcoin": "비트코인",
-    "add_bitcoin_explain": "단순하고 강력한 비트코인 지갑",
     "add_create": "생성하기",
     "total_balance": "총 잔액",
     "add_entropy_reset_title": "엔트로피 초기화",
@@ -402,8 +397,6 @@
     "add_entropy_provide": "주사위 굴림식 엔트로피 부여",
     "add_entropy_remain": "{gen} 바이트 엔트로피. 남은 {rem} 바이트는 시스템 난수발생기를 통해 얻어질 것 입니다.",
     "add_import_wallet": "지갑 들여오기",
-    "add_lightning": "라이트닝",
-    "add_lightning_explain": "즉시 거래를 통한 지출",
     "add_lndhub": "LNDhub에 연결",
     "add_lndhub_error": "제공된 노드 주소가 유효한 LNDhub 노드가 아닙니다.",
     "add_lndhub_placeholder": "사용자 노드 주소",
@@ -514,9 +507,7 @@
     "explanation": "모든 지갑의 총 잔액을 개요 화면에서 확인하세요."
   },
   "multisig": {
-    "multisig_vault": "다중서명 금고",
     "default_label": "다중서명 금고",
-    "multisig_vault_explain": "대규모 금액을 위한 최고의 보안",
     "provide_signature": "서명 제공하기",
     "provide_signature_details": "이 트랜잭션에 서명하려면 키가 저장된 기기와 지갑을 사용하세요.",
     "provide_signature_details_bluewallet": "NeuraiWallet에서 보내기 화면 메뉴로 이동한 후 선택하세요",

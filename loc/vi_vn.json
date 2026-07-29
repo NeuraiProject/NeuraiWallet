@@ -168,7 +168,6 @@
     "about_free": "NeuraiWallet là dự án nguồn mở và tự do được tạo ra bởi người dùng Bitcoin.",
     "about_license": "Giấy phép MIT",
     "about_release_notes": "Ghi chú phát hành",
-    "about_review": "Để lại đánh giá",
     "performance_score": "Điểm hiệu suất: {num}",
     "run_performance_test": "Kiểm tra hiệu suất",
     "about_selftest": "Chạy tự kiểm tra",
@@ -225,8 +224,6 @@
     "privacy_system_settings": "Cài đặt hệ thống",
     "privacy_quickactions": "Các phím tắt ví",
     "privacy_clipboard_explanation": "Cung cấp phím tắt trong trường hợp một địa chỉ hoặc hóa đơn được tìm thấy trong bảng tạm của bạn.",
-    "privacy_do_not_track": "Vô hiệu hoá phân tích ",
-    "privacy_do_not_track_explanation": "Thông tin về hiệu suất và độ tin cậy không sẽ được gửi để phân tích.",
     "rate": "Tỷ lệ",
     "selfTest": "Tự kiểm tra",
     "save": "Lưu",
@@ -285,8 +282,6 @@
     "updating": "Đang cập nhật..."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Ví Bitcoin đơn giản và mạnh mẽ",
     "add_create": "Tạo",
     "total_balance": "Tổng số dư",
     "add_entropy": "Entropy",
@@ -294,8 +289,6 @@
     "add_entropy_provide": "Cung cấp entropy bằng dice roll",
     "add_entropy_remain": "{gen} bytes entropy đã được tạo. {rem} bytes còn lại sẽ lấy được từ số ngẫu nhiên của hệ thống. ",
     "add_import_wallet": "Nhập ví",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Để chi tiêu với các giao dịch tức thời ",
     "add_lndhub_placeholder": "Địa chỉ node của bạn",
     "add_placeholder": "Ví đầu tiên của tôi",
     "add_title": "Thêm ví",
@@ -369,9 +362,7 @@
     "title": "Tổng số dư"
   },
   "multisig": {
-    "multisig_vault": "Vault Multisig",
     "default_label": "Vault Multisig",
-    "multisig_vault_explain": "An toàn cao nhất cho số tiền lớn",
     "provide_signature": "Cung cấp chữ ký",
     "vault_key": "Khoá Vault {number}",
     "required_keys_out_of_total": "Các chìa khoá cần thiết trong tổng số",

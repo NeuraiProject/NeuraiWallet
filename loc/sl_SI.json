@@ -169,7 +169,6 @@
     "about_free": "NeuraiWallet je brezplačen in odprtokodni projekt. Ustvarili uporabniki Bitcoina.",
     "about_license": "Licenca MIT",
     "about_release_notes": "Opombe ob izdaji",
-    "about_review": "Ocenite, napišite mnenje",
     "about_selftest": "Zaženi samotestiranje",
     "about_selftest_electrum_disabled": "Samotestiranje ni na voljo v Electrum načinu brez povezave. Onemogočite način brez povezave in poskusite ponovno.",
     "about_selftest_ok": "Vsi opravljeni testi so bili uspešni. Denarnica deluje brez napak.",
@@ -224,8 +223,6 @@
     "privacy_system_settings": "Sistemske nastavitve",
     "privacy_quickactions": "Bližnjice",
     "privacy_clipboard_explanation": "Prikaži bližnjice, če je v odložišču najden naslov ali račun.",
-    "privacy_do_not_track": "Onemogoči analitiko",
-    "privacy_do_not_track_explanation": "Informacije o zmogljivosti in zanesljivosti ne bodo poslane v analizo.",
     "rate": "Tečaj",
     "selfTest": "Samotestiranje",
     "save": "Shrani",
@@ -283,8 +280,6 @@
     "updating": "Osveževanje..."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Preprosta in zmogljiva Bitcoin denarnica",
     "add_create": "Ustvari",
     "total_balance": "Skupno stanje",
     "add_entropy": "Entropija",
@@ -292,8 +287,6 @@
     "add_entropy_provide": "Zagotovite entropijo s pomočjo metov kocke",
     "add_entropy_remain": "{gen} bajtov ustvarjene entropije. Preostalih {rem} bajtov bo pridobljenih iz sistemskega generatorja naključnih števil.",
     "add_import_wallet": "Uvozi denarnico",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Za hitre vsakodnevne transakcije",
     "add_lndhub_placeholder": "naslov vašega vozlišča",
     "add_placeholder": "moja prva denarnica",
     "add_title": "Dodajte denarnico",
@@ -367,9 +360,7 @@
     "title": "Skupno stanje"
   },
   "multisig": {
-    "multisig_vault": "Multisig Trezor",
     "default_label": "Multisig Trezor",
-    "multisig_vault_explain": "Največja varnost za višje zneske",
     "provide_signature": "Vnesite podpis",
     "vault_key": "Ključ trezorja {number}",
     "required_keys_out_of_total": "Zahtevani ključi od vseh",

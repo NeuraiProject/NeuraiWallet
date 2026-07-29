@@ -173,7 +173,6 @@
     "about_free": "NeuraiWallet är gratis och byggs av bitcoin-användare med hjälp av öppen källkod.",
     "about_license": "MIT-licens",
     "about_release_notes": "Versionsinformation",
-    "about_review": "Lämna oss en recension",
     "performance_score": "Prestandapoäng: {num}",
     "run_performance_test": "Testa prestanda",
     "about_selftest": "Kör självtest",
@@ -231,8 +230,6 @@
     "privacy_quickactions": "Plånboksgenvägar",
     "privacy_quickactions_explanation": "Tryck och håll in NeuraiWallet-appikonen för att snabbt se saldot i din plånbok.",
     "privacy_clipboard_explanation": "Ange genvägar om en adress eller faktura hittas i ditt urklipp.",
-    "privacy_do_not_track": "Inaktivera Analytics",
-    "privacy_do_not_track_explanation": "Information om prestanda och tillförlitlighet kommer inte att skickas in för analys.",
     "rate": "Betygsätta",
     "selfTest": "Självtest",
     "save": "Spara",
@@ -291,8 +288,6 @@
     "updating": "Uppdaterar..."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Enkel och kraftfull Bitcoin-plånbok",
     "add_create": "Skapa",
     "total_balance": "Total balans",
     "add_entropy": "Entropi",
@@ -300,8 +295,6 @@
     "add_entropy_provide": "Ge entropi via tärningskast",
     "add_entropy_remain": "{gen} byte genererad entropi. Återstående {rem} byte kommer att erhållas från systemets slumptalsgenerator.",
     "add_import_wallet": "Importera plånbok",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "För utgifter med omedelbara transaktioner",
     "add_lndhub_placeholder": "Din nodadress",
     "add_placeholder": "Min första plånbok",
     "add_title": "ny plånbok",
@@ -377,9 +370,7 @@
     "title": "Total balans"
   },
   "multisig": {
-    "multisig_vault": "Multisig Valv",
     "default_label": "Multisig Valv",
-    "multisig_vault_explain": "Bästa säkerheten för stora belopp",
     "provide_signature": "Ge signatur",
     "vault_key": "Valvnyckel {number}",
     "required_keys_out_of_total": "Nödvändiga nycklar av totalt antal",

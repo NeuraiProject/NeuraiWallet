@@ -215,7 +215,6 @@
     "about_free": "NeuraiWallet é um projeto gratuito e de código aberto. Criado por utilizadores de Bitcoin.",
     "about_license": "Licença MIT",
     "about_release_notes": "Release notes",
-    "about_review": "Deixa-nos uma review",
     "performance_score": "Pontuação de desempenho: {num}",
     "run_performance_test": "Desempenho no teste",
     "about_selftest": "Executar autoteste",
@@ -306,8 +305,6 @@
     "privacy_quickactions": "Atalhos da Carteira",
     "privacy_quickactions_explanation": "Toque e mantenha pressionado o ícone do aplicativo NeuraiWallet para visualizar rapidamente o saldo da sua carteira.",
     "privacy_clipboard_explanation": "Fornecer atalhos se um endereço ou fatura for encontrado na sua área de transferência.",
-    "privacy_do_not_track": "Desativar Ferramentas Analíticas",
-    "privacy_do_not_track_explanation": "As informações sobre desempenho e fiabilidade não serão enviadas para análise.",
     "rate": "Taxa",
     "push_notifications_explanation": "Ao ativar as notificações, o token do seu dispositivo será enviado ao servidor, juntamente com os endereços das carteiras e os IDs das transações para todas as carteiras e transações realizadas após a ativação das notificações. O token do dispositivo é usado para enviar notificações, e as informações da carteira nos permitem notificá-lo sobre Bitcoin a receber ou confirmações de transações.\nApenas as informações após a ativação das notificações são transmitidas — nada anterior a isso é recolhido.\nDesativar as notificações removerá todas essas informações do servidor. Além disso, excluir uma carteira da aplicação também removerá as informações associadas à mesma do servidor.",
     "selfTest": "Autoteste",
@@ -386,8 +383,6 @@
     "custom_fee_warning_description": "Taxas abaixo de 1 sat/vB são válidas, mas podem não ser retransmitidas devido às políticas dos nós."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Carteira Bitcoin simples e poderosa",
     "add_create": "Adicionar",
     "total_balance": "Saldo Total",
     "add_entropy_reset_title": "Redefinir Entropia",
@@ -398,8 +393,6 @@
     "add_entropy_provide": "Entropia através de dados",
     "add_entropy_remain": "{gen} bytes de entropia gerada. Os bytes {rem} restantes serão obtidos do gerador de números aleatórios do sistema.",
     "add_import_wallet": "Importar wallet",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Para gastar com transações instantâneas",
     "add_lndhub": "Ligar o seu LNDhub",
     "add_lndhub_error": "O endereço fornecido é um nó LNDhub inválido.",
     "add_lndhub_placeholder": "O Endereço do Seu Nó",
@@ -510,9 +503,7 @@
     "explanation": "Veja o saldo total de todas as suas carteiras no ecrã de visão geral."
   },
   "multisig": {
-    "multisig_vault": "Cofre Multiassinatura",
     "default_label": "Cofre Multiassinatura",
-    "multisig_vault_explain": "A melhor segurança para montantes elevados",
     "provide_signature": "Fornecer assinatura",
     "provide_signature_details": "Use o seu dispositivo e carteira onde a chave reside para assinar esta transação.",
     "provide_signature_details_bluewallet": "No NeuraiWallet, aceda ao ecrã Enviar e selecione",

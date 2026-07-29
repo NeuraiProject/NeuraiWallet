@@ -211,7 +211,6 @@
     "about_free": "פרויקט NeuraiWallet הינו פרויקט חופשי בקוד פתוח. נוצר על ידי קהילת ביטקוין.",
     "about_license": "רישיון MIT",
     "about_release_notes": "הערות שחרור",
-    "about_review": "השאירו לנו ביקורת",
     "performance_score": "ניקוד ביצועים: {num}",
     "run_performance_test": "בדיקת ביצועים",
     "about_selftest": "הרצת בדיקה עצמית",
@@ -299,8 +298,6 @@
     "privacy_quickactions": "קיצורי דרך ארנק",
     "privacy_quickactions_explanation": "לצפייה מהירה במאזן הארנק שלכם לחצו והחזיקו את סמליל אפליקציית NeuraiWallet במסך הבית.",
     "privacy_clipboard_explanation": "מספק קיצורי דרך במקרה שכתובת, או חשבונית, נמצאות בקליפבורד שלך.",
-    "privacy_do_not_track": "נטרול ניתוח",
-    "privacy_do_not_track_explanation": "מידע ביצועים ומהימנות לא ישלח לניתוח.",
     "rate": "תעריף",
     "selfTest": "בדיקה עצמית",
     "save": "שמירה",
@@ -376,8 +373,6 @@
     "custom_fee_warning_description": "עמלות מתחת ל-  1 sat/vB תקינות, אבל יתכן ולא ישודרו בשל מדיניות צומת."
   },
   "wallets": {
-    "add_bitcoin": "ביטקוין",
-    "add_bitcoin_explain": "ארנק ביטקוין פשוט וחזק",
     "add_create": "יצירה",
     "total_balance": "יתרה כוללת",
     "add_entropy_reset_title": "איפוס אנטרופיה",
@@ -388,8 +383,6 @@
     "add_entropy_provide": "אספקת אנטרופיה על ידי הטלת קוביות ",
     "add_entropy_remain": "{gen} ביתים של אנטרופיה. שאר {rem} ביתים יתקבלו ממחולל המספרים הרנדומליים של המערכת.",
     "add_import_wallet": "יבוא ארנק",
-    "add_lightning": "ברק",
-    "add_lightning_explain": "לבזבוז עם העברות מידיות",
     "add_lndhub": "התחברו ל- LNDHub האישי שלכם",
     "add_lndhub_error": "כתובת הצומת שסופקה אינה צומת LNDHub תקין.",
     "add_lndhub_placeholder": "כתובת הצומת שלך",
@@ -498,9 +491,7 @@
     "explanation": "הצגת המאזן הכולל של כל הארנקים שלך במסך הכללי."
   },
   "multisig": {
-    "multisig_vault": "כספת רבת-חתימות",
     "default_label": "כספת רבת-חתימות",
-    "multisig_vault_explain": "ההגנה הטובה ביותר לסכומים גדולים",
     "provide_signature": "ספקו חתימה",
     "provide_signature_details": "השתמשו במכשיר שלכם ובארנק שבו המפתח נמצא כדי לחתום על פעולה זאת",
     "provide_signature_details_bluewallet": "ב- NeuraiWallet, לכו לתפריט מסך השליחה ובחרו",

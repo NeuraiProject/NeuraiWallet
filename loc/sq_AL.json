@@ -176,7 +176,6 @@
   "settings": {
     "about": "Rreth",
     "about_license": "Licenca e tipit MIT",
-    "about_review": "Na leni një review",
     "about_sm_github": "GitHub",
     "about_sm_telegram": "Knali Telegram",
     "biometrics": "Te dhenat Biometrike",
@@ -217,11 +216,9 @@
     "updating": "Duke u perditesuar..."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
     "add_create": "Krijo",
     "total_balance": "Ballanca Totale",
     "add_entropy": "Entropia",
-    "add_lightning": "Lightning",
     "add_title": "Shto Portofol",
     "add_wallet_name": "Emer",
     "add_wallet_type": "Tipi",

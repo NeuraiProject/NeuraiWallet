@@ -215,7 +215,6 @@
     "about_free": "NeuraiWallet je bezplatný a open source projekt. Vytvořeno bitcoinery.",
     "about_license": "Licence MIT",
     "about_release_notes": "Poznámky k vydání",
-    "about_review": "Napište nám recenzi",
     "performance_score": "Skóre výkonu: {num}",
     "run_performance_test": "Otestovat výkon",
     "about_selftest": "Spustit autotest",
@@ -309,8 +308,6 @@
     "privacy_quickactions": "Zástupci peněženky",
     "privacy_quickactions_explanation": "Dlouhý stisk ikony NeuraiWallet na vaší výchozí obrazovce zobrazí váš zůstatek.",
     "privacy_clipboard_explanation": "Poskytnout zkratky, pokud se ve vaší schránce nachází adresa nebo faktura.",
-    "privacy_do_not_track": "Zakázat analytiku",
-    "privacy_do_not_track_explanation": "Informace o výkonu a spolehlivosti nebudou odesílány k analýze.",
     "rate": "Kurz",
     "push_notifications_explanation": "Povolením oznámení bude token vašeho zařízení odeslán na server společně s adresami peněženky a transakčními ID od všech peněženek a transakcí provedených po povolení oznámení. Token zařízení je využíván k odesílání oznámení a informace o peněžence nám umožňuje informovat vás o příchozích bitcoinech nebo o potvrzení transakcí.\n\nJsou vysílány pouze informace od té doby, co povolíte oznámení – z dřívější doby nejsou žádné informace shromažďovány.\n\nZakázáním oznámení odstraníte všechny tyto informace ze serveru. Odstraněním peněženky z aplikace taktéž dojde k odebrání jejích souvisejících informací ze serveru.",
     "selfTest": "Autotest",
@@ -390,8 +387,6 @@
     "custom_fee_warning_description": "Poplatky ve výši pod 1 sat/vB jsou platné, ale nemusí být vyslány dále do sítě z důvodu zásad uzlu."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Jednoduchá a výkonná bitcoinová peněženka",
     "add_create": "Vytvořit",
     "total_balance": "Celkový zůstatek",
     "add_entropy_reset_title": "Obnovit entropii",
@@ -402,8 +397,6 @@
     "add_entropy_provide": "Poskytnout entropii pomocí hodu kostkami",
     "add_entropy_remain": "{gen} bajtů vygenerované entropie. Zbývající bajty ({rem}) budou získány od systémového generátoru náhodných čísel.",
     "add_import_wallet": "Importovat peněženku",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Pro utrácení s okamžitými transakcemi",
     "add_lndhub": "Připojte se ke svému LNDhubu",
     "add_lndhub_error": "Uvedená adresa uzlu je neplatný LNDhub uzel.",
     "add_lndhub_placeholder": "Adresa vašeho uzlu",
@@ -514,9 +507,7 @@
     "explanation": "Zobrazit celkový zůstatek všech vašich peněženek na přehledové obrazovce."
   },
   "multisig": {
-    "multisig_vault": "Vícepodpisové Úložiště",
     "default_label": "Vícepodpisové Úložiště",
-    "multisig_vault_explain": "Nejlepší zabezpečení pro velké částky",
     "provide_signature": "Poskytnout podpis",
     "provide_signature_details": "K podpisu této transakce použijte své zařízení a peněženku, ve které je klíč umístěn",
     "provide_signature_details_bluewallet": "V aplikaci NeuraiWallet přejděte do nabídky Odeslat a vyberte",

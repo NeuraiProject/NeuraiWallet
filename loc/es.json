@@ -169,7 +169,6 @@
     "about_free": "NeuraiWallet es un proyecto de código abierto y gratuito. Elaborado por usuarios de Bitcoin.",
     "about_license": "Licencia MIT",
     "about_release_notes": "Notas de la versión",
-    "about_review": "Escribe una reseña",
     "about_selftest": "Iniciar test local",
     "about_selftest_electrum_disabled": "La autocomprobación no está disponible en el modo sin conexión de Electrum. Desactiva el modo sin conexión y vuelve a intentarlo. ",
     "about_selftest_ok": "Todas las pruebas internas han concluido satisfactoriamente. La billetera funciona bien. ",
@@ -228,8 +227,6 @@
     "privacy_system_settings": "Configuración del sistema",
     "privacy_quickactions": "Atajos para tus carteras",
     "privacy_clipboard_explanation": "Muestra atajos si encuentra direcciones o facturas en tu portapapeles.",
-    "privacy_do_not_track": "Desabilitar Analytics",
-    "privacy_do_not_track_explanation": "Los datos sobre funcionamiento y fiabilidad no serán enviados para ser analizados.",
     "rate": "Tasa",
     "selfTest": "Self-Test",
     "save": "Guardar",
@@ -288,8 +285,6 @@
     "updating": "Actualizando... "
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Una cartera de Bitcoin útil y facil de usar",
     "add_create": "Crear",
     "total_balance": "Balance total",
     "add_entropy": "Entropía ",
@@ -297,8 +292,6 @@
     "add_entropy_provide": "Entropía lanzando dados",
     "add_entropy_remain": "{gen}  bytes of entropía generada. Los {rem} bytes restantes serán obtenidos del generador de números aleatorios.",
     "add_import_wallet": "Importar cartera",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Para pagos con transferencias instantáneas",
     "add_lndhub_placeholder": "La dirección de tu nodo",
     "add_placeholder": "Mi primera cartera",
     "add_title": "Añadir cartera",
@@ -372,9 +365,7 @@
     "title": "Balance total"
   },
   "multisig": {
-    "multisig_vault": "Vault multifirma",
     "default_label": "Vault multifirma",
-    "multisig_vault_explain": "La mejor seguridad para grandes cantidades",
     "provide_signature": "Proporcionar firma",
     "vault_key": "Clave de la Vault {number}",
     "required_keys_out_of_total": "Las llaves que se necesitarán del total de llaves creadas",

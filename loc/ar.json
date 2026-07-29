@@ -176,7 +176,6 @@
     "about_free": "محفظة NeuraiWallet هي مشروع مجاني ومفتوح المصدر، أنشأه مستخدمو البتكوين.",
     "about_license": "ترخيص MIT",
     "about_release_notes": "معلومات الإصدار",
-    "about_review": "اترك لنا مراجعة",
     "performance_score": "معدل الأداء: {num}",
     "run_performance_test": "اختبار الأداء",
     "about_selftest": "تشغيل اختبار ذاتي",
@@ -233,8 +232,6 @@
     "privacy_system_settings": "اعدادات الجهاز",
     "privacy_quickactions": "اختصارات المحفظة",
     "privacy_clipboard_explanation": "عرض اختصار إذا تم العثور على عنوان أو فاتورة في الحافظة الخاصة بك.",
-    "privacy_do_not_track": "تعطيل التحليلات",
-    "privacy_do_not_track_explanation": "لن يتم إرسال التحليلات المتعلقة بأداء وقابلية تشغيل المحفظة إلينا.",
     "rate": "سعر الصرف",
     "selfTest": "اختبار ذاتي",
     "save": "حفظ",
@@ -294,8 +291,6 @@
     "watchOnlyWarningDescription": "تنبيه احتيال: انتبه إلى أن المحتالين عادةً ما يستخدمون هذا النوع من المحفظة \"للمشاهدة فقط\" لمحاولة السرقة من المستخدمين. هذه المحفظة التي لا يمكنك التحكم بها أو الإرسال منها، إلا بتصريح جهاز آخر، المحفظة تسمح فقط بمراقبة الرصيد."
   },
   "wallets": {
-    "add_bitcoin": "بتكوين",
-    "add_bitcoin_explain": "محفظة بتكوين بسيطة وقوية",
     "add_create": "إنشاء",
     "total_balance": "الرصيد الاجمالي",
     "add_entropy": "الإنتروبيا (العشوائية)",
@@ -303,8 +298,6 @@
     "add_entropy_provide": "توفير الإنتروبيا (العشوائية) باستخدام النرد",
     "add_entropy_remain": "{gen} بايت من الإنتروبيا (العشوائية) المحققة. سيتم الحصول على {rem} بايت المتبقية من مولِّد الأرقام العشوائية للنظام.",
     "add_import_wallet": "استيراد محفظة",
-    "add_lightning": "البرق",
-    "add_lightning_explain": "لإرسال المعاملات بشكل فوري عبر شبكة البرق",
     "add_lndhub_placeholder": "عنوان النود الخاص بك",
     "add_placeholder": "محفظتي الأولى",
     "add_title": "إضافة محفظة",
@@ -379,9 +372,7 @@
     "title": "الرصيد الاجمالي"
   },
   "multisig": {
-    "multisig_vault": "خزنة متعددة التواقيع",
     "default_label": "خزنة متعددة التواقيع",
-    "multisig_vault_explain": "افضل حماية للمبالغ الكبيرة",
     "provide_signature": "قدم توقيعًا",
     "vault_key": "مفتاح الخزنة {number}",
     "required_keys_out_of_total": "المفاتيح المطلوبة من الاجمالي",

@@ -215,7 +215,6 @@
     "about_free": "NeuraiWallet — бесплатный проект с открытым исходным кодом. Создано Биткойн пользователями.",
     "about_license": "Лицензия MIT",
     "about_release_notes": "История изменений",
-    "about_review": "Оставьте отзыв о нас",
     "performance_score": "Оценка производительности: {num}",
     "run_performance_test": "Тест производительности",
     "about_selftest": "Запустить самодиагностику",
@@ -304,8 +303,6 @@
     "privacy_quickactions": "Быстрые команды",
     "privacy_quickactions_explanation": "Долгое нажатие на иконку NeuraiWallet показывает баланс.",
     "privacy_clipboard_explanation": "Показывать действие, если в буфере адрес или инвойс.",
-    "privacy_do_not_track": "Выключить аналитику",
-    "privacy_do_not_track_explanation": "Данные производительности не будут отправляться.",
     "rate": "Курс",
     "push_notifications_explanation": "Включая уведомления, вы отправляете токен устройства и новые адреса/txid на сервер — только после включения.",
     "selfTest": "Проверка приложения",
@@ -384,8 +381,6 @@
     "custom_fee_warning_description": "Комиссии ниже 1 сат/вБайт действительны, но могут не ретранслироваться из-за политик узлов."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Простой и мощный Биткоин кошелёк",
     "add_create": "Создать",
     "total_balance": "Общий баланс",
     "add_entropy_reset_title": "Сброс энтропии",
@@ -396,8 +391,6 @@
     "add_entropy_provide": "Сгенерировать энтропию с помощью игральных костей",
     "add_entropy_remain": "{gen} байтов сгенерированной энтропии. Оставшиеся {rem} байтов будут получены из системного генератора случайных чисел.",
     "add_import_wallet": "Импортировать кошелёк",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "Для мгновенных переводов",
     "add_lndhub": "Подключиться к вашему LNDhub",
     "add_lndhub_error": "Предоставленный адрес ноды является недействительным LNDhub узлом.",
     "add_lndhub_placeholder": "Адрес вашей ноды",
@@ -508,9 +501,7 @@
     "explanation": "Просмотр общего баланса всех кошельков на обзорном экране."
   },
   "multisig": {
-    "multisig_vault": "Мультисиг хранилище",
     "default_label": "Мультисиг хранилище",
-    "multisig_vault_explain": "Лучшая безопасность для больших сумм",
     "provide_signature": "Предоставить подпись",
     "provide_signature_details": "Используйте устройство и кошелёк, где находится ключ, чтобы подписать транзакцию",
     "provide_signature_details_bluewallet": "В NeuraiWallet откройте меню экрана «Отправить» и выберите ",

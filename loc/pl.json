@@ -215,7 +215,6 @@
     "about_free": "NeuraiWallet jest projektem open source. Stworzonym przez i dla użytkowników Bitcoina.",
     "about_license": "Licencja MIT",
     "about_release_notes": "Informacje o wydaniu",
-    "about_review": "Wystaw nam opinię",
     "performance_score": "Wynik wydajności: {num}",
     "run_performance_test": "Test wydajności",
     "about_selftest": "Wykonaj autotest",
@@ -309,8 +308,6 @@
     "privacy_quickactions": "Skróty Portfeli",
     "privacy_quickactions_explanation": "Dotknij i przytrzymaj ikonę aplikacji NeuraiWallet, aby szybko sprawdzić saldo swojego portfela.",
     "privacy_clipboard_explanation": "Włącz skróty jeżeli adres lub faktura są znalezione w schowku.",
-    "privacy_do_not_track": "Wyłącz analitykę",
-    "privacy_do_not_track_explanation": "Informacje dotyczące wydajności i niezawodności nie będą przesyłane do analizy.",
     "rate": "Kurs",
     "push_notifications_explanation": "Włączając powiadomienia, token urządzenia zostanie wysłany do serwera, wraz z adresami portfela oraz identyfikatorami transakcji dla wszystkich portfeli i transakcji dokonanych po włączeniu powiadomień. Token ten jest używany do wysyłania powiadomień, a informacje o portfelu pozwalają nam powiadamiać cię o przychodzących Bitcoinach lub potwierdzeniach transakcji.\n\nPrzesyłane są wyłącznie informacje dotyczące okresu po włączeniu powiadomień — żadne dane sprzed tego momentu nie są zbierane.\n\nWyłączenie powiadomień spowoduje usunięcie wszystkich tych informacji z serwera. Dodatkowo, usunięcie portfela z aplikacji również spowoduje usunięcie powiązanych z nim danych z serwera.",
     "selfTest": "Autotest",
@@ -390,8 +387,6 @@
     "custom_fee_warning_description": "Opłaty poniżej 1 sat/vB są prawidłowe, ale mogą nie zostać przekazane dalej z powodu konfiguracji policy węzłów."
   },
   "wallets": {
-    "add_bitcoin": "Bitcoin",
-    "add_bitcoin_explain": "Prosty i potężny portfel Bitcoin",
     "add_create": "Utwórz",
     "total_balance": "Saldo całkowite",
     "add_entropy_reset_title": "Zresetuj entropię",
@@ -402,8 +397,6 @@
     "add_entropy_provide": "Dostarcz entropii przy użyciu rzutów kością",
     "add_entropy_remain": "{gen} bajtów wygenerowanej entropii. Pozostałe {rem} bajty zostaną pozyskane z systemowego generatora liczb losowych.",
     "add_import_wallet": "Import portfela",
-    "add_lightning": "Lightning",
-    "add_lightning_explain": "W celu wydawania za pomocą natychmiastowych transakcji",
     "add_lndhub": "Podłącz do swojego LNDhuba",
     "add_lndhub_error": "Podany adres węzła jest nieprawidłowym węzłem LNDhub.",
     "add_lndhub_placeholder": "Adres twojego węzła",
@@ -514,9 +507,7 @@
     "explanation": "Wyświetl saldo całkowite wszystkich swoich portfeli na ekranie podglądu."
   },
   "multisig": {
-    "multisig_vault": "Skarbiec wielopodpisowy",
     "default_label": "Skarbiec wielopodpisowy",
-    "multisig_vault_explain": "Najlepsze bezpieczeństwo dla dużych kwot",
     "provide_signature": "Podaj podpis",
     "provide_signature_details": "Użyj urządzenia i portfela, w którym znajduje się klucz, aby podpisać tę transakcję.",
     "provide_signature_details_bluewallet": "W NeuraiWallet przejdź do menu ekranu wysyłania i wybierz ",
