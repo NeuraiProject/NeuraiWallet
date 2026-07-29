@@ -1058,6 +1058,7 @@ export function useDePINChat(params: {
       deviceBacked,
       device,
       canCrypt,
+      walletID,
     ],
   );
 
