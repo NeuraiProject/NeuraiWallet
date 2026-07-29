@@ -7,7 +7,7 @@
  * via `setWssUrlOverride` and consumed by `createDefaultBackend`.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Keyboard, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Keyboard, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
 
 import { CHAIN_PARAMS, NeuraiNetwork, chainFor, getWssUrlOverride, loadOverrides, setWssUrlOverride } from '../../blue_modules/neurai';

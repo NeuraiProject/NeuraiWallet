@@ -36,6 +36,19 @@ const initialSteps: Step[] = [
   { label: 'WSS tip height (testnet, legacy)', status: 'pending' },
 ];
 
+function symbolFor(status: StepStatus): string {
+  switch (status) {
+    case 'pending':
+      return '·';
+    case 'running':
+      return '…';
+    case 'ok':
+      return '✓';
+    case 'fail':
+      return '✗';
+  }
+}
+
 const SelfTest: React.FC = () => {
   const [steps, setSteps] = useState<Step[]>(initialSteps);
   const [running, setRunning] = useState(false);
@@ -120,18 +133,6 @@ const SelfTest: React.FC = () => {
   );
 };
 
-function symbolFor(status: StepStatus): string {
-  switch (status) {
-    case 'pending':
-      return '·';
-    case 'running':
-      return '…';
-    case 'ok':
-      return '✓';
-    case 'fail':
-      return '✗';
-  }
-}
 
 const styles = StyleSheet.create({
   card: { padding: 16 },

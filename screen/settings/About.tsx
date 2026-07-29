@@ -313,9 +313,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  headerButton: {
-    marginTop: 16,
-  },
   footerContainer: {
     marginTop: 16,
   },

@@ -277,7 +277,7 @@ const WalletsList: React.FC = () => {
         currentWalletIndex.current = index;
       }
     },
-    [isFocused, refreshWallets, wallets, width],
+    [isFocused, wallets, width],
   );
 
   const renderListHeaderComponent = useCallback(() => {

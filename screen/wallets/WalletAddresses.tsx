@@ -222,6 +222,10 @@ const WalletAddresses: React.FC = () => {
       }
     }
     return newAddresses;
+    // `engineReady` is not read here on purpose: it is a counter bumped once
+    // `prewarmEngine()` resolves, and it is what makes this memo recompute the
+    // addresses the (non-reactive) engine can only derive once it is warm.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletInstance, engineReady, isPQAddressReuseEnabled]);
 
   useEffect(() => {
