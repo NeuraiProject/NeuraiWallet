@@ -215,7 +215,10 @@ describe('Neurai wallets', () => {
 
   describe('fee estimate (send-max parity with the engine)', () => {
     const legacyScript = '76a914' + '00'.repeat(20) + '88ac';
-    const pqScript = '5114' + '00'.repeat(20);
+    // Witness v1: OP_1 (0x51) + push-32 (0x20) + a 32-byte program. The old
+    // fixture used '5114' (push-20), which `isPQScript` does not match, so this
+    // suite measured the LEGACY branch and never covered PQ sizing at all.
+    const pqScript = '5120' + '00'.repeat(32);
 
     it('uses legacy input/output sizes (148 / 34) and base 10', () => {
       assert.strictEqual(estimateNeuraiTxSizeKb([legacyScript], ['NfooLegacyAddress']), 192 / 1024);
@@ -223,10 +226,14 @@ describe('Neurai wallets', () => {
       assert.strictEqual(estimateNeuraiFeeSats([legacyScript], ['NfooLegacyAddress'], 0.05), 937_500);
     });
 
-    it('uses PQ input/output sizes (976 / 31) and base 12 for AuthScript', () => {
-      assert.strictEqual(estimateNeuraiTxSizeKb([pqScript], ['nq1footestaddress']), 1019 / 1024);
-      // ceil((1019/1024) * 0.05 * 1e8) = ceil(4975585.9375)
-      assert.strictEqual(estimateNeuraiFeeSats([pqScript], ['nq1footestaddress'], 0.05), 4_975_586);
+    it('uses PQ input/output sizes (977 / 43) and base 12 for AuthScript', () => {
+      // 12 + 977 + 43 = 1032. The sizes mirror `VBYTES` in
+      // @neuraiproject/neurai-sign-transaction, which is the source of truth:
+      // under-counting a PQ input is what gets a transaction rejected with
+      // "min relay fee not met".
+      assert.strictEqual(estimateNeuraiTxSizeKb([pqScript], ['nq1footestaddress']), 1032 / 1024);
+      // ceil((1032/1024) * 0.05 XNA/kB * 1e8) = ceil(5039062.5)
+      assert.strictEqual(estimateNeuraiFeeSats([pqScript], ['nq1footestaddress'], 0.05), 5_039_063);
     });
   });
 });

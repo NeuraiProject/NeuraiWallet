@@ -17,6 +17,8 @@ import NeuraiJsWallet from '@neuraiproject/neurai-jswallet';
 import NeuraiKey from '@neuraiproject/neurai-key';
 import { type IDelta, type IHistoryItem } from '@neuraiproject/neurai-history-list';
 import { createPaymentTransaction, createStandardAssetTransferTransaction } from '@neuraiproject/neurai-create-transaction';
+
+import { markerForChain } from '../../blue_modules/neurai/assetMarker';
 import { sign as signNeuraiTransaction } from '@neuraiproject/neurai-sign-transaction';
 import type { NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native';
 import * as bitcoin from 'bitcoinjs-lib';
@@ -88,7 +90,44 @@ const yieldToEventLoop = () => new Promise<void>(resolve => setTimeout(resolve, 
  * why the WSS service collapses node rejections to a useless "broadcast failed". Pull
  * the real reason out of `error` / `description` here.
  */
-function describeBackendError(e: unknown): string {
+/**
+ * The node's two NIP-040 rejections, and what each one actually means.
+ *
+ * The app picks the asset marker from a table (`markerForChain`), which states
+ * something about the chain without looking at it. When the table and the node
+ * disagree the rejection is a bare consensus code, so it gets translated here
+ * — the cause is not something a user could guess from
+ * "bad-txns-asset-marker-before-nip040".
+ *
+ * Both directions are covered because both are reachable:
+ *
+ *   before-nip040  the node has NOT activated the migration yet and we sent
+ *                  `xna`. On testnet that means a node still syncing towards
+ *                  block 303000. Waiting fixes it.
+ *   after-nip040   the node HAS activated and we sent `rvn`. That is a bug in
+ *                  the app, not a node problem: some build path is missing its
+ *                  `assetMarker`.
+ */
+function explainAssetMarkerRejection(text: string): string | null {
+  if (/bad-txns-asset-marker-before-nip040/i.test(text)) {
+    return (
+      'The node has not activated the NIP-040 asset migration yet, but this wallet built the ' +
+      'transaction with the new "xna" marker. The node is most likely still syncing — on testnet ' +
+      'the migration activates at block 303000. Wait for it to catch up, or point the wallet at an ' +
+      'updated node, and try again.'
+    );
+  }
+  if (/bad-txns-legacy-asset-marker-after-nip040/i.test(text)) {
+    return (
+      'The node requires the new "xna" asset marker but this transaction was built with the legacy ' +
+      '"rvn" one. This is an app bug rather than a node problem: some asset build path is not ' +
+      'passing its assetMarker. Please report it.'
+    );
+  }
+  return null;
+}
+
+export function describeBackendError(e: unknown): string {
   if (e == null) return 'unknown error';
   const o = e as Record<string, unknown>;
   const parts: string[] = [];
@@ -106,7 +145,11 @@ function describeBackendError(e: unknown): string {
       return String(o);
     }
   }
-  return parts.join(' | ');
+  const detail = parts.join(' | ');
+  // Prepend the explanation but keep the raw reason: whoever reads a bug
+  // report still needs the node's own words.
+  const explained = explainAssetMarkerRejection(detail);
+  return explained ? `${explained} (${detail})` : detail;
 }
 
 type HistoryAsset = IHistoryItem['assets'][number];
@@ -368,6 +411,11 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       network: this.network,
       offlineMode: true,
       minAmountOfAddresses: Math.max(1, this.addressPosition),
+      // NIP-040. Without an override jswallet asks the node per build
+      // (`resolveAssetMarker`); the app already knows the answer, so it passes
+      // it and saves the round trip. Same source as the local builds, so both
+      // paths cannot disagree.
+      assetMarker: markerForChain(this.network),
     });
     this._engine = engine;
     return engine;
@@ -1131,6 +1179,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       inputs: inputs.map(u => ({ txid: u.txid, vout: u.outputIndex })),
       payments,
       transfers,
+      // NIP-040. Omitting it is not a compile error: the library keeps `rvn`
+      // and the chain rejects the transaction with
+      // bad-txns-legacy-asset-marker-after-nip040.
+      assetMarker: markerForChain(this.network),
     });
 
     const privateKeys: Record<string, unknown> = {};

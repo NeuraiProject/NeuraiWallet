@@ -41,6 +41,8 @@ import type {
 } from '@neuraiproject/neurai-sign-esp32/react-native';
 import { createStandardAssetTransferTransaction } from '@neuraiproject/neurai-create-transaction';
 
+import { markerForChain } from '../../blue_modules/neurai/assetMarker';
+
 import { chainFor, createDefaultRpcBackend, NeuraiChainType, WalletKind, type NeuraiBackend } from '../../blue_modules/neurai';
 import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
 import { getAssetType } from '../../blue_modules/neurai/assetUtils';
@@ -576,6 +578,10 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
       inputs: allInputs.map(u => ({ txid: u.txid, vout: u.outputIndex })),
       payments,
       transfers,
+      // NIP-040. Omitting it is not a compile error: the library keeps `rvn`
+      // and the chain rejects the transaction with
+      // bad-txns-legacy-asset-marker-after-nip040.
+      assetMarker: markerForChain(this.network),
     });
 
     // Asset-wrapped prevouts carry 0 XNA, so their sighash amount is 0; XNA fee
@@ -646,6 +652,10 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
       inputs: allInputs.map(u => ({ txid: u.txid, vout: u.outputIndex })),
       payments,
       transfers,
+      // NIP-040. Omitting it is not a compile error: the library keeps `rvn`
+      // and the chain rejects the transaction with
+      // bad-txns-legacy-asset-marker-after-nip040.
+      assetMarker: markerForChain(this.network),
     });
 
     // The device reads each prevout value from the full prev tx; asset outputs
