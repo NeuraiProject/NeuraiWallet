@@ -9,6 +9,7 @@ import {
   type NeuraiBackend,
   type NeuraiNetwork,
 } from '../blue_modules/neurai';
+import { getVerifiedPool } from '../blue_modules/neurai/depinPool';
 import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
 import type { DepinServerInfo } from '../components/depinChat/types';
 import { ONE_COIN, PUBKEY_POLL_MS } from '../components/depinChat/constants';
@@ -42,14 +43,39 @@ const useDepinChatSetup = ({ identity, network, supported }: UseDepinChatSetupPa
   const [chatAssets, setChatAssets] = useState<Record<string, number>>({});
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [serverInfo, setServerInfo] = useState<DepinServerInfo | null>(null);
+  /**
+   * How the pool key came to be trusted, for the UI to surface.
+   * `firstContact` means it was accepted on trust (TOFU) and the fingerprint
+   * is worth showing; `error` means nothing was verified and no pool data
+   * should be displayed.
+   */
+  const [poolTrust, setPoolTrust] = useState<{
+    firstContact: boolean;
+    fingerprint: string | null;
+    error: Error | null;
+  }>({ firstContact: false, fingerprint: null, error: null });
   const [pubkeyRevealed, setPubkeyRevealed] = useState<boolean | null>(null);
   const [depinBalance, setDepinBalance] = useState<number | null>(null);
 
   const refreshServerInfo = useCallback(() => {
-    return rpc?.<DepinServerInfo>('depingetmsginfo', [])
-      .then(info => setServerInfo(info))
-      .catch(error => console.debug('DePINChat: depingetmsginfo failed', error));
-  }, [rpc]);
+    if (!rpc) return Promise.resolve();
+    // Protocol 2: `depingetmsginfo` answers `{ body, poolsig }`, and the key
+    // that verifies the signature is inside the body. `getVerifiedPool` pins
+    // it, so a substituted key is refused instead of silently adopted.
+    //
+    // On failure the state is deliberately CLEARED rather than left stale: an
+    // unverified answer must not keep driving the UI.
+    return getVerifiedPool({ call: rpc, network, url: getDepinRpcConfig(network).url })
+      .then(pool => {
+        setServerInfo(pool.info as unknown as DepinServerInfo);
+        setPoolTrust({ firstContact: pool.firstContact, fingerprint: pool.fingerprint, error: null });
+      })
+      .catch(error => {
+        console.debug('DePINChat: verified depingetmsginfo failed', error);
+        setServerInfo(null);
+        setPoolTrust({ firstContact: false, fingerprint: null, error: error as Error });
+      });
+  }, [rpc, network]);
 
   const loadAssets = useCallback(async () => {
     if (!rpc || !identity) return;
@@ -121,7 +147,7 @@ const useDepinChatSetup = ({ identity, network, supported }: UseDepinChatSetupPa
     };
   }, [getBackend, identity, pubkeyRevealed, rpc]);
 
-  return { chatAssets, depinBalance, getBackend, loadingAssets, pubkeyRevealed, refreshServerInfo, rpc, serverInfo };
+  return { chatAssets, depinBalance, getBackend, loadingAssets, poolTrust, pubkeyRevealed, refreshServerInfo, rpc, serverInfo };
 };
 
 export default useDepinChatSetup;

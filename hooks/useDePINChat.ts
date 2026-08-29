@@ -25,10 +25,13 @@ import {
   assembleDepinMessage,
   buildDepinMessage,
   buildDepinPreimage,
+  buildDepinMessageForPool,
   decryptDepinReceiveEncryptedPayload,
-  type DepinServerWrapResult,
-  wrapMessageForServer,
 } from '../blue_modules/neurai/depinMsg';
+import type { NeuraiNetwork } from '../blue_modules/neurai';
+import { getVerifiedPool } from '../blue_modules/neurai/depinPool';
+import { getDepinRpcConfig } from '../blue_modules/neurai/depinRpcOverrides';
+import type { RawRpcCall } from '../blue_modules/neurai/depinRpcAdapter';
 import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
 import { clearDepinSession, loadDepinSession, saveDepinSession } from '../blue_modules/neurai/depinSessionStore';
 import { withDevice } from '../blue_modules/neurai-hw/deviceQueue';
@@ -231,10 +234,6 @@ interface DepinReceiveMsgItem {
   signature_hex: string;
 }
 
-interface MsgInfoResult {
-  depinpoolpkey?: string;
-}
-
 const isEncryptedResult = (value: unknown): value is { encrypted: string } => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   return typeof (value as { encrypted?: unknown }).encrypted === 'string';
@@ -251,12 +250,17 @@ export function useDePINChat(params: {
   activeTab?: string;
   /** Wallet showing the chat, for the per-wallet "already seen" marker. */
   walletID: string;
+  /**
+   * Chain the chat runs on. Needed to identify the endpoint whose pool key is
+   * pinned: a pin must never be inherited across networks.
+   */
+  network: NeuraiNetwork;
   /** Connected NeuraiHW device — required when `identity.deviceBacked` (no local WIF). */
   device?: NeuraiESP32 | null;
   /** Called when the USB link dies (device rebooted/unplugged) so the owner can reconnect. */
   onDeviceLost?: () => void;
 }) {
-  const { rpc, selectedAsset, identity, recipientList, activeTab = 'group', walletID, device = null, onDeviceLost } = params;
+  const { rpc, selectedAsset, identity, recipientList, activeTab = 'group', walletID, network, device = null, onDeviceLost } = params;
   // The visible conversation is read by definition; keep it in a ref so message
   // ingestion can consult it without re-creating the polling callbacks.
   const activeTabRef = useRef(activeTab);
@@ -1018,17 +1022,27 @@ export function useDePINChat(params: {
         });
       }
 
-      let payload: string | DepinServerWrapResult = built.hex;
-      try {
-        const info = (await rpc('depingetmsginfo', [])) as MsgInfoResult;
-        if (info?.depinpoolpkey && info.depinpoolpkey !== '0') {
-          payload = await wrapMessageForServer(built.hex, info.depinpoolpkey, effectiveAddress);
-        }
-      } catch (e) {
-        console.debug('useDePINChat: server privacy layer check failed', e);
-      }
+      // Protocol 2: the pool key comes from a VERIFIED and PINNED answer, and
+      // wrapping is mandatory — the node refuses a bare hex payload with
+      // "depinsubmitmsg expects {sender, encrypted}".
+      //
+      // This used to read `info.depinpoolpkey` off the raw reply. Under
+      // protocol 2 that field lives inside the signed body, so the read
+      // returned undefined, the `if` never ran and the message went out
+      // UNWRAPPED — and was then rejected for its shape. Failing to obtain a
+      // verified key must therefore stop the send, not fall through.
+      const pool = await getVerifiedPool({
+        call: rpc as unknown as RawRpcCall,
+        network,
+        url: getDepinRpcConfig(network).url,
+      });
+      const wrapped = await buildDepinMessageForPool({
+        messageHex: built.hex,
+        senderAddress: effectiveAddress,
+        poolPublicKey: pool.info.depinpoolpkey,
+      });
 
-      const result = await rpc('depinsubmitmsg', [payload]);
+      const result = await rpc('depinsubmitmsg', [wrapped]);
 
       if (isPrivate && targetAddress) {
         rememberPrivateRecipient(built.messageHash, targetAddress);
@@ -1039,8 +1053,11 @@ export function useDePINChat(params: {
       // leaving the chat before the next poll leaves the wallet flagging the
       // user's own message as unread.
       try {
-        const pool = (await rpc('depinpoolstats', [])) as { total_messages?: unknown; newest_message?: unknown } | null;
-        const signature = poolSignature(pool);
+        const poolAfterSend = (await rpc('depinpoolstats', [])) as {
+          total_messages?: unknown;
+          newest_message?: unknown;
+        } | null;
+        const signature = poolSignature(poolAfterSend);
         if (isMeaningfulSignature(signature)) markPoolSeen(walletID, signature);
       } catch {
         // Non-fatal: the next poll will catch up.
@@ -1049,6 +1066,7 @@ export function useDePINChat(params: {
     },
     [
       rpc,
+      network,
       selectedAsset,
       effectiveAddress,
       identity,
