@@ -29,9 +29,16 @@ import {
   normalizeDepinToken,
 } from '../blue_modules/neurai/depinMsg';
 import type { NeuraiNetwork } from '../blue_modules/neurai';
-import { getVerifiedPool } from '../blue_modules/neurai/depinPool';
+import { getVerifiedPool, getVerifiedPoolStats } from '../blue_modules/neurai/depinPool';
 import { auditRecipients } from '../blue_modules/neurai/depinRecipientAudit';
 import { sendDepinGroupMessage, softwareIdentity } from '../blue_modules/neurai/depinSend';
+import {
+  explainDepinReceiveRejection,
+  readableMessages,
+  receiveDepinPage,
+  type ChallengeState,
+  type DepinPlainMessage,
+} from '../blue_modules/neurai/depinReceive';
 import { getDepinRpcConfig } from '../blue_modules/neurai/depinRpcOverrides';
 import type { RawRpcCall } from '../blue_modules/neurai/depinRpcAdapter';
 import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
@@ -340,6 +347,10 @@ export function useDePINChat(params: {
   // Fingerprint of the server pool (`total_messages|newest_message`) at the last
   // fetch, so an unchanged pool skips the device round-trip entirely.
   const lastPoolSignatureRef = useRef<string | null>(null);
+  // Challenge carried between authenticated reads. Every reply hands out the
+  // next nonce, so the chain avoids a `depinchallenge` round trip per page —
+  // but a nonce is single-use, which is why polls are serialized above.
+  const challengeRef = useRef<ChallengeState | null>(null);
   const recipientPubKeyCacheRef = useRef<Map<string, string | null>>(new Map());
   // In-memory mirror of persisted private-message recipient mapping (hash -> address).
   const privateMsgRecipientsRef = useRef<Map<string, string>>(new Map());
@@ -480,6 +491,8 @@ export function useDePINChat(params: {
     // Message sizes differ per channel, so recalibrate the page budget.
     worstBytesPerMessageRef.current = 0;
     lastPoolSignatureRef.current = null;
+    // A challenge is bound to token + address, so it cannot cross a channel.
+    challengeRef.current = null;
     setError(null);
     setLastPoll(null);
     recipientPubKeyCacheRef.current.clear();
@@ -672,12 +685,21 @@ export function useDePINChat(params: {
     // On a hardware wallet every fetch costs a device decryption — and the
     // server re-sends the newest message on each incremental poll, so an idle
     // channel still burned one op every 5s (visible as the DePIN counter
-    // climbing on the ESP32). `depinpoolstats` is NOT privacy-wrapped, so we
-    // can ask the node whether the pool actually moved without involving the
-    // device at all, and only fetch when it did.
+    // climbing on the ESP32). `depinpoolstats` needs no identity — only the
+    // pinned pool key to verify its envelope — so we can ask whether the pool
+    // actually moved without involving the device at all, and fetch only then.
+    // Every protocol-2 reply is checked against the PINNED pool key, so the pool
+    // must be resolved before anything else is read. A rotated key stops the
+    // poll here rather than being adopted silently.
+    const pool = await getVerifiedPool({
+      call: rpc as unknown as RawRpcCall,
+      network,
+      url: getDepinRpcConfig(network).url,
+    });
+
     try {
-      const pool = (await rpc('depinpoolstats', [])) as { total_messages?: unknown; newest_message?: unknown } | null;
-      const signature = poolSignature(pool);
+      const poolStats = await getVerifiedPoolStats({ call: rpc as unknown as RawRpcCall, pool });
+      const signature = poolSignature(poolStats);
       // Opening the chat is what marks the channel as read, so record the state
       // we are about to display — this is what clears the wallet's new-message
       // dot without any decryption.
@@ -750,6 +772,45 @@ export function useDePINChat(params: {
     // Decrypt one page's messages and publish them right away, so a backlog
     // fills the screen as it arrives instead of after the whole poll — every
     // message is a device round-trip, so the wait is otherwise very visible.
+    // One readable message, mapped to what the chat renders. Shared by both
+    // fetch paths so they cannot drift on private-message routing.
+    const toChatMessage = (meta: Omit<DepinPlainMessage, 'plaintext'>, plaintext: string): DePINMessage => {
+      const ts = typeof meta.timestamp === 'number' ? meta.timestamp : Math.floor(Date.now() / 1000);
+      // Some clients send private messages as plain "@recipient text" without
+      // tagging message_type — route those to the private conversation (and
+      // strip the prefix) instead of showing them raw in the group chat.
+      const privMatch = plaintext.match(/^@(N[a-zA-Z0-9]{33,34}|t[a-zA-Z0-9]{33,34})\s+([\s\S]*)$/);
+      const messageType = privMatch ? 'private' : meta.messageType;
+      let contactAddress = getContactAddress(meta.hash, meta.sender, effectiveAddress, messageType);
+      if (privMatch && meta.sender === effectiveAddress) contactAddress = privMatch[1];
+      return {
+        recipient: effectiveAddress,
+        sender: meta.sender,
+        message: privMatch ? privMatch[2] : plaintext,
+        timestamp: ts,
+        date: new Date(ts * 1000).toLocaleString(),
+        expires: '',
+        messageHash: meta.hash,
+        messageType,
+        contactAddress,
+      };
+    };
+
+    // Publishes a page that arrived already verified and decrypted (protocol 2).
+    const ingestVerified = (resolved: DepinPlainMessage[]) => {
+      const seen = seenMessageKeysRef.current;
+      let maxTimestamp = lastTimestampRef.current;
+      const fresh: DePINMessage[] = [];
+      for (const msg of resolved) {
+        maxTimestamp = Math.max(maxTimestamp, msg.timestamp);
+        if (seen.has(msg.hash)) continue;
+        seen.add(msg.hash);
+        fresh.push(toChatMessage(msg, msg.plaintext));
+      }
+      lastTimestampRef.current = maxTimestamp;
+      if (fresh.length > 0) ingestItems([], effectiveAddress, fresh);
+    };
+
     const ingestPage = async (pageItems: DepinReceiveMsgItem[]) => {
       const decrypted: DePINMessage[] = [];
       const seen = seenMessageKeysRef.current;
@@ -780,32 +841,77 @@ export function useDePINChat(params: {
         if (typeof plaintext !== 'string' || plaintext.length === 0) continue;
 
         seen.add(key);
-        const ts = typeof item.timestamp === 'number' ? item.timestamp : Math.floor(Date.now() / 1000);
-        const messageHash = String(item.hash ?? '');
-        const sender = String(item.sender ?? '');
-        // Some clients send private messages as plain "@recipient text" without
-        // tagging message_type — route those to the private conversation (and
-        // strip the prefix) instead of showing them raw in the group chat.
-        const privMatch = plaintext.match(/^@(N[a-zA-Z0-9]{33,34}|t[a-zA-Z0-9]{33,34})\s+([\s\S]*)$/);
-        const messageType = privMatch ? 'private' : item.message_type;
-        let contactAddress = getContactAddress(messageHash, sender, effectiveAddress, messageType);
-        if (privMatch && sender === effectiveAddress) contactAddress = privMatch[1];
-        decrypted.push({
-          recipient: effectiveAddress,
-          sender,
-          message: privMatch ? privMatch[2] : plaintext,
-          timestamp: ts,
-          date: new Date(ts * 1000).toLocaleString(),
-          expires: '',
-          messageHash,
-          messageType,
-          contactAddress,
-        });
+        decrypted.push(
+          toChatMessage(
+            {
+              hash: String(item.hash ?? ''),
+              sender: String(item.sender ?? ''),
+              timestamp: typeof item.timestamp === 'number' ? item.timestamp : Math.floor(Date.now() / 1000),
+              messageType: item.message_type === 'private' ? 'private' : 'group',
+            },
+            plaintext,
+          ),
+        );
       }
 
       lastTimestampRef.current = maxTimestamp;
       if (decrypted.length > 0) ingestItems(pageItems, effectiveAddress, decrypted);
     };
+
+    // Protocol 2, software identity: the node refuses an unauthenticated read,
+    // so each page carries a signed single-use challenge, the reply's `poolsig`
+    // is checked against the pinned key, and only then does the library open the
+    // payloads through `identity.openReply`. Nothing reaches the decryptor
+    // unless the envelope authenticated first.
+    //
+    // A device-backed identity still walks the old path below: signing the
+    // challenge on the ESP32 is the hardware phase, deliberately left for last.
+    if (!deviceBacked && identity?.wif) {
+      const receiveIdentity = await softwareIdentity(String(identity.wif), network);
+      let cursor = '';
+
+      for (let page = 0; page < MAX_PAGES_PER_POLL; page++) {
+        const fetchPage = (token: string) =>
+          receiveDepinPage({
+            call: rpc as unknown as RawRpcCall,
+            identity: receiveIdentity,
+            token,
+            poolPublicKey: pool.info.depinpoolpkey,
+            network,
+            previous: challengeRef.current,
+            ...(cursor ? { afterHash: cursor } : {}),
+          });
+
+        let result;
+        try {
+          result = await fetchPage(serverTokenRef.current ?? selectedAsset);
+        } catch (err) {
+          // Never carry a nonce through a failure. The node may already have
+          // spent it, and a rejected reuse fails the same way every time — the
+          // channel would stall for good instead of recovering on the next poll.
+          challengeRef.current = null;
+          const alt = alternateTokenSpelling(selectedAsset, err);
+          if (!alt) throw err;
+          console.debug(`useDePINChat: adopting server token spelling '${alt}' for asset '${selectedAsset}'`);
+          serverTokenRef.current = alt;
+          result = await fetchPage(alt);
+        }
+
+        challengeRef.current = result.next;
+        const readable = readableMessages(result.messages);
+        ingestVerified(readable);
+
+        if (pollAbortRef.current) break;
+        if (!result.hasMore || result.messages.length === 0) break;
+        const last = result.messages[result.messages.length - 1];
+        const next = typeof last?.hash === 'string' ? last.hash : '';
+        if (!next || next === cursor) break;
+        cursor = next;
+      }
+
+      setLastPoll(new Date());
+      return;
+    }
 
     let afterHash = '';
     let pageLimit = nextPageLimit();
@@ -856,6 +962,7 @@ export function useDePINChat(params: {
     setLastPoll(new Date());
   }, [
     rpc,
+    network,
     selectedAsset,
     effectiveAddress,
     identity,
@@ -904,8 +1011,11 @@ export function useDePINChat(params: {
         // connection; polling keeps retrying every 5s, so only surface an error
         // after it fails repeatedly (the UI shows a "checking…" state meanwhile).
         consecutiveFailuresRef.current += 1;
-        if (active && consecutiveFailuresRef.current >= 2) {
-          setError(describeRpcError(err) ?? 'Failed to fetch messages');
+        // Some protocol-2 rejections describe a state polling cannot escape —
+        // say what it is instead of repeating the node's wording.
+        const explained = explainDepinReceiveRejection(describeRpcError(err) ?? err);
+        if (active && (explained || consecutiveFailuresRef.current >= 2)) {
+          setError(explained ?? describeRpcError(err) ?? 'Failed to fetch messages');
         }
         // Give up after repeated failures instead of retrying forever: when the
         // failure is a hardware wallet that can't answer, each retry hits the
@@ -1092,10 +1202,7 @@ export function useDePINChat(params: {
       // leaving the chat before the next poll leaves the wallet flagging the
       // user's own message as unread.
       try {
-        const poolAfterSend = (await rpc('depinpoolstats', [])) as {
-          total_messages?: unknown;
-          newest_message?: unknown;
-        } | null;
+        const poolAfterSend = await getVerifiedPoolStats({ call: rpc as unknown as RawRpcCall, pool });
         const signature = poolSignature(poolAfterSend);
         if (isMeaningfulSignature(signature)) markPoolSeen(walletID, signature);
       } catch {

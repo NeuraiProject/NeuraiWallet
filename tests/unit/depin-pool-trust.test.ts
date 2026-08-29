@@ -25,9 +25,11 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 const getDepinPoolInfo = jest.fn();
+const poolKeyFingerprint = jest.fn((key: string) => `fp(${key.slice(0, 4)})`);
 jest.mock('../../blue_modules/neurai/depinMsg', () => ({
   __esModule: true,
   getDepinPoolInfo: (...args: unknown[]) => getDepinPoolInfo(...args),
+  poolKeyFingerprint: (key: string) => poolKeyFingerprint(key),
 }));
 
 const KEY_A = '02' + 'a'.repeat(64);
@@ -107,11 +109,27 @@ describe('getVerifiedPool', () => {
 });
 
 describe('poolFingerprint', () => {
-  it('is short enough to read out loud and compare', () => {
-    expect(poolFingerprint(KEY_A)).toBe(`${KEY_A.slice(0, 8)}…${KEY_A.slice(-8)}`);
+  it('uses the library digest, so it matches what other clients show', () => {
+    // The point of a fingerprint is being read out and compared against
+    // another tool. A local abbreviation of our own would not compare.
+    expect(poolFingerprint(KEY_A)).toBe('fp(02aa)');
+    expect(poolKeyFingerprint).toHaveBeenCalledWith(KEY_A);
   });
 
   it('differs for different keys', () => {
     expect(poolFingerprint(KEY_A)).not.toBe(poolFingerprint(KEY_B));
+  });
+
+  it('still shows something for a key it cannot digest', () => {
+    // Reached with the unknown counterpart of a pin mismatch: showing nothing
+    // would hide the very difference the user is being asked to judge.
+    poolKeyFingerprint.mockImplementationOnce(() => {
+      throw new Error('not a public key');
+    });
+    expect(poolFingerprint(KEY_A)).toBe(`${KEY_A.slice(0, 8)}…${KEY_A.slice(-8)}`);
+  });
+
+  it('passes an empty key straight through', () => {
+    expect(poolFingerprint('')).toBe('');
   });
 });

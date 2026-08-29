@@ -31,7 +31,15 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { getDepinPoolInfo, type DepinPoolInfoResult, type DepinPoolPin, type DepinTrust } from './depinMsg';
+import {
+  decodePlainReply,
+  getDepinPoolInfo,
+  poolKeyFingerprint,
+  verifyDepinReply,
+  type DepinPoolInfoResult,
+  type DepinPoolPin,
+  type DepinTrust,
+} from './depinMsg';
 import { createDepinRpc, depinServiceId, type RawRpcCall } from './depinRpcAdapter';
 
 const KEY_PREFIX = 'depin_pool_pin_';
@@ -58,11 +66,24 @@ export class DepinPoolPinMismatchError extends Error {
   }
 }
 
-/** Short, comparable form of a pool key, for showing the user. */
+/**
+ * Short, comparable form of a pool key, for showing the user.
+ *
+ * The digest is the library's, not a local abbreviation: the only thing a
+ * fingerprint is good for is being read out and compared against what another
+ * client shows for the same pool, and two tools that disagree on how to shorten
+ * a key make that impossible.
+ */
 export function poolFingerprint(poolPublicKey: string): string {
-  const k = String(poolPublicKey || '');
-  if (k.length < 16) return k;
-  return `${k.slice(0, 8)}…${k.slice(-8)}`;
+  const key = String(poolPublicKey || '');
+  if (!key) return key;
+  try {
+    return poolKeyFingerprint(key);
+  } catch {
+    // Not a parseable key (an unknown counterpart in a mismatch): show what we
+    // have rather than hiding the difference the user is being asked about.
+    return key.length < 16 ? key : `${key.slice(0, 8)}…${key.slice(-8)}`;
+  }
 }
 
 export async function loadPin(serviceId: string): Promise<DepinPoolPin | null> {
@@ -147,4 +168,44 @@ export async function getVerifiedPool(params: { call: RawRpcCall; network: strin
     firstContact: !stored,
     fingerprint: poolFingerprint(seenKey),
   };
+}
+
+/** What `depinpoolstats` reports once its envelope has been verified. */
+export interface DepinPoolStats {
+  enabled?: boolean;
+  token?: string;
+  total_messages?: number;
+  newest_message?: string;
+  oldest_message?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Reads `depinpoolstats` through its signed envelope.
+ *
+ * Protocol 2 wrapped this reply too — it now arrives as `{ body, poolsig }`,
+ * and the app used to read `total_messages` straight off that object, getting
+ * `undefined` every time. The poll's "has the pool moved?" shortcut and the
+ * unread marker both hang off that number, so both were silently dead against
+ * an updated node.
+ *
+ * The library has no dedicated flow for this call, so the envelope is verified
+ * here with the same primitives its own flows use. The signature binds the pool
+ * ROOT token (established against the live testnet node, which does not verify
+ * unbound), and only a value branded by the verifier can be decoded.
+ *
+ * @param params.call - RPC function bound to the node
+ * @param params.pool - The verified pool, for the pinned key and root token
+ * @returns The decoded stats body
+ * @throws If the envelope does not verify against the pinned pool key
+ */
+export async function getVerifiedPoolStats(params: { call: RawRpcCall; pool: VerifiedPool }): Promise<DepinPoolStats> {
+  const reply = await params.call('depinpoolstats', []);
+  const verified = verifyDepinReply({
+    reply,
+    method: 'depinpoolstats',
+    token: params.pool.pin?.poolRoot ?? params.pool.info?.token ?? '',
+    poolPublicKey: params.pool.info.depinpoolpkey,
+  });
+  return (decodePlainReply(verified) ?? {}) as DepinPoolStats;
 }

@@ -121,7 +121,18 @@ interface DepinMsgApi {
   resolveDepinRecipients(params: Record<string, unknown>): Promise<DepinRecipients>;
   buildDepinMessageForPool(params: Record<string, unknown>): Promise<DepinPoolBuildResult>;
   submitDepinMessage(params: Record<string, unknown>): Promise<{ messageHash?: string } | string>;
+  verifyDepinReply(params: Record<string, unknown>): VerifiedDepinReply;
+  decodePlainReply(verified: VerifiedDepinReply): unknown;
+  poolKeyFingerprint(poolPublicKey: string): string;
 }
+
+/**
+ * A reply whose `poolsig` verified, branded by the library.
+ *
+ * Opaque on purpose: the decoding helpers only accept a value the verifier
+ * produced, so an unverified envelope cannot be decoded by mistake.
+ */
+export type VerifiedDepinReply = { readonly __verifiedDepinReply?: never };
 
 /** How the endpoint's pool key is trusted. See the plan's §4.1 / §4.1.1. */
 export type DepinTrust =
@@ -291,3 +302,25 @@ export const buildDepinMessageForPool = (params: Record<string, unknown>): Promi
 /** Submit the wrapped message as `{ sender, encrypted }`. */
 export const submitDepinMessage = (params: Record<string, unknown>): Promise<{ messageHash?: string } | string> =>
   api().submitDepinMessage(params);
+
+/**
+ * Verifies a `{ body, poolsig }` envelope against the pinned pool key.
+ *
+ * Needed directly for the replies the library has no flow of its own for —
+ * `depinpoolstats` today. Everything else should go through the flow that
+ * verifies for you.
+ */
+export const verifyDepinReply = (params: Record<string, unknown>): VerifiedDepinReply => api().verifyDepinReply(params);
+
+/** Decodes a verified plain reply's body. Rejects anything not branded by the verifier. */
+export const decodePlainReply = (verified: VerifiedDepinReply): unknown => api().decodePlainReply(verified);
+
+/**
+ * The pool key's fingerprint, for a human to compare out of band.
+ *
+ * Delegated rather than truncated locally: a fingerprint is only useful if the
+ * user can hold it against what another client shows, so it has to be the same
+ * digest everywhere (SHA-256 of the canonical key, first 16 hex in groups of
+ * four), not this app's private abbreviation of the key.
+ */
+export const poolKeyFingerprint = (poolPublicKey: string): string => api().poolKeyFingerprint(poolPublicKey);
