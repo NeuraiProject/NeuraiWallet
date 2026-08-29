@@ -25,11 +25,13 @@ import {
   assembleDepinMessage,
   buildDepinMessage,
   buildDepinPreimage,
-  buildDepinMessageForPool,
   decryptDepinReceiveEncryptedPayload,
+  normalizeDepinToken,
 } from '../blue_modules/neurai/depinMsg';
 import type { NeuraiNetwork } from '../blue_modules/neurai';
 import { getVerifiedPool } from '../blue_modules/neurai/depinPool';
+import { auditRecipients } from '../blue_modules/neurai/depinRecipientAudit';
+import { sendDepinGroupMessage, softwareIdentity } from '../blue_modules/neurai/depinSend';
 import { getDepinRpcConfig } from '../blue_modules/neurai/depinRpcOverrides';
 import type { RawRpcCall } from '../blue_modules/neurai/depinRpcAdapter';
 import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
@@ -279,6 +281,12 @@ export function useDePINChat(params: {
   const [privateConversations, setPrivateConversations] = useState<Map<string, PrivateConversation>>(new Map());
   const [isPolling, setIsPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Set when an independent node does not confirm every recipient the DePIN
+   * server listed. A warning, not an error: the message was sent, and the
+   * audit is advisory (see depinRecipientAudit).
+   */
+  const [recipientWarning, setRecipientWarning] = useState<string | null>(null);
   const [stats, setStats] = useState<PoolStats | null>(null);
   /** Unread arrivals in the public group (private ones live in each conversation). */
   const [groupUnread, setGroupUnread] = useState(0);
@@ -974,6 +982,30 @@ export function useDePINChat(params: {
       }
       if (recipientPubKeys.length === 0) throw new Error('No valid recipient public keys found');
 
+      // The messaging server decides who this is encrypted to, and it is the
+      // party that can lie. The library already refuses a public key that does
+      // not hash to its address, so the one move left is adding an address the
+      // server controls — which "who holds the token" settles, because that is
+      // on-chain data. Ask a DIFFERENT node: the app's own default RPC.
+      //
+      // Warn, do not block: an auditor that is down, or an endpoint that is not
+      // actually independent, is not evidence of an attack, and refusing to
+      // send on that basis would break the chat for the wrong reason.
+      const auditedAddresses = isPrivate && targetAddress ? [targetAddress] : recipientList.map(r => r.address);
+      auditRecipients({ addresses: auditedAddresses, token: normalizeDepinToken(selectedAsset), network })
+        .then(audit => {
+          if (audit.independent && !audit.ok && audit.unconfirmed.length > 0) {
+            setRecipientWarning(
+              `${audit.unconfirmed.length} recipient address(es) are not confirmed as active holders of ` +
+                `${selectedAsset} by ${audit.auditUrl}. The DePIN server may be listing addresses that do ` +
+                `not hold the token. Your message was still sent.`,
+            );
+          } else {
+            setRecipientWarning(null);
+          }
+        })
+        .catch(e => console.debug('useDePINChat: recipient audit failed', e));
+
       const messageType: 'private' | 'group' = isPrivate ? 'private' : 'group';
       const timestamp = Math.floor(Date.now() / 1000);
 
@@ -1036,13 +1068,20 @@ export function useDePINChat(params: {
         network,
         url: getDepinRpcConfig(network).url,
       });
-      const wrapped = await buildDepinMessageForPool({
-        messageHex: built.hex,
-        senderAddress: effectiveAddress,
-        poolPublicKey: pool.info.depinpoolpkey,
+      // `buildDepinMessageForPool` resolves the recipients itself and refuses
+      // any whose public key does not hash to its address — the check the old
+      // `getpubkey` path did not have. `submitDepinMessage` then wraps for the
+      // pool, submits, and verifies the confirmation before opening it.
+      const sent = await sendDepinGroupMessage({
+        call: rpc as unknown as RawRpcCall,
+        pool,
+        identity: await softwareIdentity(String(identity.wif), network),
+        token: selectedAsset,
+        message: cleaned,
+        timestamp,
+        network,
       });
-
-      const result = await rpc('depinsubmitmsg', [wrapped]);
+      const result = sent.messageHash;
 
       if (isPrivate && targetAddress) {
         rememberPrivateRecipient(built.messageHash, targetAddress);
@@ -1117,6 +1156,8 @@ export function useDePINChat(params: {
     isPolling,
     setIsPolling,
     error,
+    /** Advisory: the independent node did not confirm every listed recipient. */
+    recipientWarning,
     stats,
     lastPoll,
     sendMessage,

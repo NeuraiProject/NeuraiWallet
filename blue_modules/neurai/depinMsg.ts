@@ -119,7 +119,7 @@ interface DepinMsgApi {
   requestDepinChallenge(params: DepinChallengeParams): Promise<DepinChallenge>;
   receiveDepinMessages(params: Record<string, unknown>): Promise<DepinReceiveResult>;
   resolveDepinRecipients(params: Record<string, unknown>): Promise<DepinRecipients>;
-  buildDepinMessageForPool(params: Record<string, unknown>): Promise<{ encrypted: string; sender: string }>;
+  buildDepinMessageForPool(params: Record<string, unknown>): Promise<DepinPoolBuildResult>;
   submitDepinMessage(params: Record<string, unknown>): Promise<{ messageHash?: string } | string>;
 }
 
@@ -195,6 +195,28 @@ export interface DepinReceiveResult {
   [key: string]: unknown;
 }
 
+/**
+ * What `buildDepinMessageForPool` returns: the fully built and signed message,
+ * NOT a wrapper around a pre-built one. It resolves the recipient set itself,
+ * which is what enforces the public-key-to-address binding.
+ */
+export interface DepinPoolBuildResult {
+  /** Serialized message, ready for `submitDepinMessage`. */
+  hex: string;
+  messageHash: string;
+  recipientCount?: number;
+  resolution?: {
+    recipientPubKeys: string[];
+    /** Counters the pool reports; a `*Complete: false` means the list was cut short. */
+    skipped?: {
+      noPubKey?: number | null;
+      noPubKeyComplete?: boolean | null;
+      restricted?: number | null;
+      restrictedComplete?: boolean | null;
+    };
+  };
+}
+
 export interface DepinRecipients {
   recipients: Array<{ address: string; pubkey: string }>;
   truncated?: boolean;
@@ -263,7 +285,7 @@ export const receiveDepinMessages = (params: Record<string, unknown>): Promise<D
 export const resolveDepinRecipients = (params: Record<string, unknown>): Promise<DepinRecipients> => api().resolveDepinRecipients(params);
 
 /** Wrap a serialized message in the ECIES envelope addressed to the pool. */
-export const buildDepinMessageForPool = (params: Record<string, unknown>): Promise<{ encrypted: string; sender: string }> =>
+export const buildDepinMessageForPool = (params: Record<string, unknown>): Promise<DepinPoolBuildResult> =>
   api().buildDepinMessageForPool(params);
 
 /** Submit the wrapped message as `{ sender, encrypted }`. */
