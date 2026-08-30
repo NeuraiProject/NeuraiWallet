@@ -21,17 +21,11 @@ import { Buffer } from 'buffer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native';
 
-import {
-  assembleDepinMessage,
-  buildDepinMessage,
-  buildDepinPreimage,
-  decryptDepinReceiveEncryptedPayload,
-  normalizeDepinToken,
-} from '../blue_modules/neurai/depinMsg';
+import { decryptDepinReceiveEncryptedPayload, normalizeDepinToken } from '../blue_modules/neurai/depinMsg';
 import type { NeuraiNetwork } from '../blue_modules/neurai';
 import { getVerifiedPool, getVerifiedPoolStats } from '../blue_modules/neurai/depinPool';
 import { auditRecipients } from '../blue_modules/neurai/depinRecipientAudit';
-import { sendDepinGroupMessage, softwareIdentity } from '../blue_modules/neurai/depinSend';
+import { sendDepinGroupMessage, sendDepinPrivateMessage, softwareIdentity } from '../blue_modules/neurai/depinSend';
 import {
   explainDepinReceiveRejection,
   readableMessages,
@@ -228,12 +222,6 @@ export interface RecipientInfo {
   pubkey: string | null;
 }
 
-interface PubkeyResponse {
-  pubkey?: string;
-  revealed?: number;
-  result?: string | { pubkey?: string };
-}
-
 interface DepinReceiveMsgItem {
   hash: string;
   sender: string;
@@ -428,41 +416,6 @@ export function useDePINChat(params: {
         }
       } catch (e) {
         console.debug('useDePINChat: preloadRecipientPubkeys failed', e);
-      }
-    },
-    [rpc],
-  );
-
-  const resolveRecipientPubkey = useCallback(
-    async (address: string, existing: string | null): Promise<string | null> => {
-      const normalizedExisting = (existing || '').trim().toLowerCase();
-      if (normalizedExisting) return normalizedExisting;
-
-      if (recipientPubKeyCacheRef.current.has(address)) {
-        return recipientPubKeyCacheRef.current.get(address) ?? null;
-      }
-      if (!rpc) return null;
-
-      try {
-        const res = (await rpc('getpubkey', [address])) as PubkeyResponse | string | null;
-        const revealed = typeof (res as PubkeyResponse)?.revealed === 'number' ? (res as PubkeyResponse).revealed === 1 : null;
-        const raw =
-          typeof (res as PubkeyResponse)?.pubkey === 'string' ? (res as PubkeyResponse).pubkey! : typeof res === 'string' ? res : '';
-        const pk = raw.trim().toLowerCase();
-
-        if (revealed === false) {
-          recipientPubKeyCacheRef.current.set(address, null);
-          return null;
-        }
-        if (pk.length === 66 && (pk.startsWith('02') || pk.startsWith('03'))) {
-          recipientPubKeyCacheRef.current.set(address, pk);
-          return pk;
-        }
-        recipientPubKeyCacheRef.current.set(address, null);
-        return null;
-      } catch {
-        recipientPubKeyCacheRef.current.set(address, null);
-        return null;
       }
     },
     [rpc],
@@ -1072,35 +1025,35 @@ export function useDePINChat(params: {
       const cleaned = isPrivate ? privateMatch![2] : message;
 
       const senderPubKey = String(identity.publicKey).trim().toLowerCase();
+      const timestamp = Math.floor(Date.now() / 1000);
 
-      const recipientPubKeys: string[] = [];
-      if (isPrivate && targetAddress) {
-        const target = recipientList.find(r => r.address === targetAddress);
-        if (!target) throw new Error(`Recipient ${targetAddress} does not hold ${selectedAsset}`);
-        const pk = await resolveRecipientPubkey(target.address, target.pubkey ?? null);
-        if (!pk) throw new Error(`No public key for ${targetAddress}`);
-        recipientPubKeys.push(pk);
-      } else {
-        const set = new Set<string>();
-        for (const r of recipientList) {
-          const pk = await resolveRecipientPubkey(r.address, r.pubkey ?? null);
-          if (pk && !set.has(pk)) {
-            set.add(pk);
-            recipientPubKeys.push(pk);
-          }
-        }
+      // Protocol 2: the pool key comes from a VERIFIED and PINNED answer, and
+      // wrapping is mandatory — the node refuses a bare hex payload with
+      // "depinsubmitmsg expects {sender, encrypted}".
+      const pool = await getVerifiedPool({
+        call: rpc as unknown as RawRpcCall,
+        network,
+        url: getDepinRpcConfig(network).url,
+      });
+
+      if (deviceBacked) {
+        // The device path used to build and sign a message that was then thrown
+        // away, with a group message submitted in its place. Rather than leave
+        // that, it fails until the hardware phase wires signing into this flow.
+        throw new Error('Sending from a hardware wallet is not supported on the new DePIN protocol yet.');
       }
-      if (recipientPubKeys.length === 0) throw new Error('No valid recipient public keys found');
 
-      // The messaging server decides who this is encrypted to, and it is the
-      // party that can lie. The library already refuses a public key that does
-      // not hash to its address, so the one move left is adding an address the
-      // server controls — which "who holds the token" settles, because that is
-      // on-chain data. Ask a DIFFERENT node: the app's own default RPC.
+      const chatIdentity = await softwareIdentity(String(identity.wif), network);
+
+      // The messaging server decides who a group message is encrypted to, and it
+      // is the party that can lie. The library already refuses a public key that
+      // does not hash to its address, so the one move left is adding an address
+      // the server controls — which "who holds the token" settles, because that
+      // is on-chain data. Ask a DIFFERENT node: the app's own default RPC.
       //
       // Warn, do not block: an auditor that is down, or an endpoint that is not
-      // actually independent, is not evidence of an attack, and refusing to
-      // send on that basis would break the chat for the wrong reason.
+      // actually independent, is not evidence of an attack, and refusing to send
+      // on that basis would break the chat for the wrong reason.
       const auditedAddresses = isPrivate && targetAddress ? [targetAddress] : recipientList.map(r => r.address);
       auditRecipients({ addresses: auditedAddresses, token: normalizeDepinToken(selectedAsset), network })
         .then(audit => {
@@ -1116,86 +1069,38 @@ export function useDePINChat(params: {
         })
         .catch(e => console.debug('useDePINChat: recipient audit failed', e));
 
-      const messageType: 'private' | 'group' = isPrivate ? 'private' : 'group';
-      const timestamp = Math.floor(Date.now() / 1000);
-
-      let built;
-      if (deviceBacked) {
-        // Hardware wallet: encrypt host-side (no key), sign on the device, then
-        // assemble. The device session is scoped to the canonical `&NAME`, so we
-        // sign/assemble/submit with that same token (matches node verification).
-        if (!device) throw new Error('Device not connected');
-        const token = selectedAsset;
-        if (deviceSessionTokenRef.current !== token) {
-          throw new Error('Device DePIN session not active for this channel');
-        }
-        const pre = await buildDepinPreimage({
-          token,
-          senderAddress: effectiveAddress,
-          senderPubKey,
-          timestamp,
-          message: cleaned,
-          recipientPubKeys,
-          messageType,
-        });
-        const { signature } = await withDevice(() =>
-          device.depinSign({
-            token,
-            sender: effectiveAddress,
-            timestamp,
-            messageType: pre.messageTypeByte,
-            encryptedPayload: pre.encryptedPayloadHex,
-          }),
-        );
-        built = await assembleDepinMessage(
-          { token, senderAddress: effectiveAddress, timestamp, messageType, encryptedPayloadHex: pre.encryptedPayloadHex },
-          signature,
-        );
-      } else {
-        built = await buildDepinMessage({
-          token: serverTokenRef.current ?? selectedAsset,
-          senderAddress: effectiveAddress,
-          senderPubKey,
-          privateKey: String(identity.wif),
-          timestamp,
-          message: cleaned,
-          recipientPubKeys,
-          messageType,
-        });
-      }
-
-      // Protocol 2: the pool key comes from a VERIFIED and PINNED answer, and
-      // wrapping is mandatory — the node refuses a bare hex payload with
-      // "depinsubmitmsg expects {sender, encrypted}".
-      //
-      // This used to read `info.depinpoolpkey` off the raw reply. Under
-      // protocol 2 that field lives inside the signed body, so the read
-      // returned undefined, the `if` never ran and the message went out
-      // UNWRAPPED — and was then rejected for its shape. Failing to obtain a
-      // verified key must therefore stop the send, not fall through.
-      const pool = await getVerifiedPool({
-        call: rpc as unknown as RawRpcCall,
-        network,
-        url: getDepinRpcConfig(network).url,
-      });
-      // `buildDepinMessageForPool` resolves the recipients itself and refuses
-      // any whose public key does not hash to its address — the check the old
-      // `getpubkey` path did not have. `submitDepinMessage` then wraps for the
-      // pool, submits, and verifies the confirmation before opening it.
-      const sent = await sendDepinGroupMessage({
-        call: rpc as unknown as RawRpcCall,
-        pool,
-        identity: await softwareIdentity(String(identity.wif), network),
-        token: selectedAsset,
-        message: cleaned,
-        timestamp,
-        network,
-      });
+      // A private message goes to one holder and to us, and to nobody else. A
+      // group message is resolved and encrypted to every holder by the library.
+      const sent =
+        isPrivate && targetAddress
+          ? await sendDepinPrivateMessage({
+              call: rpc as unknown as RawRpcCall,
+              pool,
+              identity: chatIdentity,
+              token: selectedAsset,
+              toAddress: targetAddress,
+              message: cleaned,
+              timestamp,
+              network,
+              senderPubKey,
+              privateKey: String(identity.wif),
+            })
+          : await sendDepinGroupMessage({
+              call: rpc as unknown as RawRpcCall,
+              pool,
+              identity: chatIdentity,
+              token: selectedAsset,
+              message: cleaned,
+              timestamp,
+              network,
+            });
       const result = sent.messageHash;
 
-      if (isPrivate && targetAddress) {
-        rememberPrivateRecipient(built.messageHash, targetAddress);
-        if (typeof result === 'string' && result !== built.messageHash) rememberPrivateRecipient(result, targetAddress);
+      // Local bookkeeping is now only a convenience: the `@address` tag travels
+      // inside the encrypted payload, so this message places itself correctly on
+      // any device, not just this one.
+      if (isPrivate && targetAddress && typeof result === 'string') {
+        rememberPrivateRecipient(result, targetAddress);
       }
 
       // Sending changes the pool too. Record the new state right away, otherwise
@@ -1210,20 +1115,7 @@ export function useDePINChat(params: {
       }
       return result;
     },
-    [
-      rpc,
-      network,
-      selectedAsset,
-      effectiveAddress,
-      identity,
-      recipientList,
-      resolveRecipientPubkey,
-      rememberPrivateRecipient,
-      deviceBacked,
-      device,
-      canCrypt,
-      walletID,
-    ],
+    [rpc, network, selectedAsset, effectiveAddress, identity, recipientList, rememberPrivateRecipient, deviceBacked, canCrypt, walletID],
   );
 
   const checkAssetValidity = useCallback(async (): Promise<AssetValidity | null> => {

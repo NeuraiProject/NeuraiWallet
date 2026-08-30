@@ -123,6 +123,7 @@ interface DepinMsgApi {
   submitDepinMessage(params: Record<string, unknown>): Promise<{ messageHash?: string } | string>;
   verifyDepinReply(params: Record<string, unknown>): VerifiedDepinReply;
   decodePlainReply(verified: VerifiedDepinReply): unknown;
+  decodeDepinRecipients(body: unknown, params: Record<string, unknown>): Promise<DepinRecipients>;
   poolKeyFingerprint(poolPublicKey: string): string;
 }
 
@@ -314,6 +315,14 @@ export const verifyDepinReply = (params: Record<string, unknown>): VerifiedDepin
 
 /** Decodes a verified plain reply's body. Rejects anything not branded by the verifier. */
 export const decodePlainReply = (verified: VerifiedDepinReply): unknown => api().decodePlainReply(verified);
+
+/**
+ * Validates an already-verified recipients body: refuses a truncated list, a
+ * token or root that does not match, and any public key that does not hash to
+ * the address it is offered for.
+ */
+export const decodeDepinRecipients = (body: unknown, params: Record<string, unknown>): Promise<DepinRecipients> =>
+  api().decodeDepinRecipients(body, params);
 
 /**
  * The pool key's fingerprint, for a human to compare out of band.
