@@ -1,6 +1,7 @@
 import React, { type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { GiftedChat, type IMessage } from 'react-native-gifted-chat';
+import FontAwesome6 from '@react-native-vector-icons/fontawesome6';
+import { Bubble, GiftedChat, type IMessage } from 'react-native-gifted-chat';
 
 import loc from '../../loc';
 import Icon from '../Icon';
@@ -102,6 +103,23 @@ const DepinChatConversationPanel = ({
         keyboardProviderProps={{ enabled: false } as any}
         messagesContainerRef={messagesListRef}
         messagesContainerStyle={stylesHook.root}
+        // Delivery state on our own messages: an amber clock while the pool has
+        // not handed the message back, a green check once it has. The same two
+        // states the web wallet shows, so a user moving between them reads the
+        // same thing. `renderTicks` belongs to the bubble, not to GiftedChat.
+        renderBubble={(props: any) => (
+          <Bubble
+            {...props}
+            renderTicks={(message: IMessage) => {
+              if (message.user?._id !== identityAddress) return null;
+              return message.pending ? (
+                <FontAwesome6 name="clock" iconStyle="regular" size={12} color="#835608" style={styles.tick} />
+              ) : (
+                <FontAwesome6 name="circle-check" iconStyle="regular" size={12} color="#22c55e" style={styles.tick} />
+              );
+            }}
+          />
+        )}
         renderAvatar={(props: any) => (
           <View style={[styles.msgAvatar, stylesHook.chip]}>
             <Text style={[styles.msgAvatarText, stylesHook.chipText]}>{props?.currentMessage?.user?.name ?? '?'}</Text>
@@ -154,6 +172,7 @@ const styles = StyleSheet.create({
   activeConvRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, columnGap: 6 },
   activeConvText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' },
+  tick: { marginRight: 6, marginBottom: 4 },
   msgAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   msgAvatarText: { fontSize: 10, fontWeight: '700' },
   errorText: { fontSize: 12, textAlign: 'center', paddingVertical: 6, flexShrink: 1 },

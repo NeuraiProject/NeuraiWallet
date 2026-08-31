@@ -81,6 +81,14 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   const [activeTab, setActiveTab] = useState<string>('group');
   const [showQr, setShowQr] = useState(false);
   const [draft, setDraft] = useState('');
+  /**
+   * Messages submitted but not yet seen coming back from the pool.
+   *
+   * Kept here rather than in the hook: it is a property of this screen's view,
+   * not of the channel, and it must never be confused with what the pool
+   * actually holds.
+   */
+  const [pending, setPending] = useState<Array<{ id: string; tab: string; text: string; createdAt: Date; hash?: string }>>([]);
   // Which flap-tab of the section page is open: token chat picker or the
   // experimental IoT area.
   const [activeSection, setActiveSection] = useState<'chat' | 'iot'>('chat');
@@ -202,27 +210,45 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
 
   const messages = useMemo<IMessage[]>(() => {
     const src = activeTab === 'group' ? groupMessages : (privateConversations.get(activeTab)?.messages ?? []);
-    return (
-      src
-        .map((m, i) => ({
-          _id: `${m.messageHash ?? m.sender}-${m.timestamp}-${i}`,
-          text: m.message,
-          createdAt: new Date(m.timestamp * 1000),
-          // Last 4 chars as the display name: every address on a network starts
-          // with the same prefix, so first-letter avatars would all look alike.
-          user: { _id: m.sender, name: m.sender.slice(-4) },
-        }))
-        // Oldest first: paired with GiftedChat's `inverted={false}` below this
-        // renders top-to-bottom (first message at the top, newest at the bottom).
-        .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt))
-    );
-  }, [activeTab, groupMessages, privateConversations]);
+    const confirmed = src.map((m, i) => ({
+      _id: `${m.messageHash ?? m.sender}-${m.timestamp}-${i}`,
+      text: m.message,
+      createdAt: new Date(m.timestamp * 1000),
+      // Last 4 chars as the display name: every address on a network starts
+      // with the same prefix, so first-letter avatars would all look alike.
+      user: { _id: m.sender, name: m.sender.slice(-4) },
+      pending: false,
+    }));
+
+    // A sent message is shown at once and marked pending until the pool hands it
+    // back. The two are matched by the hash the pool assigned, not by text and
+    // timestamp: those can drift by a second between the copy and the message,
+    // and then the copy never clears.
+    const confirmedHashes = new Set(src.map(m => m.messageHash).filter(Boolean));
+    const stillPending = pending
+      .filter(p => p.tab === activeTab && !(p.hash && confirmedHashes.has(p.hash)))
+      .map(p => ({
+        _id: p.id,
+        text: p.text,
+        createdAt: p.createdAt,
+        user: { _id: identity?.address ?? '', name: (identity?.address ?? '').slice(-4) },
+        pending: true,
+      }));
+
+    // Oldest first: paired with GiftedChat's `inverted={false}` this renders
+    // top-to-bottom (first message at the top, newest at the bottom).
+    return [...confirmed, ...stillPending].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+  }, [activeTab, groupMessages, privateConversations, pending, identity?.address]);
 
   // With a non-inverted list, GiftedChat does NOT follow new messages — they
   // appear below the visible area while the view stays frozen. Whenever a
   // message arrives (sent or received) or the conversation tab changes, slide
   // to the end so the latest message is always in view. The small delay lets
   // the list commit the new row before measuring the scroll target.
+  useEffect(() => {
+    setPending([]);
+  }, [selectedAsset]);
+
   const messageCount = messages.length;
   useEffect(() => {
     if (messageCount === 0) return;
@@ -236,8 +262,27 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     const text = draft.trim();
     if (!text) return;
     const payload = activeTab === 'group' ? text : `@${activeTab} ${text}`;
-    sendMessage(payload).catch((e: any) => presentAlert({ message: e?.message ?? loc.depin.send_failed }));
+    const id = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // On screen immediately, so the chat does not look frozen while the message
+    // is built, encrypted and submitted.
+    setPending(prev => [...prev, { id, tab: activeTab, text, createdAt: new Date() }]);
     setDraft('');
+
+    sendMessage(payload)
+      .then((hash: string | null) => {
+        // Record what the pool called it. The copy clears when a message with
+        // that hash comes back, and not before: it stays pending while it is
+        // genuinely unconfirmed, which is the truth.
+        if (typeof hash === 'string' && hash) {
+          setPending(prev => prev.map(p => (p.id === id ? { ...p, hash } : p)));
+        }
+      })
+      .catch((e: any) => {
+        // Nothing was sent, so nothing should be left on screen pretending it was.
+        setPending(prev => prev.filter(p => p.id !== id));
+        presentAlert({ message: e?.message ?? loc.depin.send_failed });
+      });
   }, [draft, activeTab, sendMessage]);
 
   const stylesHook = {
