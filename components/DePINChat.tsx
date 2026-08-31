@@ -294,7 +294,15 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     chipActive: { backgroundColor: colors.elevated, borderColor: colors.foregroundColor },
     chipText: { color: colors.foregroundColor },
     banner: { backgroundColor: colors.inputBackgroundColor, borderColor: colors.formBorder },
-    divider: { backgroundColor: colors.formBorder },
+    // The folder panel and its selected tab must share one surface for the
+    // seam between them to disappear. `elevated` sits a step above the chips'
+    // `inputBackgroundColor`, so the tokens inside read as recessed on it.
+    panel: { backgroundColor: colors.elevated, borderColor: colors.formBorder },
+    tabLine: { borderColor: colors.formBorder },
+    // The float Send/Receive buttons are hidden on this tab, so the old flat
+    // 120 of bottom padding was dead space holding the panel up short of the
+    // screen edge. Mirror the 16 used on the sides, over the gesture bar.
+    scrollContent: { paddingBottom: (insets.bottom || 0) + 16 },
     // With the keyboard open the chat column already ends right above it, so
     // the input bar only needs a small padding instead of the nav-bar inset.
     inputBar: {
@@ -397,11 +405,11 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   );
 
   // No token selected yet — the section page: the DePIN card (title, address,
-  // derivation, Ready flap), a divider, then the flap-tabs: DePIN Chat (tokens)
-  // and the experimental IoT area.
+  // derivation, Ready flap), then the folder tabs: DePIN Chat (tokens) and the
+  // experimental IoT area, both sharing one panel below them.
   if (!selectedAsset) {
     return (
-      <ScrollView style={[styles.flex, stylesHook.root]} contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={[styles.flex, stylesHook.root]} contentContainerStyle={[styles.scrollContent, stylesHook.scrollContent]}>
         <DepinChatAddressCard
           gearButton={gearButton}
           identity={identity}
@@ -490,7 +498,7 @@ DePINChat.displayName = 'DePINChat';
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  scrollContent: { padding: 16, paddingBottom: 120 },
+  scrollContent: { padding: 16, flexGrow: 1 },
   gear: { padding: 8 },
   info: { fontSize: 15, textAlign: 'center', lineHeight: 22, paddingHorizontal: 8 },
   connectBtn: { marginTop: 18, paddingVertical: 12, paddingHorizontal: 28, borderRadius: 10, backgroundColor: '#f97316' },

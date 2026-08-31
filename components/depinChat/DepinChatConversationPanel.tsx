@@ -6,6 +6,14 @@ import { Bubble, GiftedChat, type IMessage } from 'react-native-gifted-chat';
 import loc from '../../loc';
 import Icon from '../Icon';
 
+// Our own bubbles used GiftedChat's default blue, which clashed with the
+// wallet's orange palette and left the amber clock at 1.7:1 against it — all
+// but invisible in light mode. A deep brand orange keeps the wallet's look and
+// puts both delivery icons above 3.5:1 on the bubble, white timestamp included.
+const OUTGOING_BUBBLE = '#c2410c';
+const TICK_PENDING = '#fcd34d';
+const TICK_DELIVERED = '#86efac';
+
 interface DepinChatConversationPanelProps {
   activeConversationName: string;
   activeTab: string;
@@ -110,12 +118,13 @@ const DepinChatConversationPanel = ({
         renderBubble={(props: any) => (
           <Bubble
             {...props}
+            wrapperStyle={bubbleWrapperStyle}
             renderTicks={(message: IMessage) => {
               if (message.user?._id !== identityAddress) return null;
               return message.pending ? (
-                <FontAwesome6 name="clock" iconStyle="regular" size={12} color="#835608" style={styles.tick} />
+                <FontAwesome6 name="clock" iconStyle="regular" size={12} color={TICK_PENDING} style={styles.tick} />
               ) : (
-                <FontAwesome6 name="circle-check" iconStyle="regular" size={12} color="#22c55e" style={styles.tick} />
+                <FontAwesome6 name="circle-check" iconStyle="regular" size={12} color={TICK_DELIVERED} style={styles.tick} />
               );
             }}
           />
@@ -172,7 +181,8 @@ const styles = StyleSheet.create({
   activeConvRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, columnGap: 6 },
   activeConvText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' },
-  tick: { marginRight: 6, marginBottom: 4 },
+  tick: { marginLeft: 6 },
+  outgoingBubble: { backgroundColor: OUTGOING_BUBBLE },
   msgAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   msgAvatarText: { fontSize: 10, fontWeight: '700' },
   errorText: { fontSize: 12, textAlign: 'center', paddingVertical: 6, flexShrink: 1 },
@@ -205,5 +215,8 @@ const styles = StyleSheet.create({
   sendBtnDisabled: { opacity: 0.4 },
   sendBtnGlyph: { color: '#ffffff', fontSize: 18, fontWeight: '700' },
 });
+
+// Module-level so the Bubble prop keeps a stable identity across renders.
+const bubbleWrapperStyle = { right: styles.outgoingBubble };
 
 export default DepinChatConversationPanel;
