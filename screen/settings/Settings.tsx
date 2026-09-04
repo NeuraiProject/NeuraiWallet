@@ -99,12 +99,23 @@ const Settings = () => {
 
       <SettingsSection horizontalInset={false}>
         <SettingsListItem
+          title={loc.connect.sessions_screen_title}
+          subtitle={loc.connect.settings_subtitle}
+          iconName="key"
+          onPress={() => navigate('ConnectSessions')}
+          testID="ConnectSessions"
+          chevron
+          position="first"
+          itemBackgroundColor={settingsListItemBackgroundColor}
+        />
+
+        <SettingsListItem
           title={loc.settings.tools}
           iconName="tools"
           onPress={() => navigate('SettingsTools')}
           testID="Tools"
           chevron
-          position="single"
+          position="last"
           itemBackgroundColor={settingsListItemBackgroundColor}
         />
       </SettingsSection>

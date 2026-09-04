@@ -6,8 +6,19 @@ import { useStorage } from './context/useStorage';
 import { requestCameraAuthorization } from '../helpers/scan-qr';
 import { useCallback, useMemo } from 'react';
 
-// List of screens that require biometrics
-const requiresBiometrics = ['WalletExport', 'WalletXpub', 'ViewEditMultisigCosigners', 'ExportMultisigCoordinationSetupRoot'];
+// List of screens that require biometrics. The three Neurai Connect approval
+// screens are here because every signature a web site asks for must sit behind
+// PIN or biometrics (spec/session.md section 3.4): a phone taken out of a
+// pocket must not be able to sign in as its owner or answer a session request.
+const requiresBiometrics = [
+  'WalletExport',
+  'WalletXpub',
+  'ViewEditMultisigCosigners',
+  'ExportMultisigCoordinationSetupRoot',
+  'ConnectLogin',
+  'ConnectRequest',
+  'ConnectProposal',
+];
 
 // List of screens that require wallet export to be saved
 const requiresWalletExportIsSaved = ['ReceiveDetails', 'WalletAddresses'];

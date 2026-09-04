@@ -50,6 +50,11 @@ import ManageWallets from '../screen/wallets/ManageWallets';
 import ReceiveDetails from '../screen/receive/ReceiveDetails';
 import ReceiveCustomAmountSheet from '../screen/receive/ReceiveCustomAmountSheet';
 import SendNeurai from '../screen/send/SendNeurai';
+import ConnectPair from '../screen/connect/ConnectPair';
+import ConnectLogin from '../screen/connect/ConnectLogin';
+import ConnectProposal from '../screen/connect/ConnectProposal';
+import ConnectRequest from '../screen/connect/ConnectRequest';
+import ConnectSessions from '../screen/connect/ConnectSessions';
 import ImportNeurai from '../screen/wallets/ImportNeurai';
 
 const NEURAI_LOGO = require('../img/addWallet/neurai.png');
@@ -346,6 +351,34 @@ const DetailViewStackScreensStack = () => {
           name="DepinRpcEdit"
           component={DepinRpcEdit}
           options={navigationStyle(getSettingsHeaderOptions(loc.depin.rpc_settings_title))(theme)}
+        />
+        {/* Neurai Connect. The three approval screens are modals: a site asking
+            for a signature interrupts whatever the user was doing, and it must
+            be dismissible without disturbing the stack underneath. */}
+        <DetailViewStack.Screen
+          name="ConnectPair"
+          component={ConnectPair}
+          options={navigationStyle({ title: loc.connect.pair_title, presentation: 'modal' })(theme)}
+        />
+        <DetailViewStack.Screen
+          name="ConnectLogin"
+          component={ConnectLogin}
+          options={navigationStyle({ title: loc.connect.login_title, presentation: 'modal' })(theme)}
+        />
+        <DetailViewStack.Screen
+          name="ConnectProposal"
+          component={ConnectProposal}
+          options={navigationStyle({ title: loc.connect.proposal_title, presentation: 'modal' })(theme)}
+        />
+        <DetailViewStack.Screen
+          name="ConnectRequest"
+          component={ConnectRequest}
+          options={navigationStyle({ title: loc.connect.request_title, presentation: 'modal' })(theme)}
+        />
+        <DetailViewStack.Screen
+          name="ConnectSessions"
+          component={ConnectSessions}
+          options={navigationStyle(getSettingsHeaderOptions(loc.connect.sessions_screen_title))(theme)}
         />
         <DetailViewStack.Screen
           name="SettingsBlockExplorer"

@@ -3,9 +3,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CommonActions } from '@react-navigation/native';
 import { DeviceEventEmitter, Linking, Platform } from 'react-native';
 import QuickActions, { ShortcutItem } from 'react-native-quick-actions';
+import NeuraiUriMatch from '../class/neurai-uri-match';
 import DeeplinkSchemaMatch from '../class/deeplink-schema-match';
+import { openNeuraiPaymentUri } from '../helpers/open-neurai-payment';
+import presentAlert from '../components/Alert';
 import { TWallet } from '../class/wallets/types';
-import { formatBalance } from '../loc';
+import loc, { formatBalance } from '../loc';
 import * as NavigationService from '../NavigationService';
 import { useSettings } from '../hooks/context/useSettings';
 import { useStorage } from '../hooks/context/useStorage';
@@ -94,7 +97,9 @@ const useDeviceQuickActions = () => {
         }
       } else {
         const url = await Linking.getInitialURL();
-        if (url && DeeplinkSchemaMatch.hasSchema(url)) {
+        // A cold start from a Neurai Connect deep link must be handled too, so the
+        // filter asks the Neurai matcher, not only the inherited Bitcoin schemes.
+        if (url && (NeuraiUriMatch.isConnectUri(url) || NeuraiUriMatch.parseNeuraiPaymentUri(url) || DeeplinkSchemaMatch.hasSchema(url))) {
           handleOpenURL({ url });
         }
       }
@@ -104,12 +109,23 @@ const useDeviceQuickActions = () => {
   };
 
   const handleOpenURL = (event: { url: string }): void => {
-    DeeplinkSchemaMatch.navigationRouteFor(event, (value: [string, any]) => NavigationService.navigate(...value), {
-      wallets,
-      addWallet,
-      saveToDisk,
-      setSharedCosigner,
-    });
+    NeuraiUriMatch.navigationRouteFor(
+      event,
+      value => NavigationService.navigate(...(value as [string, any])),
+      {
+        wallets,
+        addWallet,
+        saveToDisk,
+        setSharedCosigner,
+      },
+      {
+        // Same as the other two entry points: say so rather than doing nothing
+        // when there is no wallet to spend from.
+        onPayment: payment => {
+          if (!openNeuraiPaymentUri(NavigationService, wallets, payment)) presentAlert({ message: loc.wallets.select_no_bitcoin });
+        },
+      },
+    );
   };
 
   const walletQuickActions = (data: any): void => {

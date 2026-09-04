@@ -1,133 +1,149 @@
-# BlueWallet - A Bitcoin & Lightning Wallet
+# NeuraiWallet
 
-[![GitHub tag](https://img.shields.io/badge/dynamic/json.svg?url=https://raw.githubusercontent.com/BlueWallet/BlueWallet/master/package.json&query=$.version&label=Version)](https://github.com/BlueWallet/BlueWallet)
-[![code style: prettier](https://img.shields.io/badge/code_style-prettier-ff69b4.svg?style=flat-square)](https://github.com/prettier/prettier)
-![](https://img.shields.io/github/license/BlueWallet/BlueWallet.svg)
+A mobile wallet for the [Neurai](https://neurai.org) blockchain, built with React Native for
+Android and iOS. Keys are generated on the device and stored in the platform keystore; no seed
+or private key ever leaves it.
 
-Thin Bitcoin Wallet.
-Built with React Native and Electrum.
+NeuraiWallet is a fork of [BlueWallet](https://github.com/BlueWallet/BlueWallet). The
+navigation shell, the theming, the encrypted storage and the settings screens come from there;
+the wallet, transaction, asset and messaging layers are Neurai's own and are built on the
+`@neuraiproject/*` libraries (`neurai-key`, `neurai-jswallet`, `neurai-create-transaction`,
+`neurai-sign-transaction`, `neurai-depin-msg`, `neurai-message`).
 
-[![Appstore](https://bluewallet.io/uploads/app-store-badge-blue.svg)](https://itunes.apple.com/us/app/bluewallet-bitcoin-wallet/id1376878040?l=ru&ls=1&mt=8)
-[![Playstore](https://bluewallet.io/uploads/play-store-badge-blue.svg)](https://play.google.com/store/apps/details?id=io.bluewallet.bluewallet)
+## What it does
 
-Website: [bluewallet.io](https://bluewallet.io)
+* **HD wallets** on Neurai's BIP44 path, created from a 12-word mnemonic or imported from one.
+* **Post-quantum wallets** signed with ML-DSA-44, using bech32m `AuthScript` addresses.
+* **Hardware wallet** support over USB serial for the Neurai ESP32 signer: the device holds the
+  seed and signs; the phone only builds and broadcasts.
+* **Neurai Assets** — the native tokens of the chain (root, sub, unique/NFT, owner, restricted,
+  qualifier and DePIN assets) are listed per wallet and can be sent from the Send screen.
+* **DePIN messaging** — a token-gated chat tab (see below).
+* **Neurai Connect** — QR login and dApp sessions (see below).
+* Inherited from BlueWallet and still in use: encrypted storage with plausible deniability,
+  biometric unlock on the sensitive screens, "is it my address?" verification, raw transaction
+  broadcast, fiat rates and 50+ UI languages.
 
-Community: [telegram group](https://t.me/bluewallet)
+## Networks
 
-* Private keys never leave your device
-* Lightning Network supported
-* SegWit-first. Replace-By-Fee support
-* Encryption. Plausible deniability
-* And many more [features...](https://bluewallet.io/features)
+Four chain identifiers are wired in parallel, two for legacy ECDSA wallets and two for
+post-quantum ones. Switching the active network changes the backend URL, the address prefixes,
+the BIP44 coin type and the bech32m HRP in one step. They are defined in
+`blue_modules/neurai/networkConfig.ts`:
 
+| Chain | Network | Keys | Addresses | BIP44 coin type |
+| --- | --- | --- | --- | --- |
+| `xna` | mainnet | legacy ECDSA (secp256k1) | base58, P2PKH version 53 (`N…`) | 1900 |
+| `xna-test` | testnet | legacy ECDSA (secp256k1) | base58, P2PKH version 127 | 1 |
+| `xna-pq` | mainnet | post-quantum ML-DSA-44 | bech32m, HRP `nq` | 1900 |
+| `xna-pq-test` | testnet | post-quantum ML-DSA-44 | bech32m, HRP `tnq` | 1 |
 
-<img src="https://i.imgur.com/hHYJnMj.png" width="100%">
+Balances, history, UTXOs and broadcast go through `neurai-wallet-services` over WSS by default
+(`blue_modules/neurai/WssBackend.ts`), with a JSON-RPC backend as an explicit fallback
+(`RpcBackend.ts`). Both endpoints can be overridden per network from Settings → Network.
 
+## DePIN messaging
 
-## BUILD & RUN IT
+Neurai's DePIN assets (`&NAME`) carry a chat: holders of the same token can message each other
+end to end encrypted, relayed by a DePIN-enabled Neurai node rather than by a server of ours.
+The app derives a dedicated chat identity on its own BIP44 account (`m/44'/{coin}'/100'/0/0`,
+see `blue_modules/neurai/depinChatIdentity.ts` and `components/DePINChat.tsx`), lists the DePIN
+tokens held at that address and opens a group or private conversation per token. Messages are
+built, encrypted (ECIES over secp256k1 + AES-256-GCM) and signed by
+`@neuraiproject/neurai-depin-msg`, and are wire compatible with the node's `depinsubmitmsg` / `depinreceivemsg` and with the Neurai web wallet.
+Group messages need the address's public key to be visible on chain, so the app offers a
+one-tap "reveal" that spends a small amount from the chat address. The DePIN node the chat
+talks to is configurable from the gear button in the chat (the `DepinRpcEdit` screen).
 
-Please refer to the engines field in package.json file for the minimum required versions of Node and npm. It is preferred that you use an even-numbered version of Node as these are LTS versions.
+## Neurai Connect
 
-To view the version of Node and npm in your environment, run the following in your console:
+Neurai Connect is the wallet ↔ web link: a site shows a QR code, the user scans it with
+NeuraiWallet, approves on the phone, and the site is either logged in ("Sign in with Neurai",
+a CAIP-122 message signed with the chosen address) or holds a dApp session it can later use to
+ask the wallet for `getAccountAddresses` and `signMessage` (`sendTransfer` and `signPsbt` are
+declared by the `bip122` profile but not implemented yet). Traffic goes through a relay
+that only ever sees opaque encrypted blobs and random topics; no private key leaves the device.
+The wallet side lives in `blue_modules/neurai/connect/` (relay client, session storage, signer,
+per-domain identities) with the approval screens in `screen/connect/`, and pairings arrive as
+`nc:` URIs from the scanner or as `neuraiwallet://connect?uri=…` deep links, recognised by
+`class/neurai-uri-match.ts`.
 
-```
-node --version && npm --version
-```
+## Build and run
 
-* In your console:
+Node 22.11.0 or newer is required (see the `engines` field in `package.json`). Check yours with
+`node --version && npm --version`.
 
-```
-git clone https://github.com/BlueWallet/BlueWallet.git
-cd BlueWallet
+```bash
+git clone https://github.com/neuraiproject/NeuraiWallet.git
+cd NeuraiWallet
 npm install
 ```
 
-Please make sure that your console is running the most stable versions of npm and node (even-numbered versions).
-
-* To run on Android:
-
-You will now need to either connect an Android device to your computer or run an emulated Android device using AVD Manager which comes shipped with Android Studio. To run an emulator using AVD Manager:
-
-1. Download and run Android Studio
-2. Click on "Open an existing Android Studio Project"
-3. Open `build.gradle` file under `BlueWallet/android/` folder
-4. Android Studio will take some time to set things up. Once everything is set up, go to `Tools` -> `AVD Manager`.
-    * 📝 This option [may take some time to appear in the menu](https://stackoverflow.com/questions/47173708/why-avd-manager-options-are-not-showing-in-android-studio) if you're opening the project in a freshly-installed version of Android Studio.
-5. Click on "Create Virtual Device..." and go through the steps to create a virtual device
-6. Launch your newly created virtual device by clicking the `Play` button under `Actions` column
-
-Once you connected an Android device or launched an emulator, run this:
-
-```
-npx react-native run-android
-```
-
-The above command will build the app and install it. Once you launch the app it will take some time for all of the dependencies to load. Once everything loads up, you should have the built app running.
-
-* To run on iOS:
-
-```
-npx pod-install
-npm start
-```
-
-In another terminal window within the BlueWallet folder:
-```
-npx react-native run-ios
-```
-**To debug BlueWallet on the iOS Simulator, you must choose a Rosetta-compatible iOS Simulator. This can be done by navigating to the Product menu in Xcode, selecting Destination Architectures, and then opting for "Show Both." This action will reveal the simulators that support Rosetta.
-**
-
-* To run on macOS using Mac Catalyst:
-
-```
-npx pod-install
-npm start
-```
-
-Open ios/BlueWallet.xcworkspace. Once the project loads, select the scheme/target BlueWallet. Click Run.
-
-## TESTS
+Start the Metro bundler in one terminal:
 
 ```bash
-npm run test
+npm start
 ```
 
+Then, in another terminal:
 
-## LICENSE
+```bash
+npm run android        # build and install on a connected device or emulator
+npm run ios            # build and run on the iOS simulator
+```
 
-MIT
+For iOS you need the CocoaPods dependencies first (`npx pod-install`), and for macOS via Mac
+Catalyst open `ios/BlueWallet.xcworkspace` in Xcode and run the `BlueWallet` scheme (the Xcode
+project still carries the upstream name).
 
-## WANT TO CONTRIBUTE?
+Useful extras while developing:
 
-Grab an issue from [the backlog](https://github.com/BlueWallet/BlueWallet/issues), try to start or submit a PR, any doubts we will try to guide you. Contributors have a private telegram group, request access by email bluewallet@bluewallet.io
+```bash
+npm run adb              # adb reverse tcp:8081, so a device can reach Metro
+npm run android:relaunch # force-stop and relaunch the installed app
+npm run clean            # gradle clean + wipe caches and node_modules, then npm i
+npm run clean:ios        # wipe node_modules and Pods, reinstall, reset the Metro cache
+npm run android:clean    # gradle clean, then rebuild and run on Android
+```
 
-## Translations
+## Tests
 
-We accept translations via [Transifex](https://explore.transifex.com/bluewallet/bluewallet/)
+```bash
+npm test           # everything: lint + unit + integration
+npm run lint       # tsc --noEmit, unused-loc-key check, then eslint
+npm run lint:fix   # the same, applying eslint's fixes
+npm run unit       # jest tests/unit/* only
+npm run integration  # jest tests/integration/* (needs test mnemonics in the environment)
+```
 
-To participate you need to:
-1. Sign up to Transifex
-2. Find BlueWallet project
-3. Send join request
-4. After we accept your request you will be able to start translating! That's it!
+The unit suite is the one to run while working; it is self-contained and mocks the native
+modules in `tests/setup.js`. Integration tests talk to real Neurai endpoints and expect
+mnemonics in environment variables. End-to-end tests use Detox on Android:
 
-Please note the values in curly braces should not be translated. These are the names of the variables that will be inserted into the translated string. For example, the original string `"{number} of {total}"` in Russian will be `"{number} из {total}"`.
+```bash
+npm run e2e:debug         # build a debug APK if needed, then run the e2e suite
+npm run e2e:release-test  # run the suite against a release build
+```
 
-Transifex automatically creates Pull Request when language reaches 100% translation. We also trigger this by hand before each release, so don't worry if you can't translate everything, every word counts.
+## Where the code lives
 
-## Q&A
+| Directory | What is in it |
+| --- | --- |
+| `components/` | React components and the context providers (`SettingsProvider`, `StorageProvider`) |
+| `class/` | Core business logic, including the wallet implementations in `class/wallets/` |
+| `blue_modules/` | Utility modules: currency, encryption, filesystem, and the Neurai network layer in `blue_modules/neurai/` and the ESP32 driver in `blue_modules/neurai-hw/` |
+| `screen/` | Screens grouped by feature: `wallets`, `send`, `receive`, `transactions`, `settings`, `connect` |
+| `navigation/` | React Navigation setup and the typed param lists |
+| `hooks/` | Custom hooks (`useStorage`, `useSettings`, `useBiometrics`, the DePIN chat hooks, …) |
+| `loc/` | Localisation; `loc/en.json` is the source, alongside 50+ translations |
+| `models/` | Type definitions for units, fiat currencies and block explorers |
+| `tests/` | `tests/unit/`, `tests/integration/` and `tests/e2e/` |
+| `android/`, `ios/` | The native projects |
 
-Builds automated and tested with BrowserStack
+Conventions for contributors — TypeScript only, commit-message prefixes, linting rules — are in
+[`CLAUDE.md`](CLAUDE.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md). Common questions are answered
+in [`FAQ.md`](FAQ.md).
 
-<a href="https://www.browserstack.com/"><img src="https://i.imgur.com/syscHCN.png" width="160px"></a>
+## Licence
 
-Bugs reported via BugSnag
-
-<a href="https://www.bugsnag.com"><img src="https://images.typeform.com/images/QKuaAssrFCq7/image/default" width="160px"></a>
-
-
-## RESPONSIBLE DISCLOSURE
-
-Found critical bugs/vulnerabilities? Please email them bluewallet@bluewallet.io
-Thanks!
+MIT. See [`LICENSE`](LICENSE). NeuraiWallet derives from BlueWallet, which is also MIT licensed.

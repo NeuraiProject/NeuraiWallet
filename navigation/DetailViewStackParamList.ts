@@ -3,6 +3,7 @@ import { XnaUnit, Chain } from '../models/xnaUnits';
 import { PromptPasswordConfirmationParams } from '../screen/PromptPasswordConfirmationSheet.types';
 import { ElectrumServerItem } from '../screen/settings/ElectrumSettings';
 import type { NeuraiNetwork } from '../blue_modules/neurai';
+import type { JsonRpcId } from '@neuraiproject/neurai-connect-core';
 
 export type ScanQRCodeParamList = {
   cameraStatusGranted?: boolean;
@@ -62,6 +63,18 @@ export type DetailViewStackParamList = {
   NetworkSettings: undefined;
   NeuraiBackendEdit: { network: NeuraiNetwork };
   DepinRpcEdit: { network?: NeuraiNetwork };
+  /**
+   * Neurai Connect. `ConnectPair` receives the scanned `nc:` pairing and
+   * replaces itself with one of the three approval screens; those take the
+   * JSON-RPC id of the item waiting in the client's queue rather than the item
+   * itself, because navigation params must stay serialisable and the event
+   * carries live objects (`Session`, metadata) that must not be copied.
+   */
+  ConnectPair: { uri: string };
+  ConnectLogin: { id: JsonRpcId };
+  ConnectProposal: { id: JsonRpcId };
+  ConnectRequest: { id: JsonRpcId };
+  ConnectSessions: undefined;
   About: undefined;
   ElectrumSettings: { server?: ElectrumServerItem; onBarScanned?: string };
   SettingsBlockExplorer: undefined;

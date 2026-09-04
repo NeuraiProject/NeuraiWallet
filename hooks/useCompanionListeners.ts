@@ -12,7 +12,8 @@ import {
   removeAllDeliveredNotifications,
   setApplicationIconBadgeNumber,
 } from '../blue_modules/notifications';
-import DeeplinkSchemaMatch from '../class/deeplink-schema-match';
+import NeuraiUriMatch, { type NeuraiPaymentUri, type NeuraiUriRoute } from '../class/neurai-uri-match';
+import { openNeuraiPaymentUri } from '../helpers/open-neurai-payment';
 import loc from '../loc';
 import { Chain } from '../models/xnaUnits';
 import { navigationRef } from '../NavigationService';
@@ -31,6 +32,10 @@ import { useExtendedNavigation } from './useExtendedNavigation';
 const ClipboardContentType = Object.freeze({
   BITCOIN: 'BITCOIN',
   LIGHTNING: 'LIGHTNING',
+  // What the clipboard can usefully hold in this fork. The two Bitcoin-era
+  // entries are kept because the suggestion sheet still knows how to word them,
+  // but the only one this wallet offers is a Neurai Connect pairing.
+  NEURAI_CONNECT: 'NEURAI_CONNECT',
 });
 
 /**
@@ -181,7 +186,6 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
       console.error('Failed to process push notifications:', error);
     }
     return false;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shouldActivateListeners, wallets, fetchAndSaveWalletTransactions, navigation]);
 
   useEffect(() => {
@@ -190,6 +194,15 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
     initializeNotifications(processPushNotifications);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shouldActivateListeners]);
+
+  // An `xna:` request that arrives as a deep link or inside a shared image: it
+  // opens the send flow, which the route-based matcher cannot do on its own.
+  const openPayment = useCallback(
+    (payment: NeuraiPaymentUri): void => {
+      if (!openNeuraiPaymentUri(navigationRef, wallets, payment)) presentAlert({ message: loc.wallets.select_no_bitcoin });
+    },
+    [wallets],
+  );
 
   const handleOpenURL = useCallback(
     async (event: { url: string }): Promise<void> => {
@@ -217,23 +230,29 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
             throw new Error(loc.send.qr_error_no_qrcode);
           }
           triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
-          DeeplinkSchemaMatch.navigationRouteFor(
+          NeuraiUriMatch.navigationRouteFor(
             { url: qrValue },
-            (value: [string, any]) => navigationRef.navigate(...value),
+            (value: NeuraiUriRoute) => navigationRef.navigate(...(value as [string, object])),
             {
               wallets,
               addWallet,
               saveToDisk,
               setSharedCosigner,
             },
+            { onPayment: payment => openPayment(payment) },
           );
         } else {
-          DeeplinkSchemaMatch.navigationRouteFor(event, (value: [string, any]) => navigationRef.navigate(...value), {
-            wallets,
-            addWallet,
-            saveToDisk,
-            setSharedCosigner,
-          });
+          NeuraiUriMatch.navigationRouteFor(
+            event,
+            (value: NeuraiUriRoute) => navigationRef.navigate(...(value as [string, object])),
+            {
+              wallets,
+              addWallet,
+              saveToDisk,
+              setSharedCosigner,
+            },
+            { onPayment: payment => openPayment(payment) },
+          );
         }
       } catch (err: any) {
         console.error('Error in handleOpenURL:', err);
@@ -241,7 +260,7 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
         presentAlert({ message: err.message || loc.send.qr_error_no_qrcode });
       }
     },
-    [wallets, addWallet, saveToDisk, setSharedCosigner, shouldActivateListeners],
+    [wallets, addWallet, saveToDisk, setSharedCosigner, shouldActivateListeners, openPayment],
   );
 
   const showClipboardAlert = useCallback(
@@ -254,7 +273,12 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
         ActionSheet.showActionSheetWithOptions(
           {
             title: loc._.clipboard,
-            message: contentType === ClipboardContentType.BITCOIN ? loc.wallets.clipboard_bitcoin : loc.wallets.clipboard_lightning,
+            message:
+              contentType === ClipboardContentType.NEURAI_CONNECT
+                ? loc.connect.clipboard_pairing
+                : contentType === ClipboardContentType.BITCOIN
+                  ? loc.wallets.clipboard_bitcoin
+                  : loc.wallets.clipboard_lightning,
             options: [loc._.cancel, loc._.continue],
             cancelButtonIndex: 0,
           },
@@ -286,9 +310,13 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
         const isAddressFromStoredWallet = wallets.some(wallet => {
           return wallet.isAddressValid && wallet.isAddressValid(clipboard) && wallet.weOwnAddress(clipboard);
         });
-        const isBitcoinAddress = DeeplinkSchemaMatch.isBitcoinAddress(clipboard);
-        if (!isAddressFromStoredWallet && clipboardContent.current !== clipboard && isBitcoinAddress) {
-          showClipboardAlert({ contentType: ClipboardContentType.BITCOIN });
+        // The old gate was `DeeplinkSchemaMatch.isBitcoinAddress`, which no
+        // Neurai address ever satisfies: the suggestion was dead code. What is
+        // worth offering here is a Neurai Connect pairing copied from a desktop
+        // browser, which is exactly the case where the QR code cannot be scanned.
+        const isConnectPairing = NeuraiUriMatch.isConnectUri(clipboard);
+        if (!isAddressFromStoredWallet && clipboardContent.current !== clipboard && isConnectPairing) {
+          showClipboardAlert({ contentType: ClipboardContentType.NEURAI_CONNECT });
         }
         clipboardContent.current = clipboard;
       }

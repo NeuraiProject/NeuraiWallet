@@ -7,6 +7,7 @@ import DrawerList from '../screen/wallets/DrawerList';
 import DetailViewStackScreensStack from './DetailViewScreensStack';
 import { DrawerParamList } from './DrawerParamList';
 import useCompanionListeners from '../hooks/useCompanionListeners';
+import useNeuraiConnect from '../hooks/useNeuraiConnect';
 
 const Drawer = createDrawerNavigator<DrawerParamList>();
 
@@ -37,6 +38,9 @@ const DrawerRoot = () => {
   const { sizeClass, isLargeScreen } = useSizeClass();
   const { direction } = useLocale();
   useCompanionListeners();
+  // Mounted here, once: the Connect client has to outlive every screen so a
+  // request that arrives between two screens still finds a listener.
+  useNeuraiConnect();
 
   const getDrawerWidth = useMemo(() => {
     switch (sizeClass) {

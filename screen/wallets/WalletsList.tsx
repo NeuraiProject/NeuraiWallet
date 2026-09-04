@@ -5,7 +5,8 @@ import { getClipboardContent } from '../../blue_modules/clipboard';
 import { isDesktop } from '../../blue_modules/environment';
 import * as fs from '../../blue_modules/fs';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
-import DeeplinkSchemaMatch from '../../class/deeplink-schema-match';
+import NeuraiUriMatch from '../../class/neurai-uri-match';
+import { openNeuraiPaymentUri } from '../../helpers/open-neurai-payment';
 import { ExtendedTransaction, Transaction, TWallet } from '../../class/wallets/types';
 import presentAlert from '../../components/Alert';
 import { FButton, FContainer, FloatButtonsBottomFade } from '../../components/FloatButtons';
@@ -231,16 +232,29 @@ const WalletsList: React.FC = () => {
     (value: any) => {
       if (!value) return;
       try {
-        DeeplinkSchemaMatch.navigationRouteFor({ url: value }, completionValue => {
-          triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
-          // @ts-ignore: for now
-          navigation.navigate(...completionValue);
-        });
+        // Neurai first: a scanned `nc:` pairing opens the Connect flow and an
+        // `xna:` request opens the send flow, while anything the Neurai matcher
+        // does not own falls through to the legacy Bitcoin-era router inside it.
+        NeuraiUriMatch.navigationRouteFor(
+          { url: value },
+          completionValue => {
+            triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
+            // @ts-ignore: for now
+            navigation.navigate(...completionValue);
+          },
+          undefined,
+          {
+            onPayment: payment => {
+              triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
+              if (!openNeuraiPaymentUri(navigation, wallets, payment)) Alert.alert(loc.send.header, loc.wallets.select_no_bitcoin);
+            },
+          },
+        );
       } catch (e: any) {
         Alert.alert(loc.send.details_scan_error, e.message);
       }
     },
-    [navigation],
+    [navigation, wallets],
   );
 
   const handleClick = useCallback(

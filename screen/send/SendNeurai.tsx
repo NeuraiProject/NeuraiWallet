@@ -32,6 +32,7 @@ import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import { useTheme } from '../../components/themes';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
+import { parseNeuraiPaymentUri, type NeuraiPaymentUri } from '../../class/neurai-uri-match';
 import { NeuraiHardwareWallet, type NeuraiHwUnsignedSend } from '../../class/wallets/neurai-hardware-wallet';
 import { useNeuraiHwDevice } from '../../blue_modules/neurai-hw/useNeuraiHwDevice';
 import { useSettings } from '../../hooks/context/useSettings';
@@ -64,28 +65,6 @@ function assetTypeLabel(type: NeuraiAssetType): string {
 
 type RouteProps = RouteProp<DetailViewStackParamList, 'SendNeurai'>;
 type NavigationProps = NativeStackNavigationProp<DetailViewStackParamList, 'SendNeurai'>;
-
-/**
- * Parse a payment payload coming from a scanned QR. Accepts either a bare
- * Neurai address or a `xna:address?amount=N&label=...` URI. Anything that
- * doesn't look like a URI is returned as the address as-is.
- */
-function parseScannedPayload(input: string): { address: string; amount?: string } {
-  const trimmed = input.trim();
-  if (!trimmed.toLowerCase().startsWith('xna:')) {
-    return { address: trimmed };
-  }
-  const withoutScheme = trimmed.slice(4);
-  const [addressPart, queryPart] = withoutScheme.split('?', 2);
-  const result: { address: string; amount?: string } = { address: addressPart };
-  if (queryPart) {
-    for (const pair of queryPart.split('&')) {
-      const [k, v] = pair.split('=', 2);
-      if (k === 'amount' && v) result.amount = decodeURIComponent(v);
-    }
-  }
-  return result;
-}
 
 const SendNeurai: React.FC = () => {
   const { colors } = useTheme();
@@ -190,9 +169,15 @@ const SendNeurai: React.FC = () => {
   // popTo('SendNeurai') from the modal can't find it across navigators.
   const handleScanned = useCallback(
     (data: string) => {
-      const parsed = parseScannedPayload(data);
-      if (parsed.address) setAddress(parsed.address);
-      if (parsed.amount) setAmount(parsed.amount);
+      // `xna:` payment requests (also `XNA:` and `xna://`) are parsed by the
+      // shared matcher in `class/neurai-uri-match.ts`; a string with no scheme
+      // is taken as a bare address, as before.
+      const trimmed = data.trim();
+      const parsed: NeuraiPaymentUri | undefined = trimmed.toLowerCase().startsWith('xna:')
+        ? parseNeuraiPaymentUri(trimmed)
+        : { address: trimmed };
+      if (parsed?.address) setAddress(parsed.address);
+      if (parsed?.amount) setAmount(parsed.amount);
       resetDrafts();
     },
     [resetDrafts],

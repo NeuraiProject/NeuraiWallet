@@ -107,6 +107,8 @@
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>xna</string>
+				<string>neuraiwallet</string>
 				<string>bitcoin</string>
 				<string>lightning</string>
 				<string>bluewallet</string>

@@ -263,6 +263,13 @@ export interface NeuraiBuildTransactionResult {
   debug: unknown;
 }
 
+/**
+ * Material a Neurai wallet can hand out for local message signing. Legacy
+ * wallets expose a WIF; post-quantum wallets expose the 32-byte ML-DSA-44 seed
+ * and the public key it expands to.
+ */
+export type NeuraiSigningMaterial = { kind: 'legacy'; wif: string } | { kind: 'pq'; seedKey: string; publicKey: string };
+
 export abstract class AbstractNeuraiWallet extends AbstractWallet {
   /** Chain identifier passed to the underlying engine. Persisted. */
   network: NeuraiChainType;
@@ -759,6 +766,30 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * `false` if the address is unknown or this is a PQ wallet (PQ keys do not
    * have a WIF representation).
    */
+  /**
+   * Signing material for an address owned by this wallet, used by Neurai Connect
+   * to sign messages locally (`blue_modules/neurai/connect/signer.ts`).
+   *
+   * Legacy wallets return their WIF; post-quantum wallets return the ML-DSA-44
+   * seed plus public key, from which the signing key pair is expanded. Hardware
+   * wallets return `false`: their key never leaves the device, so message
+   * signing has to be routed through the device instead.
+   */
+  async getMessageSigningMaterial(address: string): Promise<NeuraiSigningMaterial | false> {
+    if (!this.secret) return false;
+    try {
+      const engine = await this.ensureEngine();
+      const material = engine.getPrivateKeyByAddress(address);
+      if (typeof material === 'string' && material.length > 0) return { kind: 'legacy', wif: material };
+      if (material && typeof material === 'object' && typeof material.seedKey === 'string' && typeof material.publicKey === 'string') {
+        return { kind: 'pq', seedKey: material.seedKey, publicKey: material.publicKey };
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+
   _getWIFbyAddress(address: string): string | false {
     if (!this._engine) return false;
     try {
@@ -1354,11 +1385,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * physically. All inputs belong to the single DePIN address, so one pubkey
    * signs them all.
    */
-  private async signDepinRevealWithDevice(
-    rawTx: string,
-    utxos: SpendableUtxo[],
-    device: NeuraiESP32,
-  ): Promise<string> {
+  private async signDepinRevealWithDevice(rawTx: string, utxos: SpendableUtxo[], device: NeuraiESP32): Promise<string> {
     const tx = bitcoin.Transaction.fromHex(rawTx);
     const byOutpoint = new Map(utxos.map(u => [`${u.txid}:${u.outputIndex}`, u]));
     const SIGHASH_ALL = bitcoin.Transaction.SIGHASH_ALL;

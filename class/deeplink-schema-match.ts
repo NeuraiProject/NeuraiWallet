@@ -1,11 +1,43 @@
+/**
+ * Legacy Bitcoin-era deep links and BIP21 helpers.
+ *
+ * This file is what is left of BlueWallet's deep-link router after the Neurai
+ * fork removed the Bitcoin and Lightning screens. It now holds only the pieces
+ * live code still calls:
+ *
+ * - `hasSchema` / `isBitcoinAddress`: recognition of the inherited `bitcoin:`,
+ *   `blue:` and `bluewallet:` links and of bare Bitcoin addresses, used by the
+ *   clipboard watcher (`hooks/useCompanionListeners.ts`), the home-screen quick
+ *   actions (`hooks/useDeviceQuickActions.ts`) and `class/neurai-uri-match.ts`.
+ * - `bip21encode` / `bip21decode`: BIP21 encoding and decoding for the Receive
+ *   screens. Neurai reuses the BIP21 grammar with the `xna` URN scheme.
+ * - `navigationRouteFor`: the iOS home-screen widget's "receive" button, the
+ *   only deep link left whose destination screen still exists.
+ * - `getServerFromSetElectrumServerAction`: still called by
+ *   `screen/settings/ElectrumSettings.tsx`.
+ *
+ * Everything else was deleted because it pointed at screens this fork does not
+ * have (`SendDetailsRoot`, `SendDetails`, `PsbtWithHardwareWallet`, the LNURL
+ * and Lightning invoice flows) or at features it never shipped (`.psbt` and
+ * `.bwcosigner` file imports, multisig cosigner sharing).
+ *
+ * Neurai's own URIs — `nc:` pairings, `xna:` payment requests and
+ * `neuraiwallet://connect` — are NOT handled here. They live in
+ * `class/neurai-uri-match.ts`, which is the entry point for the scanner and
+ * for deep links, and which delegates the legacy schemes above to this class.
+ */
+
 import bip21, { TOptions } from 'bip21';
 import * as bitcoin from 'bitcoinjs-lib';
-import URL from 'url';
-import { readFileOutsideSandbox } from '../blue_modules/fs';
 import { Chain } from '../models/xnaUnits';
 import type { TWallet } from './wallets/types';
 
 type TCompletionHandlerParams = [string, object];
+/**
+ * Only `wallets` is read today. The other three are still declared because the
+ * live callers (`useCompanionListeners`, `useDeviceQuickActions`) pass them as
+ * an object literal, and TypeScript rejects excess properties on those.
+ */
 type TContext = {
   wallets: TWallet[];
   saveToDisk: () => void;
@@ -25,7 +57,12 @@ class DeeplinkSchemaMatch {
    * If the content is recognizable, create a dictionary with the respective
    * navigation dictionary required by react-navigation.
    *
-   * @param event {{url: string}} URL deeplink as passed to app, e.g. `bitcoin:bc1qh6tf004ty7z7un2v5ntu4mkf630545gvhs45u7?amount=666&label=Yo`
+   * The only link still recognised is `bluewallet://widget?action=openReceive`,
+   * emitted by the iOS home-screen widget (`ios/Widgets/Shared/Views/SendReceiveButtons.swift`).
+   * Its `openSend` sibling is deliberately ignored: it opened `SendDetailsRoot`,
+   * a Bitcoin route that no longer exists in this fork.
+   *
+   * @param event {{url: string}} URL deeplink as passed to app, e.g. `bluewallet://widget?action=openReceive`
    * @param completionHandler {function} Callback that returns [string, params: object]
    */
   static navigationRouteFor(
@@ -33,108 +70,38 @@ class DeeplinkSchemaMatch {
     completionHandler: (args: TCompletionHandlerParams) => void,
     context: TContext = { wallets: [], saveToDisk: () => {}, addWallet: () => {}, setSharedCosigner: () => {} },
   ) {
-    if (event.url === null) {
-      return;
-    }
     if (typeof event.url !== 'string') {
       return;
     }
 
-    if (event.url.toLowerCase().startsWith('bluewallet:bitcoin:')) {
-      event.url = event.url.substring(11);
-    } else if (event.url.toLocaleLowerCase().startsWith('bluewallet://widget?action=')) {
-      event.url = event.url.substring('bluewallet://'.length);
+    let url = event.url;
+    if (url.toLocaleLowerCase().startsWith('bluewallet://widget?action=')) {
+      url = url.substring('bluewallet://'.length);
     }
 
-    if (DeeplinkSchemaMatch.isWidgetAction(event.url)) {
-      if (context.wallets.length >= 0) {
-        const wallet = context.wallets[0];
-        const action = event.url.split('widget?action=')[1];
-        if (wallet.chain === Chain.ONCHAIN) {
-          if (action === 'openSend') {
-            completionHandler([
-              'SendDetailsRoot',
-              {
-                screen: 'SendDetails',
-                params: {
-                  walletID: wallet.getID(),
-                },
-              },
-            ]);
-          } else if (action === 'openReceive') {
-            completionHandler([
-              'DetailViewStackScreensStack',
-              {
-                screen: 'ReceiveDetails',
-                params: {
-                  walletID: wallet.getID(),
-                },
-              },
-            ]);
-          }
-        }
-      }
-    } else if (DeeplinkSchemaMatch.isPossiblyPSBTFile(event.url)) {
-      readFileOutsideSandbox(decodeURI(event.url))
-        .then(file => {
-          if (file) {
-            completionHandler([
-              'SendDetailsRoot',
-              {
-                screen: 'PsbtWithHardwareWallet',
-                params: {
-                  deepLinkPSBT: file,
-                },
-              },
-            ]);
-          }
-        })
-        .catch(e => console.warn(e));
-      return;
-    } else if (DeeplinkSchemaMatch.isPossiblyCosignerFile(event.url)) {
-      readFileOutsideSandbox(decodeURI(event.url))
-        .then(file => {
-          // checks whether the necessary json keys are present in order to set a cosigner,
-          // doesn't validate the values this happens later
-          if (!file || !this.hasNeededJsonKeysForMultiSigSharing(file)) {
-            return;
-          }
-          context.setSharedCosigner(file);
-        })
-        .catch(e => console.warn(e));
-      return;
-    }
+    if (!DeeplinkSchemaMatch.isWidgetAction(url)) return;
+    if (url.split('widget?action=')[1] !== 'openReceive') return;
 
-    if (DeeplinkSchemaMatch.isBitcoinAddress(event.url)) {
-      completionHandler([
-        'SendDetailsRoot',
-        {
-          screen: 'SendDetails',
-          params: {
-            uri: event.url.replace('://', ':'),
-          },
+    const wallet = context.wallets[0];
+    if (!wallet || wallet.chain !== Chain.ONCHAIN) return;
+
+    completionHandler([
+      'DetailViewStackScreensStack',
+      {
+        screen: 'ReceiveDetails',
+        params: {
+          walletID: wallet.getID(),
         },
-      ]);
-    } else {
-      const urlObject = URL.parse(event.url, true); // eslint-disable-line n/no-deprecated-api
-      (async () => {
-        if (urlObject.protocol === 'bluewallet:' || urlObject.protocol === 'blue:') {
-          if (urlObject.host === 'setelectrumserver') {
-            completionHandler([
-              'ElectrumSettings',
-              {
-                server: DeeplinkSchemaMatch.getServerFromSetElectrumServerAction(event.url),
-              },
-            ]);
-          }
-        }
-      })();
-    }
+      },
+    ]);
   }
 
   /**
    * Extracts server from a deeplink like `bluewallet:setelectrumserver?server=electrum1.bluewallet.io%3A443%3As`
    * returns FALSE if none found
+   *
+   * The deeplink itself is no longer routed — `ElectrumSettings` is Bitcoin-era
+   * code on its way out — but the screen still uses this to parse a scanned QR.
    *
    * @param url {string}
    * @return {string|boolean}
@@ -144,18 +111,6 @@ class DeeplinkSchemaMatch {
     const splt = url.split('server=');
     if (splt[1]) return decodeURIComponent(splt[1]);
     return false;
-  }
-
-  static isTXNFile(filePath: string): boolean {
-    return filePath.toLowerCase().endsWith('.txn');
-  }
-
-  static isPossiblyPSBTFile(filePath: string): boolean {
-    return filePath.toLowerCase().endsWith('.psbt');
-  }
-
-  static isPossiblyCosignerFile(filePath: string): boolean {
-    return filePath.toLowerCase().endsWith('.bwcosigner');
   }
 
   static isBitcoinAddress(address: string): boolean {
@@ -172,20 +127,6 @@ class DeeplinkSchemaMatch {
 
   static isWidgetAction(text: string): boolean {
     return text.startsWith('widget?action=');
-  }
-
-  static hasNeededJsonKeysForMultiSigSharing(str: string): boolean {
-    let obj;
-
-    // Check if it's a valid JSON
-    try {
-      obj = JSON.parse(str);
-    } catch (e) {
-      return false;
-    }
-
-    // Check for the existence and type of the keys
-    return typeof obj.xfp === 'string' && typeof obj.xpub === 'string' && typeof obj.path === 'string';
   }
 
   static bip21decode(uri?: string) {
@@ -215,29 +156,6 @@ class DeeplinkSchemaMatch {
       }
     }
     return bip21.encode(address, options, urnScheme);
-  }
-
-  static decodeBitcoinUri(uri: string) {
-    let amount;
-    let address = uri || '';
-    let memo = '';
-    let payjoinUrl = '';
-    try {
-      const parsedBitcoinUri = DeeplinkSchemaMatch.bip21decode(uri);
-      address = parsedBitcoinUri.address ? parsedBitcoinUri.address.toString() : address;
-      if ('options' in parsedBitcoinUri) {
-        if (parsedBitcoinUri.options.amount) {
-          amount = Number(parsedBitcoinUri.options.amount);
-        }
-        if (parsedBitcoinUri.options.label) {
-          memo = parsedBitcoinUri.options.label;
-        }
-        if (parsedBitcoinUri.options.pj) {
-          payjoinUrl = parsedBitcoinUri.options.pj;
-        }
-      }
-    } catch (_) {}
-    return { address, amount, memo, payjoinUrl };
   }
 }
 

@@ -155,6 +155,11 @@
             <intent-filter tools:ignore="AppLinkUrlError">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
+                <!-- Neurai schemes: xna: payment requests and neuraiwallet://connect pairings. -->
+                <data android:scheme="xna" />
+                <data android:scheme="neuraiwallet" />
+                <!-- Inherited from the BlueWallet fork; kept as deprecated aliases so links
+                     already in the wild keep opening the app. To be removed in a later release. -->
                 <data android:scheme="bitcoin" />
                 <data android:scheme="lightning" />
                 <data android:scheme="bluewallet" />
