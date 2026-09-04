@@ -11,8 +11,8 @@
  */
 
 import { AppState, type AppStateStatus } from 'react-native';
-import { NeuraiConnectWallet } from '@neuraiproject/neurai-connect-wallet';
-import { parsePairingUri } from '@neuraiproject/neurai-connect-core';
+import { NeuraiConnectWallet, PAIRINGS_STORAGE_KEY, SESSIONS_STORAGE_KEY } from '@neuraiproject/neurai-connect-wallet';
+import { parsePairingUri, RecordStore } from '@neuraiproject/neurai-connect-core';
 import type { AuthRequestEvent, Pairing, Session, SessionProposalEvent, SessionRequestEvent } from '@neuraiproject/neurai-connect-wallet';
 import type { JsonRpcId } from '@neuraiproject/neurai-connect-core';
 import { getRelayUrl, loadRelayOverride, setRelayUrlOverride } from './config';
@@ -236,6 +236,24 @@ export function relayInUse(): boolean {
   return usage.sessions > 0 || usage.pairings > 0;
 }
 
+/** Sessions and pairings as they are on disk, for when the client cannot start. */
+async function persistedUsage(): Promise<ConnectRelayUsage> {
+  const storage = new SecureConnectStorage();
+  const count = async (key: string): Promise<number> => {
+    const store = new RecordStore<{ topic: string }>(storage, key);
+    await store.load();
+    return store.values().length;
+  };
+  try {
+    return { sessions: await count(SESSIONS_STORAGE_KEY), pairings: await count(PAIRINGS_STORAGE_KEY) };
+  } catch (error) {
+    // Unreadable storage must not turn into "nothing is there", which would let
+    // a relay change strand whatever it holds.
+    console.warn('[neurai-connect] could not read the stored sessions', error);
+    return { sessions: 1, pairings: 0 };
+  }
+}
+
 /**
  * Moves the wallet to `url`, or back to the default when it is null.
  *
@@ -245,12 +263,25 @@ export function relayInUse(): boolean {
  * sessions persisted from a previous run are counted rather than missed.
  */
 export async function changeRelay(url: string | null): Promise<void> {
-  await startConnect();
-  const usage = relayUsage();
+  // Counting must not depend on reaching the relay. The reason to change it is
+  // often that the current one does not answer — a typo, a dev server that is
+  // down, a phone that cannot open the URL at all — and requiring a live
+  // connection to leave would make the setting impossible to correct from the
+  // app. So: use the running client when there is one, and read the same
+  // records from disk when there is not.
+  let usage: ConnectRelayUsage;
+  try {
+    await startConnect();
+    usage = relayUsage();
+  } catch {
+    usage = await persistedUsage();
+  }
   if (usage.sessions > 0 || usage.pairings > 0) throw new RelayInUseError(usage);
   await stopConnect();
   await setRelayUrlOverride(url);
-  await startConnect();
+  // The setting is saved either way: the new relay may be unreachable too, and
+  // that is reported by the next pairing, not by refusing to store the choice.
+  await startConnect().catch(error => console.warn('[neurai-connect] the new relay did not answer yet', error));
 }
 
 /**

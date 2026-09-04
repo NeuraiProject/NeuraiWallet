@@ -51,9 +51,18 @@ const fakeWallet = {
   resume: jest.fn(async () => {}),
 };
 
+let initFails: string | null = null;
+
 jest.mock('@neuraiproject/neurai-connect-wallet', () => ({
   __esModule: true,
-  NeuraiConnectWallet: { init: jest.fn(async () => fakeWallet) },
+  NeuraiConnectWallet: {
+    init: jest.fn(async () => {
+      if (initFails) throw new Error(initFails);
+      return fakeWallet;
+    }),
+  },
+  SESSIONS_STORAGE_KEY: 'connect:sessions',
+  PAIRINGS_STORAGE_KEY: 'connect:pairings',
 }));
 jest.mock('react-native-secure-key-store', () => ({
   __esModule: true,
@@ -84,6 +93,7 @@ jest.mock('react-native-default-preference', () => {
 });
 
 beforeEach(async () => {
+  initFails = null;
   sessions = [];
   pairings = [];
   await startConnect();
@@ -190,6 +200,25 @@ describe('the login-then-revoke cycle', () => {
     expect(fakeWallet.forgetPairings).toHaveBeenCalled();
     expect(relayInUse()).toBe(false);
     await changeRelay(OTHER_RELAY);
+    expect(getRelayUrl()).toBe(OTHER_RELAY);
+  });
+});
+
+describe('when the current relay does not answer', () => {
+  // The trap this avoids: Android refuses cleartext to the stored relay, so the
+  // client cannot start — and if changing the setting required a live client,
+  // the only way out of a bad relay URL would be reinstalling the app.
+  it('still saves the new relay when the client cannot start', async () => {
+    initFails = 'CLEARTEXT communication to 127.0.0.1 not permitted by network security policy';
+
+    await changeRelay(OTHER_RELAY);
+    expect(getRelayUrlOverride()).toBe(OTHER_RELAY);
+  });
+
+  it('saves it even when the new relay does not answer either', async () => {
+    initFails = 'connection refused';
+
+    await changeRelay(OTHER_RELAY); // resolves: the choice is stored, the failure is reported when pairing
     expect(getRelayUrl()).toBe(OTHER_RELAY);
   });
 });
