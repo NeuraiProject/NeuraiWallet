@@ -214,7 +214,7 @@ const ConnectSessions: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  content: { padding: 20 },
+  content: { paddingHorizontal: 20, paddingTop: 12 },
   empty: { fontSize: 14, marginVertical: 8 },
   card: { borderWidth: 1, borderRadius: 8, padding: 12, marginVertical: 8 },
   cardTitle: { fontSize: 16, fontWeight: '700' },

@@ -15,14 +15,22 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import presentAlert, { AlertType } from '../../components/Alert';
 import Button from '../../components/Button';
-import { BlueSpacing20 } from '../../components/BlueSpacing';
-import { ConnectNotice, ConnectRow, ConnectSectionTitle } from '../../components/ConnectParts';
+import {
+  ConnectActions,
+  ConnectCard,
+  ConnectChoice,
+  ConnectHeader,
+  ConnectNotice,
+  ConnectRow,
+  ConnectSectionTitle,
+  connectStyles,
+} from '../../components/ConnectParts';
 import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import { useTheme } from '../../components/themes';
 import { connectClient, peekIncoming, takeIncoming } from '../../blue_modules/neurai/connect/client';
@@ -133,59 +141,50 @@ const ConnectProposal: React.FC = () => {
     }
   }, [id, navigation]);
 
-  const stylesHook = {
-    name: { color: colors.foregroundColor },
-    url: { color: colors.alternativeTextColor },
-    option: { borderColor: colors.formBorder, backgroundColor: colors.elevated },
-    optionSelected: { borderColor: colors.mainColor },
-    optionTitle: { color: colors.foregroundColor },
-  };
-
   if (!event) {
     return (
-      <SafeAreaScrollView contentContainerStyle={styles.centered}>
-        <Text style={[styles.gone, stylesHook.url]}>{loc.connect.request_gone}</Text>
+      <SafeAreaScrollView contentContainerStyle={connectStyles.centered}>
+        <Text style={[styles.gone, { color: colors.alternativeTextColor }]}>{loc.connect.request_gone}</Text>
         <Button title={loc.connect.close} onPress={navigation.goBack} />
       </SafeAreaScrollView>
     );
   }
 
-  return (
-    <SafeAreaScrollView contentContainerStyle={styles.content}>
-      <Text style={[styles.name, stylesHook.name]}>{event.proposer.metadata.name}</Text>
-      <Text style={[styles.url, stylesHook.url]} selectable>
-        {event.proposer.metadata.url}
-      </Text>
+  const networkLabel =
+    network === 'testnet' ? loc.wallets.neurai_network_testnet : network === 'mainnet' ? loc.wallets.neurai_network_mainnet : undefined;
 
-      <ConnectRow label={loc.connect.field_chain} value={chainId ?? CONNECT_EMPTY_FIELD} mono />
-      <ConnectRow label={loc.connect.proposal_methods} value={(asked?.methods ?? []).join(', ') || CONNECT_EMPTY_FIELD} />
-      <ConnectRow label={loc.connect.proposal_events} value={(asked?.events ?? []).join(', ') || CONNECT_EMPTY_FIELD} />
-      <ConnectRow
-        label={loc.connect.proposal_account}
-        value={address && chainId ? caip10Account(chainId, address) : CONNECT_EMPTY_FIELD}
-        mono
-      />
-      <ConnectRow label={loc.connect.proposal_session_length} value={loc.connect.proposal_seven_days} />
-      <ConnectRow
-        label={loc.connect.proposal_request_expires}
-        value={formatMoment(event.expiryTimestamp ? event.expiryTimestamp * 1000 : undefined)}
-      />
+  return (
+    <SafeAreaScrollView contentContainerStyle={connectStyles.content}>
+      <ConnectHeader title={event.proposer.metadata.name} subtitle={event.proposer.metadata.url} badge={networkLabel} />
 
       <ConnectNotice tone="info" text={loc.connect.proposal_wallet_addresses_note} />
 
+      <ConnectCard>
+        <ConnectRow
+          label={loc.connect.proposal_account}
+          value={address && chainId ? caip10Account(chainId, address) : CONNECT_EMPTY_FIELD}
+          mono
+        />
+        <ConnectRow label={loc.connect.proposal_methods} value={(asked?.methods ?? []).join(', ') || CONNECT_EMPTY_FIELD} />
+        <ConnectRow label={loc.connect.proposal_events} value={(asked?.events ?? []).join(', ') || CONNECT_EMPTY_FIELD} />
+        <ConnectRow label={loc.connect.proposal_session_length} value={loc.connect.proposal_seven_days} />
+        <ConnectRow
+          label={loc.connect.proposal_request_expires}
+          value={formatMoment(event.expiryTimestamp ? event.expiryTimestamp * 1000 : undefined)}
+        />
+        <ConnectRow label={loc.connect.field_chain} value={chainId ?? CONNECT_EMPTY_FIELD} mono />
+      </ConnectCard>
+
       {candidates.length > 1 && (
         <>
-          <ConnectSectionTitle title={loc.connect.login_which_wallet} />
+          <ConnectSectionTitle title={loc.connect.login_which_wallet} hint={loc.connect.proposal_which_wallet_hint} />
           {candidates.map(candidate => (
-            <Pressable
-              accessibilityRole="radio"
-              accessibilityState={{ selected: candidate.getID() === wallet?.getID() }}
+            <ConnectChoice
               key={candidate.getID()}
+              selected={candidate.getID() === wallet?.getID()}
+              title={candidate.getLabel()}
               onPress={() => setWalletID(candidate.getID())}
-              style={[styles.option, stylesHook.option, candidate.getID() === wallet?.getID() ? stylesHook.optionSelected : null]}
-            >
-              <Text style={[styles.optionTitle, stylesHook.optionTitle]}>{candidate.getLabel()}</Text>
-            </Pressable>
+            />
           ))}
         </>
       )}
@@ -193,27 +192,21 @@ const ConnectProposal: React.FC = () => {
       {resolving && <ActivityIndicator />}
       {approval.blocker === 'no_wallet' && <ConnectNotice tone="danger" text={loc.connect.blocked_no_wallet} />}
 
-      <BlueSpacing20 />
-      <Button
-        title={loc.connect.proposal_approve}
-        disabled={!approval.canApprove || busy}
-        onPress={onApprove}
-        testID="ConnectProposalApprove"
+      <ConnectActions
+        primary={{
+          title: loc.connect.proposal_approve,
+          onPress: onApprove,
+          disabled: !approval.canApprove || busy,
+          testID: 'ConnectProposalApprove',
+        }}
+        secondary={{ title: loc.connect.reject, onPress: onReject, disabled: busy, testID: 'ConnectProposalReject' }}
       />
-      <BlueSpacing20 />
-      <Button title={loc.connect.reject} disabled={busy} onPress={onReject} testID="ConnectProposalReject" />
     </SafeAreaScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  content: { padding: 20 },
-  centered: { padding: 24, flexGrow: 1, justifyContent: 'center' },
   gone: { fontSize: 15, textAlign: 'center', marginBottom: 20 },
-  name: { fontSize: 26, fontWeight: '700' },
-  url: { fontSize: 15, marginTop: 4, marginBottom: 8 },
-  option: { borderWidth: 1.5, borderRadius: 8, padding: 12, marginVertical: 6 },
-  optionTitle: { fontSize: 15, fontWeight: '700' },
 });
 
 export default ConnectProposal;

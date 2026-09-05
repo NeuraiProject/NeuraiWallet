@@ -27,15 +27,24 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { buildCacao, buildCacaoPayload, formatAuthMessage } from '@neuraiproject/neurai-connect-wallet';
 
 import presentAlert, { AlertType } from '../../components/Alert';
 import Button from '../../components/Button';
-import { BlueSpacing20 } from '../../components/BlueSpacing';
-import { ConnectMonospaceBlock, ConnectNotice, ConnectRow, ConnectSectionTitle } from '../../components/ConnectParts';
+import {
+  ConnectActions,
+  ConnectCard,
+  ConnectChoice,
+  ConnectHeader,
+  ConnectMonospaceBlock,
+  ConnectNotice,
+  ConnectRow,
+  ConnectSectionTitle,
+  connectStyles,
+} from '../../components/ConnectParts';
 import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import { useTheme } from '../../components/themes';
 import { connectClient, peekIncoming, takeIncoming } from '../../blue_modules/neurai/connect/client';
@@ -101,7 +110,12 @@ const ConnectLogin: React.FC = () => {
     [wallets, network],
   );
   const [walletID, setWalletID] = useState<string | undefined>();
-  const wallet = useMemo(() => candidates.find(w => w.getID() === walletID) ?? candidates[0], [candidates, walletID]);
+  // Chosen by the user, or the first candidate that can actually sign: a
+  // hardware wallet listed first must not start selected only to block approval.
+  const wallet = useMemo(
+    () => candidates.find(w => w.getID() === walletID) ?? candidates.find(w => w.type !== NeuraiHardwareWallet.type) ?? candidates[0],
+    [candidates, walletID],
+  );
 
   const { requireUnlock } = useConnectApprovalGate();
   const [identity, setIdentity] = useState<DomainIdentity | undefined>();
@@ -194,20 +208,10 @@ const ConnectLogin: React.FC = () => {
     }
   }, [id, navigation]);
 
-  const stylesHook = {
-    domain: { color: colors.foregroundColor },
-    aud: { color: colors.alternativeTextColor },
-    option: { borderColor: colors.formBorder, backgroundColor: colors.elevated },
-    optionSelected: { borderColor: colors.mainColor },
-    optionTitle: { color: colors.foregroundColor },
-    optionDescription: { color: colors.alternativeTextColor },
-    optionAddress: { color: colors.foregroundColor },
-  };
-
   if (!event || !payload) {
     return (
-      <SafeAreaScrollView contentContainerStyle={styles.centered}>
-        <Text style={[styles.gone, stylesHook.aud]}>{loc.connect.request_gone}</Text>
+      <SafeAreaScrollView contentContainerStyle={connectStyles.centered}>
+        <Text style={[styles.gone, { color: colors.alternativeTextColor }]}>{loc.connect.request_gone}</Text>
         <Button title={loc.connect.close} onPress={navigation.goBack} />
       </SafeAreaScrollView>
     );
@@ -216,33 +220,14 @@ const ConnectLogin: React.FC = () => {
   // Computed once: it is both the reason the button is disabled and the
   // sentence shown next to it, and those two must never disagree.
   const blocked = blockerText(approval.blocker);
-
-  const renderOption = (kind: ConnectAddressKind, title: string, description: string, address: string | undefined, enabled: boolean) => (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityState={{ selected: addressKind === kind, disabled: !enabled }}
-      disabled={!enabled}
-      onPress={() => setAddressKind(kind)}
-      style={[styles.option, stylesHook.option, addressKind === kind ? stylesHook.optionSelected : null, enabled ? null : styles.disabled]}
-      testID={`ConnectAddressOption-${kind}`}
-    >
-      <Text style={[styles.optionTitle, stylesHook.optionTitle]}>{title}</Text>
-      <Text style={[styles.optionDescription, stylesHook.optionDescription]}>{description}</Text>
-      <Text style={[styles.optionAddress, stylesHook.optionAddress]} selectable>
-        {address ?? CONNECT_EMPTY_FIELD}
-      </Text>
-    </Pressable>
-  );
+  const networkLabel =
+    network === 'testnet' ? loc.wallets.neurai_network_testnet : network === 'mainnet' ? loc.wallets.neurai_network_mainnet : undefined;
 
   return (
-    <SafeAreaScrollView contentContainerStyle={styles.content}>
-      <Text style={[styles.domain, stylesHook.domain]}>{payload.domain}</Text>
-      <Text style={[styles.aud, stylesHook.aud]} selectable>
-        {payload.aud}
-      </Text>
+    <SafeAreaScrollView contentContainerStyle={connectStyles.content}>
+      <ConnectHeader title={payload.domain} subtitle={payload.aud} badge={networkLabel} />
 
       <ConnectNotice tone="warn" text={loc.connect.login_browser_warning} testID="ConnectBrowserWarning" />
-
       {!event.verify.domainMatchesMetadata && (
         <ConnectNotice
           tone="danger"
@@ -252,84 +237,83 @@ const ConnectLogin: React.FC = () => {
       )}
       {event.verify.expired && <ConnectNotice tone="danger" text={loc.connect.blocked_expired} />}
 
-      <ConnectRow label={loc.connect.field_requested_by} value={`${event.requester.metadata.name} — ${event.requester.metadata.url}`} />
-      <ConnectRow label={loc.connect.field_requested_at} value={formatMoment(payload.iat)} />
-      <ConnectRow label={loc.connect.field_expires} value={formatMoment(payload.exp)} />
-      <ConnectRow label={loc.connect.field_statement} value={payload.statement || CONNECT_EMPTY_FIELD} />
-      <ConnectRow label={loc.connect.field_chain} value={chainId ?? CONNECT_EMPTY_FIELD} mono />
+      <ConnectCard>
+        <ConnectRow label={loc.connect.field_requested_by} value={`${event.requester.metadata.name} — ${event.requester.metadata.url}`} />
+        <ConnectRow label={loc.connect.field_statement} value={payload.statement || CONNECT_EMPTY_FIELD} />
+        <ConnectRow
+          label={loc.connect.field_requested_at}
+          value={loc.formatString(loc.connect.field_requested_line, { time: formatMoment(payload.iat), exp: formatMoment(payload.exp) })}
+        />
+      </ConnectCard>
 
-      <ConnectSectionTitle title={loc.connect.login_which_address} />
+      <ConnectSectionTitle title={loc.connect.login_sign_in_as} hint={loc.connect.login_sign_in_as_hint} />
       {resolving ? (
         <ActivityIndicator />
       ) : (
         <>
-          {renderOption(
-            'identity',
-            loc.connect.login_identity_title,
-            identity ? loc.connect.login_identity_description : loc.connect.blocked_no_identity,
-            identity?.address,
-            identity !== undefined,
-          )}
-          {renderOption(
-            'wallet',
-            loc.connect.login_wallet_title,
-            loc.connect.login_wallet_description,
-            walletAddress,
-            walletAddress !== undefined,
-          )}
+          <ConnectChoice
+            selected={addressKind === 'identity'}
+            disabled={identity === undefined}
+            title={loc.connect.login_identity_title}
+            description={identity ? loc.connect.login_identity_description : loc.connect.blocked_no_identity}
+            detail={identity?.address}
+            onPress={() => setAddressKind('identity')}
+            testID="ConnectAddressOption-identity"
+          />
+          <ConnectChoice
+            selected={addressKind === 'wallet'}
+            disabled={walletAddress === undefined}
+            title={loc.connect.login_wallet_title}
+            description={loc.connect.login_wallet_description}
+            detail={walletAddress}
+            onPress={() => setAddressKind('wallet')}
+            testID="ConnectAddressOption-wallet"
+          />
         </>
       )}
 
       {candidates.length > 1 && (
         <>
-          <ConnectSectionTitle title={loc.connect.login_which_wallet} />
-          {candidates.map(candidate => (
-            <Pressable
-              accessibilityRole="radio"
-              accessibilityState={{ selected: candidate.getID() === wallet?.getID() }}
-              key={candidate.getID()}
-              onPress={() => setWalletID(candidate.getID())}
-              style={[styles.option, stylesHook.option, candidate.getID() === wallet?.getID() ? stylesHook.optionSelected : null]}
-            >
-              <Text style={[styles.optionTitle, stylesHook.optionTitle]}>{candidate.getLabel()}</Text>
-            </Pressable>
-          ))}
+          <ConnectSectionTitle title={loc.connect.login_from_wallet} />
+          {candidates.map(candidate => {
+            const hardware = candidate.type === NeuraiHardwareWallet.type;
+            return (
+              <ConnectChoice
+                key={candidate.getID()}
+                selected={candidate.getID() === wallet?.getID()}
+                disabled={hardware}
+                title={candidate.getLabel()}
+                description={hardware ? loc.connect.login_wallet_cannot_sign : undefined}
+                onPress={() => setWalletID(candidate.getID())}
+              />
+            );
+          })}
         </>
       )}
 
-      <ConnectSectionTitle title={loc.connect.login_exact_text} />
+      <ConnectSectionTitle title={loc.connect.login_exact_text} hint={loc.connect.details_exact_text_hint} />
       {canonical.error ? (
         <ConnectNotice tone="danger" text={canonical.error} />
       ) : (
         <ConnectMonospaceBlock text={canonical.text} testID="ConnectCanonicalMessage" />
       )}
-
       {blocked !== undefined && <ConnectNotice tone="danger" text={blocked} />}
 
-      <BlueSpacing20 />
-      <Button
-        title={loc.connect.login_approve}
-        disabled={!approval.canApprove || busy || canonical.error !== undefined}
-        onPress={onApprove}
-        testID="ConnectLoginApprove"
+      <ConnectActions
+        primary={{
+          title: loc.connect.login_approve,
+          onPress: onApprove,
+          disabled: !approval.canApprove || busy || canonical.error !== undefined,
+          testID: 'ConnectLoginApprove',
+        }}
+        secondary={{ title: loc.connect.reject, onPress: onReject, disabled: busy, testID: 'ConnectLoginReject' }}
       />
-      <BlueSpacing20 />
-      <Button title={loc.connect.reject} disabled={busy} onPress={onReject} testID="ConnectLoginReject" />
     </SafeAreaScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  content: { padding: 20 },
-  centered: { padding: 24, flexGrow: 1, justifyContent: 'center' },
   gone: { fontSize: 15, textAlign: 'center', marginBottom: 20 },
-  domain: { fontSize: 26, fontWeight: '700' },
-  aud: { fontSize: 15, marginTop: 4 },
-  option: { borderWidth: 1.5, borderRadius: 8, padding: 12, marginVertical: 6 },
-  disabled: { opacity: 0.5 },
-  optionTitle: { fontSize: 15, fontWeight: '700' },
-  optionDescription: { fontSize: 13, marginTop: 2 },
-  optionAddress: { fontFamily: 'monospace', fontSize: 12, marginTop: 6 },
 });
 
 export default ConnectLogin;

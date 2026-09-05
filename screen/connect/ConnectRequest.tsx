@@ -31,8 +31,16 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import presentAlert, { AlertType } from '../../components/Alert';
 import Button from '../../components/Button';
-import { BlueSpacing20 } from '../../components/BlueSpacing';
-import { ConnectMonospaceBlock, ConnectNotice, ConnectRow, ConnectSectionTitle } from '../../components/ConnectParts';
+import {
+  ConnectActions,
+  ConnectCard,
+  ConnectHeader,
+  ConnectMonospaceBlock,
+  ConnectNotice,
+  ConnectRow,
+  ConnectSectionTitle,
+  connectStyles,
+} from '../../components/ConnectParts';
 import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import { useTheme } from '../../components/themes';
 import { connectClient, peekIncoming, takeIncoming } from '../../blue_modules/neurai/connect/client';
@@ -165,15 +173,10 @@ const ConnectRequest: React.FC = () => {
     }
   }, [event, id, finish]);
 
-  const stylesHook = {
-    method: { color: colors.foregroundColor },
-    peer: { color: colors.alternativeTextColor },
-  };
-
   if (!event) {
     return (
-      <SafeAreaScrollView contentContainerStyle={styles.centered}>
-        <Text style={[styles.gone, stylesHook.peer]}>{loc.connect.request_gone}</Text>
+      <SafeAreaScrollView contentContainerStyle={connectStyles.centered}>
+        <Text style={[styles.gone, { color: colors.alternativeTextColor }]}>{loc.connect.request_gone}</Text>
         <Button title={loc.connect.close} onPress={navigation.goBack} />
       </SafeAreaScrollView>
     );
@@ -181,70 +184,60 @@ const ConnectRequest: React.FC = () => {
 
   const blocked = event.guard?.blocked === true;
   const transfer = method === 'sendTransfer' ? summariseSendTransfer(event.params) : undefined;
+  const primaryAction =
+    handling === 'answer'
+      ? { title: loc.connect.request_addresses_confirm, onPress: onAnswerAddresses, disabled: busy || !sessionAddress }
+      : handling === 'sign' && !blocked
+        ? { title: loc.connect.request_sign, onPress: onSign, disabled: busy || !wallet, testID: 'ConnectRequestSign' }
+        : undefined;
 
   return (
-    <SafeAreaScrollView contentContainerStyle={styles.content}>
-      <Text style={[styles.method, stylesHook.method]}>{method}</Text>
-      <Text style={[styles.peer, stylesHook.peer]} selectable>
-        {`${event.session.peerMetadata.name} — ${event.session.peerMetadata.url}`}
-      </Text>
-
-      <ConnectRow label={loc.connect.field_chain} value={event.chainId} mono />
-      <ConnectRow label={loc.connect.request_account} value={sessionAddress ?? CONNECT_EMPTY_FIELD} mono />
+    <SafeAreaScrollView contentContainerStyle={connectStyles.content}>
+      <ConnectHeader title={method} subtitle={`${event.session.peerMetadata.name} — ${event.session.peerMetadata.url}`} />
 
       {blocked && <ConnectNotice tone="danger" testID="ConnectSignMessageBlocked" text={loc.connect.request_signmessage_blocked} />}
-
-      {handling === 'answer' && (
-        <>
-          <ConnectNotice tone="info" text={loc.connect.request_addresses_explanation} />
-          <BlueSpacing20 />
-          <Button title={loc.connect.request_addresses_confirm} disabled={busy || !sessionAddress} onPress={onAnswerAddresses} />
-        </>
+      {handling === 'answer' && <ConnectNotice tone="info" text={loc.connect.request_addresses_explanation} />}
+      {handling === 'sign' && !blocked && event.guard?.looksLikeLogin === true && (
+        <ConnectNotice tone="warn" text={loc.connect.request_signmessage_login} />
       )}
+      {handling === 'unsupported' && <ConnectNotice tone="warn" text={loc.formatString(loc.connect.request_unsupported, { method })} />}
 
       {handling === 'sign' && (
         <>
           <ConnectSectionTitle title={loc.connect.request_message} />
           <ConnectMonospaceBlock text={signMessageText(event.params)} testID="ConnectRequestMessage" />
-          {!blocked && event.guard?.looksLikeLogin === true && <ConnectNotice tone="warn" text={loc.connect.request_signmessage_login} />}
-          {!blocked && (
-            <>
-              <BlueSpacing20 />
-              <Button title={loc.connect.request_sign} disabled={busy || !wallet} onPress={onSign} testID="ConnectRequestSign" />
-            </>
-          )}
           {!blocked && !wallet && <ConnectNotice tone="danger" text={loc.connect.blocked_no_wallet} />}
         </>
       )}
 
-      {transfer && (
-        <>
-          <ConnectRow label={loc.connect.transfer_destination} value={transfer.destination} mono />
-          <ConnectRow label={loc.connect.transfer_amount} value={transfer.amount} />
-          <ConnectRow label={loc.connect.transfer_memo} value={transfer.memo} />
-        </>
-      )}
+      <ConnectCard>
+        {transfer && (
+          <>
+            <ConnectRow label={loc.connect.transfer_destination} value={transfer.destination} mono />
+            <ConnectRow label={loc.connect.transfer_amount} value={transfer.amount} />
+            <ConnectRow label={loc.connect.transfer_memo} value={transfer.memo} />
+          </>
+        )}
+        <ConnectRow label={loc.connect.request_account} value={sessionAddress ?? CONNECT_EMPTY_FIELD} mono />
+        <ConnectRow label={loc.connect.field_chain} value={event.chainId} mono />
+        {refusal !== undefined && <ConnectRow label={loc.connect.request_answer_sent} value={refusal} />}
+      </ConnectCard>
 
-      {handling === 'unsupported' && <ConnectNotice tone="warn" text={loc.formatString(loc.connect.request_unsupported, { method })} />}
-      {refusal !== undefined && <ConnectRow label={loc.connect.request_answer_sent} value={refusal} />}
-
-      <BlueSpacing20 />
-      <Button
-        title={handling === 'unsupported' ? loc.connect.close : loc.connect.reject}
-        disabled={busy}
-        onPress={onReject}
-        testID="ConnectRequestReject"
+      <ConnectActions
+        primary={primaryAction}
+        secondary={{
+          title: handling === 'unsupported' ? loc.connect.close : loc.connect.reject,
+          onPress: onReject,
+          disabled: busy,
+          testID: 'ConnectRequestReject',
+        }}
       />
     </SafeAreaScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  content: { padding: 20 },
-  centered: { padding: 24, flexGrow: 1, justifyContent: 'center' },
   gone: { fontSize: 15, textAlign: 'center', marginBottom: 20 },
-  method: { fontSize: 26, fontWeight: '700' },
-  peer: { fontSize: 15, marginTop: 4, marginBottom: 8 },
 });
 
 export default ConnectRequest;

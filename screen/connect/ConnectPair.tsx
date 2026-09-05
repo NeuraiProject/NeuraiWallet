@@ -111,7 +111,7 @@ const ConnectPair: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  content: { padding: 24, alignItems: 'center', justifyContent: 'center', flexGrow: 1 },
+  content: { paddingHorizontal: 24, paddingVertical: 24, alignItems: 'center', justifyContent: 'center', flexGrow: 1 },
   waiting: { fontSize: 17, fontWeight: '600', marginTop: 24, textAlign: 'center' },
   hint: { fontSize: 13, marginTop: 12, marginBottom: 24, textAlign: 'center' },
   failureBox: { borderRadius: 8, padding: 16, marginBottom: 8, alignSelf: 'stretch' },
