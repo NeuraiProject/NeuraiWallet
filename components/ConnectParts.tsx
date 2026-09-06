@@ -31,11 +31,22 @@ export const connectStyles: { content: ViewStyle; centered: ViewStyle } = {
   centered: { paddingHorizontal: 24, flexGrow: 1, justifyContent: 'center' },
 };
 
-/** How loud a notice is. `danger` is reserved for "do not approve this". */
-export type ConnectNoticeTone = 'info' | 'warn' | 'danger';
+/**
+ * How loud a notice is. `danger` is reserved for "do not approve this", and
+ * `quiet` is a plain line with no box, for text that must be read but should
+ * not shout — it reads like the hint under a section heading.
+ */
+export type ConnectNoticeTone = 'quiet' | 'info' | 'warn' | 'danger';
 
 export const ConnectNotice: React.FC<{ tone: ConnectNoticeTone; text: string; testID?: string }> = ({ tone, text, testID }) => {
   const { colors } = useTheme();
+  if (tone === 'quiet') {
+    return (
+      <Text style={[styles.quietNotice, { color: colors.alternativeTextColor }]} testID={testID}>
+        {text}
+      </Text>
+    );
+  }
   const palette = {
     info: {
       box: { backgroundColor: colors.inputBackgroundColor, borderColor: colors.formBorder },
@@ -127,11 +138,13 @@ export const ConnectChoice: React.FC<{
   selected: boolean;
   disabled?: boolean;
   title: string;
+  /** Short qualifier shown next to the title, such as the network of a wallet. */
+  badge?: string;
   description?: string;
   detail?: string;
   onPress: () => void;
   testID?: string;
-}> = ({ selected, disabled, title, description, detail, onPress, testID }) => {
+}> = ({ selected, disabled, title, badge, description, detail, onPress, testID }) => {
   const { colors } = useTheme();
   return (
     <Pressable
@@ -153,7 +166,16 @@ export const ConnectChoice: React.FC<{
         {selected ? <View style={[styles.radioDot, { backgroundColor: colors.mainColor }]} /> : null}
       </View>
       <View style={styles.choiceBody}>
-        <Text style={[styles.choiceTitle, { color: colors.foregroundColor }]}>{title}</Text>
+        <View style={styles.choiceHeading}>
+          <Text style={[styles.choiceTitle, { color: colors.foregroundColor }]} numberOfLines={1}>
+            {title}
+          </Text>
+          {badge ? (
+            <View style={[styles.choiceBadge, { borderColor: colors.formBorder }]}>
+              <Text style={[styles.choiceBadgeText, { color: colors.alternativeTextColor }]}>{badge}</Text>
+            </View>
+          ) : null}
+        </View>
         {description ? <Text style={[styles.choiceDescription, { color: colors.alternativeTextColor }]}>{description}</Text> : null}
         {detail ? (
           <Text style={[styles.choiceDetail, { color: colors.foregroundColor }]} selectable>
@@ -226,6 +248,7 @@ const styles = StyleSheet.create({
 
   noticeBox: { borderWidth: 1, borderLeftWidth: 3, borderRadius: 10, padding: 12, marginBottom: 12 },
   noticeText: { fontSize: 14, fontWeight: '600', lineHeight: 20 },
+  quietNotice: { fontSize: 13, lineHeight: 18, marginBottom: 14 },
 
   row: { paddingVertical: 8 },
   rowLabel: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
@@ -238,7 +261,10 @@ const styles = StyleSheet.create({
   choice: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, borderWidth: 1.5, borderRadius: 14, padding: 14, marginBottom: 10 },
   choiceDisabled: { opacity: 0.5 },
   choiceBody: { flex: 1 },
-  choiceTitle: { fontSize: 15, fontWeight: '700' },
+  choiceHeading: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  choiceTitle: { fontSize: 15, fontWeight: '700', flexShrink: 1 },
+  choiceBadge: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 1 },
+  choiceBadgeText: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 },
   choiceDescription: { fontSize: 13, marginTop: 2, lineHeight: 18 },
   choiceDetail: { fontFamily: 'monospace', fontSize: 12, marginTop: 8 },
   radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center', marginTop: 1 },

@@ -105,17 +105,17 @@ const ConnectLogin: React.FC = () => {
   const chainId = useMemo(() => pickChain(payload?.chains, c => networkForCaip2(c) !== undefined), [payload?.chains]);
   const network = chainId ? networkForCaip2(chainId) : undefined;
 
-  const candidates = useMemo(
-    () => wallets.filter(isNeuraiWallet).filter(w => network !== undefined && w.getNeuraiNetwork() === network),
-    [wallets, network],
+  // Every Neurai wallet is listed with its network, because "why is my wallet
+  // not here" is worse than a disabled row: a login is signed on the chain the
+  // site asked for, so a wallet of the other network simply cannot answer it.
+  const neuraiWallets = useMemo(() => wallets.filter(isNeuraiWallet), [wallets]);
+  const onNetwork = useMemo(
+    () => neuraiWallets.filter(w => network !== undefined && w.getNeuraiNetwork() === network),
+    [neuraiWallets, network],
   );
+  const signable = useMemo(() => onNetwork.filter(w => w.type !== NeuraiHardwareWallet.type), [onNetwork]);
   const [walletID, setWalletID] = useState<string | undefined>();
-  // Chosen by the user, or the first candidate that can actually sign: a
-  // hardware wallet listed first must not start selected only to block approval.
-  const wallet = useMemo(
-    () => candidates.find(w => w.getID() === walletID) ?? candidates.find(w => w.type !== NeuraiHardwareWallet.type) ?? candidates[0],
-    [candidates, walletID],
-  );
+  const wallet = useMemo(() => signable.find(w => w.getID() === walletID) ?? signable[0], [signable, walletID]);
 
   const { requireUnlock } = useConnectApprovalGate();
   const [identity, setIdentity] = useState<DomainIdentity | undefined>();
@@ -140,7 +140,12 @@ const ConnectLogin: React.FC = () => {
       if (cancelled) return;
       setIdentity(derived);
       setWalletAddress(address);
-      setAddressKind(current => current ?? defaultAddressKind(payload.addressPolicy, derived !== undefined));
+      setAddressKind(current => {
+        // Switching to a wallet that cannot derive an identity (post-quantum)
+        // must move the choice, not leave it selected on an impossible option.
+        if (current === 'identity' && derived === undefined) return 'wallet';
+        return current ?? defaultAddressKind(payload.addressPolicy, derived !== undefined);
+      });
       setResolving(false);
     })();
     return () => {
@@ -151,8 +156,10 @@ const ConnectLogin: React.FC = () => {
   const chosenAddress = addressKind === 'identity' ? identity?.address : walletAddress;
 
   const approval = loginApproval({
-    hasWallet: wallet !== undefined,
-    isHardwareWallet: wallet?.type === NeuraiHardwareWallet.type,
+    // A wallet of the right network exists, but every one of them is hardware:
+    // that deserves its own explanation rather than "no wallet available".
+    hasWallet: onNetwork.length > 0,
+    isHardwareWallet: wallet === undefined,
     addressKind: addressKind ?? 'identity',
     identityAvailable: identity !== undefined,
     address: chosenAddress,
@@ -227,7 +234,7 @@ const ConnectLogin: React.FC = () => {
     <SafeAreaScrollView contentContainerStyle={connectStyles.content}>
       <ConnectHeader title={payload.domain} subtitle={payload.aud} badge={networkLabel} />
 
-      <ConnectNotice tone="warn" text={loc.connect.login_browser_warning} testID="ConnectBrowserWarning" />
+      <ConnectNotice tone="quiet" text={loc.connect.login_browser_warning} testID="ConnectBrowserWarning" />
       {!event.verify.domainMatchesMetadata && (
         <ConnectNotice
           tone="danger"
@@ -245,6 +252,35 @@ const ConnectLogin: React.FC = () => {
           value={loc.formatString(loc.connect.field_requested_line, { time: formatMoment(payload.iat), exp: formatMoment(payload.exp) })}
         />
       </ConnectCard>
+
+      {neuraiWallets.length > 0 && (
+        <>
+          <ConnectSectionTitle title={loc.connect.login_select_wallet} />
+          {neuraiWallets.map(candidate => {
+            const hardware = candidate.type === NeuraiHardwareWallet.type;
+            const walletNetwork = candidate.getNeuraiNetwork();
+            const wrongNetwork = network !== undefined && walletNetwork !== network;
+            return (
+              <ConnectChoice
+                key={candidate.getID()}
+                selected={candidate.getID() === wallet?.getID()}
+                disabled={hardware || wrongNetwork}
+                title={candidate.getLabel()}
+                badge={walletNetwork === 'testnet' ? loc.wallets.neurai_network_testnet : loc.wallets.neurai_network_mainnet}
+                description={
+                  wrongNetwork
+                    ? loc.formatString(loc.connect.login_wallet_wrong_network, { network: networkLabel ?? CONNECT_EMPTY_FIELD }).toString()
+                    : hardware
+                      ? loc.connect.login_wallet_cannot_sign
+                      : undefined
+                }
+                onPress={() => setWalletID(candidate.getID())}
+                testID={`ConnectWalletOption-${candidate.getID()}`}
+              />
+            );
+          })}
+        </>
+      )}
 
       <ConnectSectionTitle title={loc.connect.login_sign_in_as} hint={loc.connect.login_sign_in_as_hint} />
       {resolving ? (
@@ -269,25 +305,6 @@ const ConnectLogin: React.FC = () => {
             onPress={() => setAddressKind('wallet')}
             testID="ConnectAddressOption-wallet"
           />
-        </>
-      )}
-
-      {candidates.length > 1 && (
-        <>
-          <ConnectSectionTitle title={loc.connect.login_from_wallet} />
-          {candidates.map(candidate => {
-            const hardware = candidate.type === NeuraiHardwareWallet.type;
-            return (
-              <ConnectChoice
-                key={candidate.getID()}
-                selected={candidate.getID() === wallet?.getID()}
-                disabled={hardware}
-                title={candidate.getLabel()}
-                description={hardware ? loc.connect.login_wallet_cannot_sign : undefined}
-                onPress={() => setWalletID(candidate.getID())}
-              />
-            );
-          })}
         </>
       )}
 

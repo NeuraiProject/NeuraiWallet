@@ -177,7 +177,7 @@ const ConnectProposal: React.FC = () => {
 
       {candidates.length > 1 && (
         <>
-          <ConnectSectionTitle title={loc.connect.login_which_wallet} hint={loc.connect.proposal_which_wallet_hint} />
+          <ConnectSectionTitle title={loc.connect.login_select_wallet} hint={loc.connect.proposal_which_wallet_hint} />
           {candidates.map(candidate => (
             <ConnectChoice
               key={candidate.getID()}

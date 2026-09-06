@@ -8,6 +8,8 @@
 
 import type { AuthRequestEvent, SessionRequestEvent } from '@neuraiproject/neurai-connect-wallet';
 
+import { addressFromCaip10 } from '../../screen/connect/logic';
+
 import {
   connectSessions,
   onConnectIncoming,
@@ -151,5 +153,16 @@ describe('notices and session changes', () => {
 
   it('exposes the sessions the SDK holds', () => {
     expect(connectSessions()).toHaveLength(1);
+  });
+});
+
+describe('the wallet a session belongs to', () => {
+  // The card badge asks "does this wallet answer any live session", and the answer
+  // is the CAIP-10 account a session settled with — always a wallet address.
+  it('reads the address out of the account the session settled with', () => {
+    const account = `bip122:0000009697907b2aa409d4b1f10da0fa:t9Zo5RAwAucmz3tGuTFak6ZqpytiyxnLiJ`;
+    expect(addressFromCaip10(account)).toBe('t9Zo5RAwAucmz3tGuTFak6ZqpytiyxnLiJ');
+    expect(addressFromCaip10(undefined)).toBeUndefined();
+    expect(addressFromCaip10('not-an-account')).toBeUndefined();
   });
 });

@@ -33,11 +33,15 @@ import { Transaction, TWallet } from '../class/wallets/types';
 import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
 import { isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIdentity';
 import useDepinPoolWatch from '../hooks/useDepinPoolWatch';
+import { useNeuraiConnectSessions } from '../hooks/useNeuraiConnectSessions';
 import { isTestnetChain } from '../blue_modules/neurai/networkConfig';
 import { BlueSpacing10 } from './BlueSpacing';
 import { useLocale } from '@react-navigation/native';
 
 export const WALLET_CAROUSEL_HEADER_WIDTH = 16;
+
+/** The green of the DePIN "new messages" label, reused so one green means one thing. */
+const CONNECT_BADGE_COLOR = '#4ade80';
 
 export const getWalletCarouselItemWidth = (screenWidth: number) => Math.round(screenWidth * 0.82 > 375 ? 375 : screenWidth * 0.82);
 
@@ -314,6 +318,15 @@ const iStyles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
   },
+  // Same circle as the hardware badge, tinted green: this one only appears while
+  // a Neurai Connect session is live, so green always means connected.
+  connectBadge: {
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(74, 222, 128, 0.55)',
+  },
+  connectBadgeAside: { right: 50 },
+  connectBadgeAsideCompact: { right: 38 },
   latestTx: {
     backgroundColor: 'transparent',
     fontSize: 13,
@@ -407,6 +420,9 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
       network: isNeuraiWallet(item) ? item.getNeuraiNetwork() : 'mainnet',
       walletID: item.getID?.() ?? '',
     });
+    // Live Neurai Connect sessions answered by this wallet: a site can still ask
+    // it for signatures, which is worth seeing without opening the settings.
+    const connectSessionCount = useNeuraiConnectSessions(isNeuraiWallet(item) && !isPlaceHolder ? item : undefined);
 
     const animatePressScale = useCallback(
       (toValue: number) => {
@@ -544,6 +560,21 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
               {isNeuraiWallet(item) && !isPlaceHolder && item.use_with_hardware_wallet && (
                 <View style={[iStyles.hwBadge, isCompact && iStyles.hwBadgeCompact]}>
                   <MaterialIcons name="memory" size={isCompact ? 16 : 20} color="rgba(255, 255, 255, 0.92)" />
+                </View>
+              )}
+              {connectSessionCount > 0 && (
+                <View
+                  accessibilityLabel={loc.connect.card_connected}
+                  style={[
+                    iStyles.hwBadge,
+                    isCompact && iStyles.hwBadgeCompact,
+                    iStyles.connectBadge,
+                    // The hardware badge owns the corner; a hardware wallet cannot sign
+                    // Connect messages today, but the two must not stack if that changes.
+                    item.use_with_hardware_wallet ? (isCompact ? iStyles.connectBadgeAsideCompact : iStyles.connectBadgeAside) : null,
+                  ]}
+                >
+                  <MaterialIcons name="hub" size={isCompact ? 16 : 20} color={CONNECT_BADGE_COLOR} />
                 </View>
               )}
               {isNeuraiWallet(item) && !isPlaceHolder && assetCount > 0 && (

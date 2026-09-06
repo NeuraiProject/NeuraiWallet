@@ -256,13 +256,7 @@ export function summariseSendTransfer(params: unknown): TransferSummary {
  * wallet is talking to while it waits, because that is the only party that can
  * see the pairing happen at all.
  */
-export function relayHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
+export { relayHost } from '../../blue_modules/neurai/connect/relay-url';
 
 /** A relay URL the wallet accepts. Only the WebSocket schemes: the relay is not HTTP. */
 export function isValidRelayUrl(url: string): boolean {

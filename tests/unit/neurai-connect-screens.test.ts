@@ -245,9 +245,9 @@ describe('the relay field', () => {
   });
 
   it('shows the host the wallet is talking to, and the raw value when there is none', () => {
+    // The parser itself, and the case React Native's URL got wrong, are covered
+    // in neurai-connect-relay-url.test.ts.
     expect(relayHost('wss://relay.neurai.org/v1')).toBe('relay.neurai.org');
-    expect(relayHost('ws://10.0.2.2:8080/v1')).toBe('10.0.2.2:8080');
-    expect(relayHost('not a url')).toBe('not a url');
   });
 });
 

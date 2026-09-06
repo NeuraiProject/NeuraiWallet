@@ -16,7 +16,10 @@ import { parsePairingUri, RecordStore } from '@neuraiproject/neurai-connect-core
 import type { AuthRequestEvent, Pairing, Session, SessionProposalEvent, SessionRequestEvent } from '@neuraiproject/neurai-connect-wallet';
 import type { JsonRpcId } from '@neuraiproject/neurai-connect-core';
 import { getRelayUrl, loadRelayOverride, setRelayUrlOverride } from './config';
+import { relayHost, sameRelay } from './relay-url';
 import { SecureConnectStorage } from './storage';
+
+export { relayHost, sameRelay };
 
 export type ConnectIncoming =
   | { kind: 'auth'; id: JsonRpcId; receivedAt: number; event: AuthRequestEvent }
@@ -130,6 +133,10 @@ export function startConnect(relayUrl?: string): Promise<NeuraiConnectWallet> {
     starting = create(relayUrl)
       .then(instance => {
         client = instance;
+        // The sessions restored from storage are news to anything already on
+        // screen: without this a wallet card mounted during start-up would not
+        // show its Connect badge until the next settle or revoke.
+        emitSessionsChanged({ reason: 'resumed' });
         return instance;
       })
       .finally(() => {
@@ -160,19 +167,6 @@ export function activeRelay(): string | undefined {
   return activeRelayUrl;
 }
 
-/** Same relay endpoint, ignoring a trailing slash. The query string counts: it can carry the project key. */
-function sameRelay(a: string, b: string): boolean {
-  const normalise = (url: string) => {
-    try {
-      const u = new URL(url);
-      return `${u.protocol}//${u.host}${u.pathname.replace(/\/$/, '')}${u.search}`.toLowerCase();
-    } catch {
-      return url.trim().toLowerCase();
-    }
-  };
-  return normalise(a) === normalise(b);
-}
-
 /** Sessions this wallet has, most recently used first. */
 export function connectSessions(): Session[] {
   return client?.sessions() ?? [];
@@ -189,15 +183,6 @@ export function connectSessions(): Session[] {
  */
 export function connectPairings(): Pairing[] {
   return client?.pairingList() ?? [];
-}
-
-/** Host of a relay URL, for messages the user reads. */
-export function relayHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
 }
 
 /** What is still tied to the relay in use: it lives there and nowhere else. */
