@@ -4,8 +4,6 @@ import { PromptPasswordConfirmationParams } from '../screen/PromptPasswordConfir
 import { ElectrumServerItem } from '../screen/settings/ElectrumSettings';
 import type { NeuraiNetwork } from '../blue_modules/neurai';
 import type { JsonRpcId } from '@neuraiproject/neurai-connect-core';
-import type { NavigatorScreenParams } from '@react-navigation/native';
-import type { AddWalletStackParamList } from './AddWalletStack';
 
 export type ScanQRCodeParamList = {
   cameraStatusGranted?: boolean;
@@ -49,7 +47,7 @@ export type DetailViewStackParamList = {
   Broadcast: undefined;
   GenerateWord: undefined;
   WalletAddresses: { walletID: string };
-  AddWalletRoot: NavigatorScreenParams<AddWalletStackParamList> | undefined;
+  AddWalletRoot: undefined;
   SendNeurai: {
     walletID: string;
     address?: string;

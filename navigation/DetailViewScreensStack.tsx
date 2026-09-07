@@ -135,13 +135,11 @@ const DetailViewStackScreensStack = () => {
 
   const DetailButton = useMemo(() => <HeaderRightButton testID="DetailButton" disabled={true} title={loc.send.create_details} />, []);
 
-  const { canSwitch: canSwitchNetwork, network: homeNetwork } = useNetworkSelection();
+  const { canSwitch: canSwitchNetwork } = useNetworkSelection();
 
-  // "+" opens Add Wallet preset to the network on screen, so a testnet user
-  // does not create a mainnet wallet by default.
   const navigateToAddWallet = useCallback(() => {
-    navigation.navigate('AddWalletRoot', { screen: 'AddWallet', params: { network: homeNetwork } });
-  }, [navigation, homeNetwork]);
+    navigation.navigate('AddWalletRoot');
+  }, [navigation]);
 
   // The switcher sits left of "+" and only exists while both networks have
   // wallets; its spacer goes with it so a mainnet-only header keeps its layout.

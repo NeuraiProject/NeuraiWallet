@@ -122,7 +122,7 @@ const WalletsList: React.FC = () => {
   // list below. `wallets` (all of them) is still what gets connected and
   // refreshed: hidden wallets keep syncing, or the switcher's dot would never
   // light and their balances would be stale on the way back.
-  const { visibleWallets, network: homeNetwork } = useNetworkSelection();
+  const { visibleWallets } = useNetworkSelection();
   // Same rules as BlueApp.getTransactions (hidden-wallet flag, newest first)
   // over the visible subset — the storage-wide getter cannot filter by network.
   const dataSource = useMemo<ExtendedTransaction[]>(() => {
@@ -287,10 +287,10 @@ const WalletsList: React.FC = () => {
           walletNetwork: (item as { network?: string }).network,
         });
       } else {
-        navigation.navigate('AddWalletRoot', { screen: 'AddWallet', params: { network: homeNetwork } });
+        navigation.navigate('AddWalletRoot');
       }
     },
-    [navigation, homeNetwork],
+    [navigation],
   );
 
   const onSnapToItem = useCallback(

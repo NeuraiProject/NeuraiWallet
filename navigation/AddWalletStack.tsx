@@ -6,11 +6,9 @@ import { useTheme } from '../components/themes';
 import loc from '../loc';
 import { withLazySuspense } from './LazyLoadingIndicator';
 import { ScanQRCodeParamList } from './DetailViewStackParamList';
-import type { NeuraiNetwork } from '../blue_modules/neurai/networkConfig';
 
 export type AddWalletStackParamList = {
-  /** Preset from the home header, so the new wallet lands on the network the user is looking at. */
-  AddWallet: { network?: NeuraiNetwork } | undefined;
+  AddWallet: undefined;
   PleaseBackup: {
     walletID: string;
   };

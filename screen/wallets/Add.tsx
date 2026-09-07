@@ -1,5 +1,4 @@
 import React, { useCallback, useState } from 'react';
-import { RouteProp, useRoute } from '@react-navigation/native';
 import { ActivityIndicator, Keyboard, StyleSheet, TextInput, View } from 'react-native';
 import Animated, { Layout } from 'react-native-reanimated';
 
@@ -33,10 +32,10 @@ const WalletsAdd: React.FC = () => {
 
   const [label, setLabel] = useState('');
   const [walletKind, setWalletKind] = useState<WalletKind>('legacy');
-  // Preset by the home header so the wallet lands on the network in view;
-  // mainnet otherwise (deep links, the import flow).
-  const route = useRoute<RouteProp<AddWalletStackParamList, 'AddWallet'>>();
-  const [network, setNetwork] = useState<NeuraiNetwork>(route.params?.network ?? 'mainnet');
+  // Always mainnet by default, whatever network the home screen is showing:
+  // creating real-money wallets is the common case and testnet is a deliberate
+  // choice.
+  const [network, setNetwork] = useState<NeuraiNetwork>('mainnet');
   const [isLoading, setIsLoading] = useState(false);
 
   const stylesHook = {
