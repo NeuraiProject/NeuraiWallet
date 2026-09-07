@@ -15,6 +15,8 @@ import { BlurredBalanceView } from './BlurredBalanceView';
 import { useSettings } from '../hooks/context/useSettings';
 import ToolTipMenu from './TooltipMenu';
 import useAnimateOnChange from '../hooks/useAnimateOnChange';
+import { useNeuraiConnectSessions } from '../hooks/useNeuraiConnectSessions';
+import NeuraiConnectIcon from './icons/NeuraiConnectIcon';
 import { useLocale } from '@react-navigation/native';
 
 interface TransactionsNavigationHeaderProps {
@@ -26,6 +28,9 @@ interface TransactionsNavigationHeaderProps {
   unitSwitching?: boolean;
 }
 
+/** Matches the wallet card cover's connect badge (WalletsCarousel). */
+const CONNECT_BADGE_COLOR = '#4ade80';
+
 const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> = ({
   wallet,
   onWalletUnitChange,
@@ -36,6 +41,7 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
 }) => {
   const { hideBalance } = wallet;
   const { preferredFiatCurrency } = useSettings();
+  const connectSessionCount = useNeuraiConnectSessions(isNeuraiWallet(wallet) ? wallet : undefined);
   const { direction } = useLocale();
   const balanceOpacity = useSharedValue(1);
   const balanceTranslateY = useSharedValue(0);
@@ -235,6 +241,16 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
           <MaterialIcons name="memory" size={20} color="rgba(255, 255, 255, 0.92)" />
         </View>
       )}
+      {/* Live Neurai Connect session, mirroring the wallet card cover: hardware keeps
+          the corner and this one steps to its left so the two can sit side by side. */}
+      {connectSessionCount > 0 && (
+        <View
+          accessibilityLabel={loc.connect.card_connected}
+          style={[styles.hwBadge, styles.connectBadge, wallet.use_with_hardware_wallet ? styles.connectBadgeAside : null]}
+        >
+          <NeuraiConnectIcon size={20} color={CONNECT_BADGE_COLOR} />
+        </View>
+      )}
     </LinearGradient>
   );
 };
@@ -326,6 +342,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.35)',
   },
+  // Same circle as the hardware badge, ringed green: it only renders while a
+  // session is live, so green always means connected.
+  connectBadge: {
+    borderWidth: 1,
+    borderColor: 'rgba(74, 222, 128, 0.55)',
+  },
+  // Clears the 30-wide hardware badge at right: 12, plus an 8 gap.
+  connectBadgeAside: { right: 50 },
 });
 
 export const actionKeys = {

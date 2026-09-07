@@ -34,6 +34,7 @@ import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
 import { isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIdentity';
 import useDepinPoolWatch from '../hooks/useDepinPoolWatch';
 import { useNeuraiConnectSessions } from '../hooks/useNeuraiConnectSessions';
+import NeuraiConnectIcon from './icons/NeuraiConnectIcon';
 import { isTestnetChain } from '../blue_modules/neurai/networkConfig';
 import { BlueSpacing10 } from './BlueSpacing';
 import { useLocale } from '@react-navigation/native';
@@ -574,7 +575,7 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
                     item.use_with_hardware_wallet ? (isCompact ? iStyles.connectBadgeAsideCompact : iStyles.connectBadgeAside) : null,
                   ]}
                 >
-                  <MaterialIcons name="hub" size={isCompact ? 16 : 20} color={CONNECT_BADGE_COLOR} />
+                  <NeuraiConnectIcon size={isCompact ? 16 : 20} color={CONNECT_BADGE_COLOR} />
                 </View>
               )}
               {isNeuraiWallet(item) && !isPlaceHolder && assetCount > 0 && (
