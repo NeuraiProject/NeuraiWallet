@@ -27,3 +27,17 @@
 
 # Activities, widget providers and the Application are named in the manifest,
 # which AGP already turns into keep rules — no entries needed for those here.
+
+# librealm.so resolves this one by name through JNI (FindClass), so R8 sees no
+# reference to it and strips it — the app then dies on startup building the
+# package list with ClassNotFoundException. Realm ships no rules of its own.
+-keep class io.realm.react.util.SSLHelper { *; }
+# Realm's React package is instantiated from the package list; keep the rest of
+# its entry points with it rather than discovering them one crash at a time.
+-keep class io.realm.react.** { *; }
+
+# react-native-device-info probes for this optional dependency with
+# getMethod("newBuilder"), which R8's renaming breaks. The library catches the
+# failure and carries on (this app never calls getInstallReferrer), so this only
+# keeps a confusing exception out of the log and restores pre-R8 behaviour.
+-keep class com.android.installreferrer.api.** { *; }
