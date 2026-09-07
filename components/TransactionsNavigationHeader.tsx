@@ -331,10 +331,14 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   // Hardware-wallet chip badge, mirroring the wallet card cover (hwBadge).
+  // The rounded content sheet (WalletTransactions' headerBottomBar) covers the
+  // header's bottom 12, so the inset is 12 + 14 to leave the same 14 of clear
+  // header under the badge that chainBadge leaves above it. `right` matches
+  // chainBadge too, so the top and bottom badges share one right edge.
   hwBadge: {
     position: 'absolute',
-    bottom: 10,
-    right: 12,
+    bottom: 26,
+    right: 14,
     width: 30,
     height: 30,
     borderRadius: 15,
@@ -348,8 +352,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(74, 222, 128, 0.55)',
   },
-  // Clears the 30-wide hardware badge at right: 12, plus an 8 gap.
-  connectBadgeAside: { right: 50 },
+  // Clears the 30-wide hardware badge at right: 14, plus an 8 gap.
+  connectBadgeAside: { right: 52 },
 });
 
 export const actionKeys = {
