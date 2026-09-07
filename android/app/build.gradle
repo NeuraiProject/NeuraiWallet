@@ -153,6 +153,12 @@ android {
         release {
             signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
+            // Drops unreferenced resources. React Native's images are packaged as
+            // drawables and looked up by name at runtime, so the shrinker report in
+            // build/outputs/mapping/release/resources.txt must be checked for them
+            // after any change here — a stripped drawable shows up as a blank image,
+            // never as a build error.
+            shrinkResources enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             proguardFile "${rootProject.projectDir}/../node_modules/detox/android/detox/proguard-rules-app.pro"
             // Include native debug symbols in the AAB so Play Console can
