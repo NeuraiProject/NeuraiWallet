@@ -5,6 +5,7 @@ import { useSettings } from '../hooks/context/useSettings';
 import { useStorage } from '../hooks/context/useStorage';
 import { GROUP_IO_BLUEWALLET } from '../blue_modules/currency';
 import debounce from '../blue_modules/debounce';
+import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
 
 enum WidgetCommunicationKeys {
   AllWalletsSatoshiBalance = 'WidgetCommunicationAllWalletsSatoshiBalance',
@@ -70,7 +71,10 @@ export const calculateBalanceAndTransactionTime = async (
 
   const results = await Promise.allSettled(
     wallets.map(async wallet => {
-      if (wallet.hideBalance) return { balance: 0, latestTransactionTime: 0 };
+      // Real money only: the widget has no network label, so a testnet
+      // balance would read as spendable XNA on the lock screen.
+      const isTestnet = isNeuraiWallet(wallet) && wallet.getNeuraiNetwork() === 'testnet';
+      if (wallet.hideBalance || isTestnet) return { balance: 0, latestTransactionTime: 0 };
 
       const balance = await wallet.getBalance();
       const transactions: Transaction[] = await wallet.getTransactions();

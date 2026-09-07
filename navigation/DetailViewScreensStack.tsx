@@ -15,6 +15,8 @@ import WalletAddresses from '../screen/wallets/WalletAddresses';
 import WalletDetails from '../screen/wallets/WalletDetails';
 import SelectWallet from '../screen/wallets/SelectWallet';
 import WalletsList from '../screen/wallets/WalletsList';
+import NetworkSwitcher from '../components/NetworkSwitcher';
+import { useNetworkSelection } from '../hooks/useNetworkSelection';
 import { DetailViewStack } from './index';
 import SettingsButton from '../components/icons/SettingsButton';
 import { useSettings } from '../hooks/context/useSettings';
@@ -133,22 +135,35 @@ const DetailViewStackScreensStack = () => {
 
   const DetailButton = useMemo(() => <HeaderRightButton testID="DetailButton" disabled={true} title={loc.send.create_details} />, []);
 
-  const navigateToAddWallet = useCallback(() => {
-    navigation.navigate('AddWalletRoot');
-  }, [navigation]);
+  const { canSwitch: canSwitchNetwork, network: homeNetwork } = useNetworkSelection();
 
+  // "+" opens Add Wallet preset to the network on screen, so a testnet user
+  // does not create a mainnet wallet by default.
+  const navigateToAddWallet = useCallback(() => {
+    navigation.navigate('AddWalletRoot', { screen: 'AddWallet', params: { network: homeNetwork } });
+  }, [navigation, homeNetwork]);
+
+  // The switcher sits left of "+" and only exists while both networks have
+  // wallets; its spacer goes with it so a mainnet-only header keeps its layout.
   const RightBarButtons = useMemo(
-    () =>
-      sizeClass === SizeClass.Large ? (
+    () => (
+      <>
+        {canSwitchNetwork && (
+          <>
+            <NetworkSwitcher />
+            <View style={styles.width24} />
+          </>
+        )}
         <AddWalletButton onPress={navigateToAddWallet} />
-      ) : (
-        <>
-          <AddWalletButton onPress={navigateToAddWallet} />
-          <View style={styles.width24} />
-          <SettingsButton />
-        </>
-      ),
-    [sizeClass, navigateToAddWallet],
+        {sizeClass !== SizeClass.Large && (
+          <>
+            <View style={styles.width24} />
+            <SettingsButton />
+          </>
+        )}
+      </>
+    ),
+    [sizeClass, navigateToAddWallet, canSwitchNetwork],
   );
 
   const walletListScreenOptions = useMemo<NativeStackNavigationOptions>(() => {

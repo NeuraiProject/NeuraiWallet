@@ -489,6 +489,8 @@
     "neurai_network_mainnet": "Mainnet",
     "neurai_network_testnet": "Testnet",
     "neurai_network_label": "Neurai Network",
+    "network_switch_hint": "Switch to {network}",
+    "network_switch_hint_unseen": "Switch to {network} — new coins received there",
     "add_create": "Create",
     "total_balance": "Total Balance",
     "add_entropy": "Entropy",

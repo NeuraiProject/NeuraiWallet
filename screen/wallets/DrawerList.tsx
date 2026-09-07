@@ -11,6 +11,7 @@ import { useStorage } from '../../hooks/context/useStorage';
 import TotalWalletsBalance from '../../components/TotalWalletsBalance';
 import { useSettings } from '../../hooks/context/useSettings';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
+import { useNetworkSelection } from '../../hooks/useNetworkSelection';
 
 enum WalletActionType {
   SetWallets = 'SET_WALLETS',
@@ -95,7 +96,10 @@ const DrawerList: React.FC<DrawerContentComponentProps> = memo((props: DrawerCon
 
   const [state, dispatch] = useReducer(walletReducer, initialState);
   const walletsCarousel = useRef<any>(null);
-  const { wallets, selectedWalletID } = useStorage();
+  const { selectedWalletID } = useStorage();
+  // The drawer is the tablet's wallet list, so it follows the header switcher
+  // exactly like the phone carousel does.
+  const { visibleWallets: wallets } = useNetworkSelection();
   const { colors } = useTheme();
   const isFocused = useIsFocused();
   const { isTotalBalanceEnabled } = useSettings();

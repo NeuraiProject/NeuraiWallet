@@ -27,6 +27,7 @@ import { NeuraiHardwareWallet } from '../class/wallets/neurai-hardware-wallet';
 import { useDePINChat } from '../hooks/useDePINChat';
 import useDepinChatAssetSelection from '../hooks/useDepinChatAssetSelection';
 import useDepinChatIdentity from '../hooks/useDepinChatIdentity';
+import { isKnownRevealed, markRevealed } from '../blue_modules/neurai/depinRevealed';
 import { useDepinChatDeviceIdentity } from '../hooks/useDepinChatDeviceIdentity';
 import useDepinChatKeyboard from '../hooks/useDepinChatKeyboard';
 import useDepinChatReadyState from '../hooks/useDepinChatReadyState';
@@ -74,6 +75,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
 
   const { chatAssets, depinBalance, getBackend, loadingAssets, pubkeyRevealed, refreshServerInfo, rpc, serverInfo } = useDepinChatSetup({
     identity,
+    knownRevealed: isKnownRevealed(walletID),
     network,
     supported,
   });
@@ -93,6 +95,12 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
   // experimental IoT area.
   const [activeSection, setActiveSection] = useState<'chat' | 'iot'>('chat');
   const [showInfo, setShowInfo] = useState(false);
+  // A reveal is permanent: settle it for the wallet card's badge and for the
+  // next chat open, which then skips the pubkey poll entirely.
+  useEffect(() => {
+    if (pubkeyRevealed === true) markRevealed(walletID);
+  }, [pubkeyRevealed, walletID]);
+
   const lastKnownReady = useDepinChatReadyState({
     identity,
     pubkeyRevealed,

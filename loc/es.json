@@ -382,6 +382,8 @@
     "add_lndhub_placeholder": "La dirección de tu nodo",
     "add_placeholder": "Mi primera cartera",
     "add_title": "Añadir cartera",
+    "network_switch_hint": "Cambiar a {network}",
+    "network_switch_hint_unseen": "Cambiar a {network} — has recibido monedas ahí",
     "add_wallet_name": "Nombre",
     "add_wallet_type": "Tipo de cartera",
     "clipboard_bitcoin": "Tienes una dirección de Bitcoin en tu portapapeles. ¿Quieres usarla para una transacción?",
