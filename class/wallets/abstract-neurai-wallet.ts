@@ -669,6 +669,20 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     return this.getReceiveAddressAsync();
   }
 
+  /**
+   * The address Neurai Connect exposes to a site and signs messages with.
+   *
+   * A session or a login is bound to one address, and the signature the site
+   * verifies must come from that address's key. For a software wallet every
+   * address has its key at hand, so the current receive address is as good as
+   * any. A hardware wallet overrides this: its device signs with one fixed
+   * key, and Connect has to expose exactly that address, not whichever receive
+   * address HD discovery currently points at.
+   */
+  async getConnectAddressAsync(): Promise<string> {
+    return this.getReceiveAddressAsync();
+  }
+
   async getChangeAddressAsync(): Promise<string> {
     const engine = await this.ensureEngine();
     return engine.getChangeAddress();

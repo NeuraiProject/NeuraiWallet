@@ -221,6 +221,20 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     return this.getReceiveAddressAsync();
   }
 
+  /**
+   * The address the device signs messages with. `sign_message` on the
+   * firmware has no path argument: it always uses the account key, which for
+   * a legacy device is the leaf `m/44'/coin'/0'/0/0`, and answers with that
+   * leaf's address. Exposing the first unused receive address to Connect
+   * would work only until the wallet receives its first funds; after that the
+   * device's signature would no longer verify against the session address.
+   * PQ devices have a single address, so the two notions coincide.
+   */
+  async getConnectAddressAsync(): Promise<string> {
+    if (this.keyType === 'pq') return this.address;
+    return this._legacyIndexZeroAddress() ?? this.address;
+  }
+
   async getChangeAddressAsync(): Promise<string> {
     if (this.keyType === 'pq') return this.address;
     await this._ensureDiscovered();
@@ -242,7 +256,9 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
 
   weOwnAddress(address: string): boolean {
     if (this.keyType === 'pq') return !!this.address && address === this.address;
-    return this._addrMeta.has(address) || address === this.address;
+    // Index 0 is what Connect sessions are settled on; it must be recognised
+    // before HD discovery has run (a session request can arrive at any time).
+    return this._addrMeta.has(address) || address === this.address || address === this._legacyIndexZeroAddress();
   }
 
   async prewarmEngine(): Promise<void> {
@@ -281,6 +297,22 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
   }
 
   // ---------- HD discovery (legacy) ------------------------------------------------
+
+  /** Memo of `m/44'/coin'/0'/0/0`, keyed by the xpub it was derived from. */
+  private _indexZero?: { xpub: string; address: string };
+
+  /**
+   * The legacy leaf at index 0 of the receive branch: the key the device's
+   * `sign_message` uses. Derived from the persisted xpub, never read from
+   * `this.address`, which discovery overwrites with the first unused address.
+   */
+  private _legacyIndexZeroAddress(): string | undefined {
+    if (this.keyType !== 'legacy' || !this.xpub) return undefined;
+    if (this._indexZero?.xpub !== this.xpub) {
+      this._indexZero = { xpub: this.xpub, address: this._deriveAndCache(0, 0).address };
+    }
+    return this._indexZero.address;
+  }
 
   /** Derive a legacy address + cache its metadata. */
   private _deriveAndCache(change: 0 | 1, index: number): { address: string; pubkeyHex: string } {

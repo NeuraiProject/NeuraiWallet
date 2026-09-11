@@ -14,9 +14,11 @@
  *   with `ml_dsa44.keygen(seed)` and checked against the stored public key
  *   before use.
  *
- * Hardware wallets are not supported yet: their key never leaves the device, so
- * signing has to be routed through the device protocol. Until that lands the
- * signer refuses clearly instead of silently signing with something else.
+ * Hardware wallets never expose their key, so their signature is produced by
+ * the device (`sign_message` over USB) and only checked here. The firmware
+ * signs with its one fixed key and reports the address it signed for; that
+ * address has to be the session address, otherwise the device plugged in is
+ * not the one this wallet was added from and the signature would never verify.
  */
 
 import { ml_dsa44 } from '@noble/post-quantum/ml-dsa.js';
@@ -28,8 +30,17 @@ import {
   isPostQuantumAddress,
   signatureTypeForAddress,
 } from '@neuraiproject/neurai-connect-core';
+import type { NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native';
 import type { AbstractNeuraiWallet } from '../../../class/wallets/abstract-neurai-wallet';
 import type { NeuraiChainType } from '../networkConfig';
+import { withDevice } from '../../neurai-hw/deviceQueue';
+
+/**
+ * `NeuraiHardwareWallet.type`, as a literal: importing the class here would
+ * drag the USB transport into every consumer of the signer (and into the unit
+ * tests), and the string is the only thing the signer needs from it.
+ */
+const HARDWARE_WALLET_TYPE = 'NeuraiHardware';
 
 export class ConnectSignerError extends Error {
   constructor(message: string) {
@@ -56,19 +67,66 @@ export interface ConnectSignature {
   address: string;
 }
 
+export interface ConnectSignOptions {
+  /**
+   * Hardware wallets only: opens (or reuses) the USB link to the NeuraiHW
+   * device. The screen owns the link, so it passes the hook's `connect`; the
+   * signer just asks for a device when it needs one.
+   */
+  connectDevice?: () => Promise<NeuraiESP32 | null>;
+}
+
+/**
+ * Hardware route: the device signs, the app checks. `ping` needs no on-device
+ * approval, so the user confirms exactly once, on the sign prompt.
+ */
+async function signWithDevice(
+  connectDevice: (() => Promise<NeuraiESP32 | null>) | undefined,
+  address: string,
+  message: string,
+): Promise<string> {
+  if (!connectDevice) throw new ConnectSignerError('a hardware wallet signs on the device: connect it over USB and try again');
+  const device = await connectDevice();
+  if (!device) throw new ConnectSignerError('could not connect to the NeuraiHW device');
+  const result = await withDevice(async () => {
+    const probe = await device.ping();
+    if (probe.device !== 'NeuraiHW') throw new ConnectSignerError('the connected device is not a NeuraiHW hardware wallet');
+    return device.signMessage(message);
+  });
+  if (!result.signature) throw new ConnectSignerError('the device did not return a signature');
+  if (result.address !== address) {
+    throw new ConnectSignerError(
+      `the connected device is not the one this wallet was added from: it signs with ${result.address}, the session uses ${address}`,
+    );
+  }
+  return result.signature;
+}
+
 /**
  * Signs `message` with the key of `address`, which must belong to `wallet`.
  * The signature is verified locally before it is returned: a wallet must never
  * hand a web site something that will not check out.
  */
-export async function signConnectMessage(wallet: AbstractNeuraiWallet, address: string, message: string): Promise<ConnectSignature> {
+export async function signConnectMessage(
+  wallet: AbstractNeuraiWallet,
+  address: string,
+  message: string,
+  options: ConnectSignOptions = {},
+): Promise<ConnectSignature> {
   if (!address) throw new ConnectSignerError('no address to sign with');
-  const material = await wallet.getMessageSigningMaterial(address);
-  if (!material) {
-    throw new ConnectSignerError(
-      'this wallet cannot sign messages for that address (hardware wallets are not supported by Neurai Connect yet)',
-    );
+
+  // `type` is declared as the literal 'abstract' on the base class (see
+  // `asConnectWallet` in screen/connect/logic.ts), hence the widening.
+  if ((wallet.type as string) === HARDWARE_WALLET_TYPE) {
+    const signature = await signWithDevice(options.connectDevice, address, message);
+    if (!verifyMessage(message, address, signature)) {
+      throw new ConnectSignerError('the signature the device produced does not verify against the address');
+    }
+    return { signature, type: signatureTypeForAddress(address), address };
   }
+
+  const material = await wallet.getMessageSigningMaterial(address);
+  if (!material) throw new ConnectSignerError('this wallet cannot sign messages for that address');
 
   let signature: string;
   if (material.kind === 'legacy') {
