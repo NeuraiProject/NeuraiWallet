@@ -23,6 +23,9 @@ import { detectQRCodeInImage } from 'react-native-camera-kit-no-google';
 import RNFS from 'react-native-fs';
 import presentAlert from '../components/Alert';
 import useWidgetCommunication from './useWidgetCommunication';
+import useNetworkActivityWatch from './useNetworkActivityWatch';
+import { useSettings } from './context/useSettings';
+import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
 import useWatchConnectivity from './useWatchConnectivity';
 import useDeviceQuickActions from './useDeviceQuickActions';
 import useHandoffListener from './useHandoffListener';
@@ -51,6 +54,7 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
     setSharedCosigner,
     walletsInitialized,
   } = useStorage();
+  const { setSelectedNetworkStorage } = useSettings();
   const appState = useRef<AppStateStatus>(AppState.currentState);
   const clipboardContent = useRef<undefined | string>(undefined);
   const navigation = useExtendedNavigation();
@@ -66,6 +70,7 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
   useMenuElements();
   useDeviceQuickActions();
   useHandoffListener();
+  useNetworkActivityWatch();
 
   const processPushNotifications = useCallback(async () => {
     if (!shouldActivateListeners) return false;
@@ -106,6 +111,9 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
           const walletID = wallet.getID();
           fetchAndSaveWalletTransactions(walletID);
           if (wasTapped) {
+            // Land the home screen on this wallet's network too: going back from
+            // the wallet must not drop the user on a list where it is missing.
+            if (isNeuraiWallet(wallet)) setSelectedNetworkStorage(wallet.getNeuraiNetwork());
             if (payload.type !== 3) {
               navigation.navigate('WalletTransactions', {
                 walletID,
@@ -146,6 +154,7 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
             const walletID = wallet.getID();
             fetchAndSaveWalletTransactions(walletID);
             if (wasTapped) {
+              if (isNeuraiWallet(wallet)) setSelectedNetworkStorage(wallet.getNeuraiNetwork());
               if (payload.type !== 3) {
                 navigationRef.dispatch(
                   CommonActions.navigate({
@@ -186,7 +195,7 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
       console.error('Failed to process push notifications:', error);
     }
     return false;
-  }, [shouldActivateListeners, wallets, fetchAndSaveWalletTransactions, navigation]);
+  }, [shouldActivateListeners, wallets, fetchAndSaveWalletTransactions, navigation, setSelectedNetworkStorage]);
 
   useEffect(() => {
     if (!shouldActivateListeners) return;

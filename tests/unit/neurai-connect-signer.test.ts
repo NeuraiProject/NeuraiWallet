@@ -5,8 +5,9 @@
 // signer makes: it verifies its own output before returning it, and it refuses
 // rather than signing with the wrong kind of key.
 
-import { getAddressPair, getPQAddress } from '@neuraiproject/neurai-key';
-import { verifyMessage } from '@neuraiproject/neurai-message';
+import { getAddressByWIF, getAddressPair, getPQAddress } from '@neuraiproject/neurai-key';
+import { sign as signLegacy, verifyMessage } from '@neuraiproject/neurai-message';
+import type { NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native';
 import { SIGNATURE_TYPE_LEGACY, SIGNATURE_TYPE_PQ, signConnectMessage } from '../../blue_modules/neurai/connect/signer';
 import type { AbstractNeuraiWallet, NeuraiSigningMaterial } from '../../class/wallets/abstract-neurai-wallet';
 
@@ -57,11 +58,62 @@ describe('post-quantum addresses', () => {
   });
 });
 
+describe('hardware wallets', () => {
+  // The device signs with its one fixed key; the app only checks the result.
+  // A fake device backed by a real key gives signatures that verify.
+  const pair = getAddressPair('xna-test', MNEMONIC, 0, 0);
+  const leaf =
+    (pair as unknown as { external?: { address: string; WIF: string } }).external ?? (pair as unknown as { address: string; WIF: string });
+  const hardwareWallet = () =>
+    ({ type: 'NeuraiHardware', network: 'xna-test', getMessageSigningMaterial: async () => false }) as unknown as AbstractNeuraiWallet;
+
+  const fakeDevice = (signsAs: string, name = 'NeuraiHW') =>
+    ({
+      ping: async () => ({ device: name }),
+      signMessage: async (message: string) => {
+        const key = getAddressByWIF('xna-test', leaf.WIF).privateKey;
+        const bytes = Uint8Array.from(Buffer.from(key, 'hex'));
+        return { status: 'success', signature: signLegacy(message, bytes, true), address: signsAs, message };
+      },
+    }) as unknown as NeuraiESP32;
+
+  it('signs on the device and verifies the signature against the session address', async () => {
+    const signed = await signConnectMessage(hardwareWallet(), leaf.address, MESSAGE, {
+      connectDevice: async () => fakeDevice(leaf.address),
+    });
+    expect(signed.type).toBe(SIGNATURE_TYPE_LEGACY);
+    expect(signed.address).toBe(leaf.address);
+    expect(verifyMessage(MESSAGE, leaf.address, signed.signature)).toBe(true);
+  });
+
+  it('refuses when the plugged-in device signs with another address', async () => {
+    const next = getAddressPair('xna-test', MNEMONIC, 0, 1);
+    const other = ((next as unknown as { external?: { address: string } }).external ?? (next as unknown as { address: string })).address;
+    expect(other).not.toBe(leaf.address);
+    await expect(
+      signConnectMessage(hardwareWallet(), leaf.address, MESSAGE, { connectDevice: async () => fakeDevice(other) }),
+    ).rejects.toThrow(/not the one this wallet was added from/);
+  });
+
+  it('refuses when the device is not NeuraiHW firmware', async () => {
+    await expect(
+      signConnectMessage(hardwareWallet(), leaf.address, MESSAGE, { connectDevice: async () => fakeDevice(leaf.address, 'Other') }),
+    ).rejects.toThrow(/not a NeuraiHW/);
+  });
+
+  it('refuses without a way to reach the device', async () => {
+    await expect(signConnectMessage(hardwareWallet(), leaf.address, MESSAGE)).rejects.toThrow(/connect it over USB/);
+    await expect(signConnectMessage(hardwareWallet(), leaf.address, MESSAGE, { connectDevice: async () => null })).rejects.toThrow(
+      /could not connect/,
+    );
+  });
+});
+
 describe('refusals', () => {
-  it('refuses when the wallet holds no key for the address (hardware wallets)', async () => {
+  it('refuses when the wallet holds no key for the address', async () => {
     const wallet = walletStub('xna-test', false);
     await expect(signConnectMessage(wallet, 'tCEDTHevFvG9CF6SCw3c4E7yxi9Tmnvr2x', MESSAGE)).rejects.toThrow(
-      /hardware wallets are not supported/,
+      /cannot sign messages for that address/,
     );
   });
 

@@ -33,9 +33,9 @@ import { Transaction, TWallet } from '../class/wallets/types';
 import { isNeuraiWallet } from '../class/wallets/is-neurai-wallet';
 import { isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIdentity';
 import useDepinPoolWatch from '../hooks/useDepinPoolWatch';
+import { useDepinRevealed } from '../hooks/useDepinRevealed';
 import { useNeuraiConnectSessions } from '../hooks/useNeuraiConnectSessions';
 import NeuraiConnectIcon from './icons/NeuraiConnectIcon';
-import { isTestnetChain } from '../blue_modules/neurai/networkConfig';
 import { BlueSpacing10 } from './BlueSpacing';
 import { useLocale } from '@react-navigation/native';
 
@@ -223,28 +223,6 @@ const iStyles = StyleSheet.create({
   balanceDecimalCompact: {
     fontSize: 19,
   },
-  chainBadge: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
-  },
-  chainBadgeCompact: {
-    top: 8,
-    right: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  chainBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
   // Flap pegado a la esquina superior-izquierda: top-left sigue la curva del
   // card (mismo radio que `grad.borderRadius`), bottom-right con ligera curva
   // para terminar suavemente; los otros corners quedan a 90° contra el borde.
@@ -274,9 +252,11 @@ const iStyles = StyleSheet.create({
   kindBadgeColor: {
     backgroundColor: '#dc2626',
   },
+  // Top-right corner: the network badge that sat above these moved to the
+  // header switcher, so the asset badge starts at the top.
   assetBadge: {
     position: 'absolute',
-    top: 38,
+    top: 10,
     right: 10,
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -284,7 +264,7 @@ const iStyles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.35)',
   },
   assetBadgeCompact: {
-    top: 30,
+    top: 8,
     right: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -297,8 +277,8 @@ const iStyles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   // Sits under the asset count when that one is present; takes its slot when not.
-  depinBadgeStacked: { top: 66 },
-  depinBadgeStackedCompact: { top: 52 },
+  depinBadgeStacked: { top: 38 },
+  depinBadgeStackedCompact: { top: 30 },
   // Green label = the channel has messages this wallet has not read.
   depinBadgeTextNew: { color: '#4ade80' },
   hwBadge: {
@@ -415,7 +395,12 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
     // DePIN chat availability + whether its channel moved since this wallet
     // last read it. The check only talks to the configured node (never the
     // hardware wallet) and is shared across cards on the same network.
-    const showDepinBadge = isNeuraiWallet(item) && !isPlaceHolder && isDepinChatSupportedNetwork(item.network);
+    // The badge means "this wallet is on DePIN": its address has published a
+    // key on-chain. Network support alone is not that — every testnet wallet
+    // would carry it. Once revealed the answer is cached for good.
+    const depinCapable = isNeuraiWallet(item) && !isPlaceHolder && isDepinChatSupportedNetwork(item.network);
+    const depinRevealed = useDepinRevealed({ enabled: depinCapable, wallet: depinCapable ? item : null });
+    const showDepinBadge = depinCapable && depinRevealed;
     const { hasNewMessages: depinHasNews } = useDepinPoolWatch({
       enabled: showDepinBadge,
       network: isNeuraiWallet(item) ? item.getNeuraiNetwork() : 'mainnet',
@@ -548,11 +533,6 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
           >
             <LinearGradient colors={WalletGradient.gradientsForWallet(item)} style={[iStyles.grad, isCompact && iStyles.gradCompact]}>
               <ImageBackground source={image} style={[iStyles.image, isCompact && iStyles.imageCompact]} />
-              {isNeuraiWallet(item) && !isPlaceHolder && (
-                <View style={[iStyles.chainBadge, isCompact && iStyles.chainBadgeCompact]}>
-                  <Text style={iStyles.chainBadgeText}>{isTestnetChain(item.network) ? 'TESTNET' : 'MAINNET'}</Text>
-                </View>
-              )}
               {isNeuraiWallet(item) && !isPlaceHolder && (
                 <View style={[iStyles.kindBadge, iStyles.kindBadgeColor, isCompact && iStyles.kindBadgeCompact]}>
                   <Text style={iStyles.kindBadgeText}>{item.walletKind === 'pq' ? 'PQ' : 'HD'}</Text>
@@ -871,8 +851,17 @@ const WalletsCarousel = forwardRef<FlatListRefType, WalletsCarouselProps>((props
         return;
       }
 
-      // Handle wallet additions
-      const addedWallets = currentWalletIds.filter(id => !prevWalletIds.current.includes(id));
+      // Handle wallet additions. When wallets also vanished in the same update
+      // the list was swapped, not added to — the home screen's network switcher
+      // replaces the whole set — so nothing is "new" to scroll to, and the
+      // carousel goes back to its first card instead of chasing the last one.
+      const arrivedWallets = currentWalletIds.filter(id => !prevWalletIds.current.includes(id));
+      const departedWallets = prevWalletIds.current.filter(id => !currentWalletIds.includes(id));
+      const swapped = arrivedWallets.length > 0 && departedWallets.length > 0;
+      if (swapped && isFlatList) {
+        flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      }
+      const addedWallets = swapped ? [] : arrivedWallets;
       if (addedWallets.length > 0) {
         // Track last added wallet for animations and scrolling
         lastAddedWalletId.current = addedWallets[addedWallets.length - 1];
@@ -907,7 +896,7 @@ const WalletsCarousel = forwardRef<FlatListRefType, WalletsCarouselProps>((props
         }, 2000);
       }
     }
-  }, [data, animateChanges, scrollToWalletById]);
+  }, [data, animateChanges, scrollToWalletById, isFlatList]);
 
   const onScrollToIndexFailed = (error: { averageItemLength: number; index: number }): void => {
     console.debug('onScrollToIndexFailed', error);

@@ -32,6 +32,9 @@ const WalletsAdd: React.FC = () => {
 
   const [label, setLabel] = useState('');
   const [walletKind, setWalletKind] = useState<WalletKind>('legacy');
+  // Always mainnet by default, whatever network the home screen is showing:
+  // creating real-money wallets is the common case and testnet is a deliberate
+  // choice.
   const [network, setNetwork] = useState<NeuraiNetwork>('mainnet');
   const [isLoading, setIsLoading] = useState(false);
 

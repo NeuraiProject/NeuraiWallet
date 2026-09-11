@@ -25,6 +25,8 @@ import {
 import * as BlueElectrum from '../../blue_modules/BlueElectrum';
 import { isBalanceDisplayAllowed, setBalanceDisplayAllowed } from '../../hooks/useWidgetCommunication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { NeuraiNetwork } from '../../blue_modules/neurai/networkConfig';
+import { DEFAULT_SELECTED_NETWORK, NETWORKS } from '../../blue_modules/neurai/networkSelection';
 
 export const setTotalBalanceViewEnabledStorage = async (value: boolean): Promise<void> => {
   try {
@@ -114,6 +116,57 @@ export const setThemeModeStorageFunc = async (value: ThemeMode): Promise<void> =
   }
 };
 
+// Home-screen network switcher. The pick persists so the app reopens where it
+// was left; the unseen flags persist because the receipt that lights them can
+// land while the app is closed.
+const SELECTED_NETWORK_KEY = 'SELECTED_NETWORK';
+const UNSEEN_NETWORKS_KEY = 'UNSEEN_NETWORKS';
+
+export type UnseenNetworks = Record<NeuraiNetwork, boolean>;
+
+const NO_UNSEEN: UnseenNetworks = { mainnet: false, testnet: false };
+
+export const getSelectedNetwork = async (): Promise<NeuraiNetwork> => {
+  try {
+    await DefaultPreference.setName(GROUP_IO_BLUEWALLET);
+    const value = await DefaultPreference.get(SELECTED_NETWORK_KEY);
+    return value === 'testnet' ? 'testnet' : DEFAULT_SELECTED_NETWORK;
+  } catch (e) {
+    console.error('Error getting SelectedNetwork:', e);
+    return DEFAULT_SELECTED_NETWORK;
+  }
+};
+
+export const setSelectedNetworkStorageFunc = async (value: NeuraiNetwork): Promise<void> => {
+  try {
+    await DefaultPreference.setName(GROUP_IO_BLUEWALLET);
+    await DefaultPreference.set(SELECTED_NETWORK_KEY, value);
+  } catch (e) {
+    console.error('Error setting SelectedNetwork:', e);
+  }
+};
+
+export const getUnseenNetworks = async (): Promise<UnseenNetworks> => {
+  try {
+    await DefaultPreference.setName(GROUP_IO_BLUEWALLET);
+    const raw = await DefaultPreference.get(UNSEEN_NETWORKS_KEY);
+    const flagged = String(raw ?? '').split(',');
+    return { mainnet: flagged.includes('mainnet'), testnet: flagged.includes('testnet') };
+  } catch (e) {
+    console.error('Error getting UnseenNetworks:', e);
+    return { ...NO_UNSEEN };
+  }
+};
+
+export const setUnseenNetworksStorageFunc = async (value: UnseenNetworks): Promise<void> => {
+  try {
+    await DefaultPreference.setName(GROUP_IO_BLUEWALLET);
+    await DefaultPreference.set(UNSEEN_NETWORKS_KEY, NETWORKS.filter(n => value[n]).join(','));
+  } catch (e) {
+    console.error('Error setting UnseenNetworks:', e);
+  }
+};
+
 interface SettingsContextType {
   preferredFiatCurrency: TFiatUnit;
   setPreferredFiatCurrencyStorage: (currency: TFiatUnit) => Promise<void>;
@@ -145,6 +198,14 @@ interface SettingsContextType {
   setIsPQAddressReuseEnabledStorage: (value: boolean) => Promise<void>;
   themeMode: ThemeMode;
   setThemeModeStorage: (value: ThemeMode) => Promise<void>;
+  /** Network the home screen shows. Persisted; see useNetworkSelection for the effective value. */
+  selectedNetwork: NeuraiNetwork;
+  /** Switches the home screen and clears that network's unseen flag: looking at it is seeing it. */
+  setSelectedNetworkStorage: (network: NeuraiNetwork) => Promise<void>;
+  /** Networks that received coins while not being shown. */
+  unseenNetworks: UnseenNetworks;
+  /** No-op for the network currently shown. */
+  markNetworkUnseen: (network: NeuraiNetwork) => Promise<void>;
 }
 
 const defaultSettingsContext: SettingsContextType = {
@@ -178,6 +239,10 @@ const defaultSettingsContext: SettingsContextType = {
   setIsPQAddressReuseEnabledStorage: async () => {},
   themeMode: 'system',
   setThemeModeStorage: async () => {},
+  selectedNetwork: DEFAULT_SELECTED_NETWORK,
+  setSelectedNetworkStorage: async () => {},
+  unseenNetworks: NO_UNSEEN,
+  markNetworkUnseen: async () => {},
 };
 
 export const SettingsContext = createContext<SettingsContextType>(defaultSettingsContext);
@@ -198,6 +263,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
   const [isElectrumDisabled, setIsElectrumDisabled] = useState<boolean>(true);
   const [isPQAddressReuseEnabled, setIsPQAddressReuseEnabled] = useState<boolean>(true);
   const [themeMode, setThemeMode] = useState<ThemeMode>('system');
+  const [selectedNetwork, setSelectedNetwork] = useState<NeuraiNetwork>(DEFAULT_SELECTED_NETWORK);
+  const [unseenNetworks, setUnseenNetworks] = useState<UnseenNetworks>(NO_UNSEEN);
 
   const { walletsInitialized } = useStorage();
 
@@ -254,6 +321,12 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
         }),
         getThemeMode().then(mode => {
           setThemeMode(mode);
+        }),
+        getSelectedNetwork().then(network => {
+          setSelectedNetwork(network);
+        }),
+        getUnseenNetworks().then(unseen => {
+          setUnseenNetworks(unseen);
         }),
       ];
 
@@ -393,6 +466,42 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
     }
   }, []);
 
+  const setSelectedNetworkStorage = useCallback(async (network: NeuraiNetwork): Promise<void> => {
+    try {
+      setSelectedNetwork(network);
+      // Functional update: a receipt can flag a network in the same tick the
+      // user switches to it, and the switch must win.
+      let cleared: UnseenNetworks | undefined;
+      setUnseenNetworks(current => {
+        if (!current[network]) return current;
+        cleared = { ...current, [network]: false };
+        return cleared;
+      });
+      await setSelectedNetworkStorageFunc(network);
+      if (cleared) await setUnseenNetworksStorageFunc(cleared);
+    } catch (e) {
+      console.error('Error setting selectedNetwork:', e);
+    }
+  }, []);
+
+  const markNetworkUnseen = useCallback(
+    async (network: NeuraiNetwork): Promise<void> => {
+      if (network === selectedNetwork) return;
+      try {
+        let flagged: UnseenNetworks | undefined;
+        setUnseenNetworks(current => {
+          if (current[network]) return current;
+          flagged = { ...current, [network]: true };
+          return flagged;
+        });
+        if (flagged) await setUnseenNetworksStorageFunc(flagged);
+      } catch (e) {
+        console.error('Error marking network unseen:', e);
+      }
+    },
+    [selectedNetwork],
+  );
+
   const setBlockExplorerStorage = useCallback(async (explorer: BlockExplorer): Promise<boolean> => {
     try {
       const success = await saveBlockExplorer(explorer.url);
@@ -451,6 +560,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
       setIsPQAddressReuseEnabledStorage,
       themeMode,
       setThemeModeStorage,
+      selectedNetwork,
+      setSelectedNetworkStorage,
+      unseenNetworks,
+      markNetworkUnseen,
     }),
     [
       preferredFiatCurrency,
@@ -482,6 +595,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
       setIsPQAddressReuseEnabledStorage,
       themeMode,
       setThemeModeStorage,
+      selectedNetwork,
+      setSelectedNetworkStorage,
+      unseenNetworks,
+      markNetworkUnseen,
     ],
   );
 

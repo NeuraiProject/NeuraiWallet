@@ -89,7 +89,9 @@ const ConnectProposal: React.FC = () => {
     let cancelled = false;
     setResolving(true);
     (async () => {
-      const resolved = await wallet.getReceiveAddressAsync().catch(() => undefined);
+      // The account a session exposes must be one the wallet can later sign
+      // for: a hardware wallet resolves this to the device's signing address.
+      const resolved = await wallet.getConnectAddressAsync().catch(() => undefined);
       if (cancelled) return;
       setAddress(resolved);
       setResolving(false);

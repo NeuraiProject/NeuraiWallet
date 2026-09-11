@@ -15,6 +15,7 @@ import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
 import { deriveLegacyAddress } from '../../blue_modules/neurai-hw/xpubDerivation';
 import { useNeuraiHwDevice } from '../../blue_modules/neurai-hw/useNeuraiHwDevice';
+import { defaultHardwareWalletLabel } from '../../blue_modules/neurai-hw/walletLabel';
 import {
   generateSetupMnemonic,
   validateSetupMnemonic,
@@ -62,6 +63,7 @@ const AddHardwareWallet: React.FC = () => {
   const navigation = useExtendedNavigation();
   const [phase, setPhase] = useState<Phase>('idle');
   const [pending, setPending] = useState<NeuraiHardwareWallet | null>(null);
+  const [walletName, setWalletName] = useState('');
 
   // Setup wizard selections + the seed we generated (kept only until it is on the device).
   const [mode, setMode] = useState<SetupMode>('new');
@@ -84,6 +86,7 @@ const AddHardwareWallet: React.FC = () => {
     warning: { backgroundColor: colors.inputBackgroundColor, borderColor: colors.redBG },
     warningText: { color: colors.foregroundColor },
     restoreInput: { backgroundColor: colors.inputBackgroundColor, borderColor: colors.formBorder, color: colors.foregroundColor },
+    nameInput: { backgroundColor: colors.inputBackgroundColor, borderColor: colors.formBorder, color: colors.foregroundColor },
     wordChip: { backgroundColor: colors.elevated, borderColor: colors.formBorder },
     wordIndex: { color: colors.alternativeTextColor },
     wordText: { color: colors.foregroundColor },
@@ -137,6 +140,22 @@ const AddHardwareWallet: React.FC = () => {
     return wallet;
   }, []);
 
+  // Stage a wallet read from the device for review, with a name the user can
+  // still change before it is added.
+  const stageForReview = useCallback(
+    (wallet: NeuraiHardwareWallet) => {
+      setWalletName(
+        defaultHardwareWalletLabel(
+          wallet.hwFingerprint,
+          wallets.map(w => w.getLabel()),
+        ),
+      );
+      setPending(wallet);
+      setPhase('review');
+    },
+    [wallets],
+  );
+
   const onConnect = useCallback(async () => {
     if (phase === 'connecting') return;
     setPhase('connecting');
@@ -163,14 +182,13 @@ const AddHardwareWallet: React.FC = () => {
       // `ready`: read the wallet and stage it for review.
       const wallet = await buildWalletFromDevice(device);
       await closeConnection();
-      setPending(wallet);
-      setPhase('review');
+      stageForReview(wallet);
     } catch (e: unknown) {
       await closeConnection();
       presentAlert({ message: e instanceof Error ? e.message : String(e) });
       setPhase('idle');
     }
-  }, [phase, connect, error, closeConnection, buildWalletFromDevice]);
+  }, [phase, connect, error, closeConnection, buildWalletFromDevice, stageForReview]);
 
   // Wizard selectors. PQ keys are testnet-only (the firmware enforces it), so
   // keep network/key-type mutually consistent instead of letting an invalid
@@ -212,8 +230,7 @@ const AddHardwareWallet: React.FC = () => {
         setMnemonic(null); // it now lives on the device; drop our copies
         setRestoreInput('');
         await closeConnection();
-        setPending(wallet);
-        setPhase('review');
+        stageForReview(wallet);
       } catch (e: unknown) {
         setMnemonic(null);
         setRestoreInput('');
@@ -222,7 +239,7 @@ const AddHardwareWallet: React.FC = () => {
         setPhase('idle');
       }
     },
-    [network, keyType, buildWalletFromDevice, closeConnection],
+    [network, keyType, buildWalletFromDevice, closeConnection, stageForReview],
   );
 
   // NEW: generate the seed and move to the mandatory backup step.
@@ -279,18 +296,28 @@ const AddHardwareWallet: React.FC = () => {
       presentAlert({ message: loc.wallets.hardware_already_added });
       return;
     }
+    // An empty name falls back to the proposed one (base + fingerprint) rather
+    // than to the shared type name that caused the confusion in the first place.
+    pending.setLabel(
+      walletName.trim() ||
+        defaultHardwareWalletLabel(
+          pending.hwFingerprint,
+          wallets.map(w => w.getLabel()),
+        ),
+    );
     addWallet(pending);
     await saveToDisk();
     triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
     // Close the whole "Add wallet" modal and land on the wallet list.
     navigation.getParent()?.goBack();
-  }, [pending, wallets, addWallet, saveToDisk, navigation]);
+  }, [pending, walletName, wallets, addWallet, saveToDisk, navigation]);
 
   const onCancel = useCallback(async () => {
     setMnemonic(null);
     setRestoreInput('');
     setMode('new');
     setPending(null);
+    setWalletName('');
     await closeConnection();
     setPhase('idle');
     navigation.goBack();
@@ -432,6 +459,20 @@ const AddHardwareWallet: React.FC = () => {
     pending && (
       <>
         <BlueFormLabel>{loc.wallets.hardware_review_title}</BlueFormLabel>
+        <BlueFormLabel>{loc.wallets.hardware_name_hint}</BlueFormLabel>
+        <TextInput
+          testID="HardwareWalletNameInput"
+          style={[styles.nameInput, stylesHook.nameInput]}
+          value={walletName}
+          onChangeText={setWalletName}
+          placeholder={loc.wallets.add_wallet_name}
+          placeholderTextColor="#81868e"
+          autoCapitalize="words"
+          autoCorrect={false}
+          maxLength={40}
+          numberOfLines={1}
+          underlineColorAndroid="transparent"
+        />
         <View style={[styles.card, stylesHook.card]}>
           {renderField(loc.wallets.hardware_field_network, networkLabel(pending.network))}
           {renderField(loc.wallets.hardware_field_type, pending.keyType === 'pq' ? 'Post-Quantum (ML-DSA-44)' : 'Legacy (ECDSA P2PKH)')}
@@ -530,6 +571,15 @@ const styles = StyleSheet.create({
   warningText: {
     fontSize: 13,
     fontWeight: '500',
+  },
+  nameInput: {
+    marginHorizontal: 20,
+    marginTop: 8,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
   },
   restoreInput: {
     marginHorizontal: 20,

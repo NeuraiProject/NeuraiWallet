@@ -86,7 +86,6 @@ describe('addressPolicy', () => {
 describe('when a login may be approved', () => {
   const base = {
     hasWallet: true,
-    isHardwareWallet: false,
     addressKind: 'identity' as const,
     identityAvailable: true,
     address: 'NX7syqGJzweY57vW2K1D9G3kn8DXSq9Azc',
@@ -98,14 +97,6 @@ describe('when a login may be approved', () => {
 
   it('refuses when there is no wallet of the requested network', () => {
     expect(loginApproval({ ...base, hasWallet: false })).toEqual({ canApprove: false, blocker: 'no_wallet' });
-  });
-
-  it('refuses on a hardware wallet, whichever address was picked', () => {
-    expect(loginApproval({ ...base, isHardwareWallet: true })).toEqual({ canApprove: false, blocker: 'hardware' });
-    expect(loginApproval({ ...base, isHardwareWallet: true, addressKind: 'wallet', identityAvailable: false })).toEqual({
-      canApprove: false,
-      blocker: 'hardware',
-    });
   });
 
   it('refuses a post-quantum wallet asked for an identity address, but not for a wallet one', () => {

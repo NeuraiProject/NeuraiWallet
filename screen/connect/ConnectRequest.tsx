@@ -45,8 +45,10 @@ import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import { useTheme } from '../../components/themes';
 import { connectClient, peekIncoming, takeIncoming } from '../../blue_modules/neurai/connect/client';
 import { signConnectMessage } from '../../blue_modules/neurai/connect/signer';
+import { useNeuraiHwDevice } from '../../blue_modules/neurai-hw/useNeuraiHwDevice';
 import { useConnectApprovalGate } from '../../hooks/useConnectApprovalGate';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
+import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
 import { useStorage } from '../../hooks/context/useStorage';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc from '../../loc';
@@ -85,6 +87,11 @@ const ConnectRequest: React.FC = () => {
     () => wallets.filter(isNeuraiWallet).find(w => sessionAddress !== undefined && w.weOwnAddress(sessionAddress)),
     [wallets, sessionAddress],
   );
+
+  // A hardware wallet signs on the device; the link is opened for the
+  // signature and closed once the request is answered.
+  const isHardware = wallet?.type === NeuraiHardwareWallet.type;
+  const hw = useNeuraiHwDevice();
 
   const { requireUnlock } = useConnectApprovalGate();
   const [busy, setBusy] = useState(false);
@@ -139,16 +146,19 @@ const ConnectRequest: React.FC = () => {
     try {
       const client = connectClient();
       if (!client) throw new Error(loc.connect.error_not_connected);
-      const signature = await signConnectMessage(asConnectWallet(wallet), sessionAddress, signMessageText(event.params));
+      const signature = await signConnectMessage(asConnectWallet(wallet), sessionAddress, signMessageText(event.params), {
+        connectDevice: isHardware ? hw.connect : undefined,
+      });
       await client.respondRequest(id, { signature: signature.signature });
       presentAlert({ message: loc.connect.request_signed, type: AlertType.Toast });
       finish();
     } catch (error: unknown) {
       presentAlert({ message: describeError(error) });
     } finally {
+      if (isHardware) await hw.disconnect().catch(() => {});
       setBusy(false);
     }
-  }, [wallet, sessionAddress, event, id, finish, requireUnlock]);
+  }, [wallet, sessionAddress, event, id, finish, requireUnlock, isHardware, hw]);
 
   const onReject = useCallback(async () => {
     setBusy(true);

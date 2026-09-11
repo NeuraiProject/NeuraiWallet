@@ -52,6 +52,7 @@ import { networkForCaip2 } from '../../blue_modules/neurai/connect/config';
 import { deriveDomainIdentity, recordDomainIdentity, type DomainIdentity } from '../../blue_modules/neurai/connect/identity';
 import { useConnectApprovalGate } from '../../hooks/useConnectApprovalGate';
 import { signConnectMessage } from '../../blue_modules/neurai/connect/signer';
+import { useNeuraiHwDevice } from '../../blue_modules/neurai-hw/useNeuraiHwDevice';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
 import { useStorage } from '../../hooks/context/useStorage';
@@ -78,8 +79,6 @@ function blockerText(blocker: ConnectApprovalBlocker | undefined): string | unde
   switch (blocker) {
     case 'no_wallet':
       return loc.connect.blocked_no_wallet;
-    case 'hardware':
-      return loc.connect.blocked_hardware;
     case 'expired':
       return loc.connect.blocked_expired;
     case 'no_identity':
@@ -113,9 +112,12 @@ const ConnectLogin: React.FC = () => {
     () => neuraiWallets.filter(w => network !== undefined && w.getNeuraiNetwork() === network),
     [neuraiWallets, network],
   );
-  const signable = useMemo(() => onNetwork.filter(w => w.type !== NeuraiHardwareWallet.type), [onNetwork]);
   const [walletID, setWalletID] = useState<string | undefined>();
-  const wallet = useMemo(() => signable.find(w => w.getID() === walletID) ?? signable[0], [signable, walletID]);
+  const wallet = useMemo(() => onNetwork.find(w => w.getID() === walletID) ?? onNetwork[0], [onNetwork, walletID]);
+  // A hardware wallet signs on the device: the link is opened when the user
+  // approves, and closed once the login is answered either way.
+  const isHardware = wallet?.type === NeuraiHardwareWallet.type;
+  const hw = useNeuraiHwDevice();
 
   const { requireUnlock } = useConnectApprovalGate();
   const [identity, setIdentity] = useState<DomainIdentity | undefined>();
@@ -136,7 +138,7 @@ const ConnectLogin: React.FC = () => {
       // BIP44 account 101 to derive from (post-quantum, hardware); that is the
       // signal that the identity option cannot be offered at all.
       const derived = await deriveDomainIdentity(asConnectWallet(wallet), payload.domain).catch(() => undefined);
-      const address = await wallet.getReceiveAddressAsync().catch(() => undefined);
+      const address = await wallet.getConnectAddressAsync().catch(() => undefined);
       if (cancelled) return;
       setIdentity(derived);
       setWalletAddress(address);
@@ -156,10 +158,7 @@ const ConnectLogin: React.FC = () => {
   const chosenAddress = addressKind === 'identity' ? identity?.address : walletAddress;
 
   const approval = loginApproval({
-    // A wallet of the right network exists, but every one of them is hardware:
-    // that deserves its own explanation rather than "no wallet available".
     hasWallet: onNetwork.length > 0,
-    isHardwareWallet: wallet === undefined,
     addressKind: addressKind ?? 'identity',
     identityAvailable: identity !== undefined,
     address: chosenAddress,
@@ -187,7 +186,9 @@ const ConnectLogin: React.FC = () => {
       const client = connectClient();
       if (!client) throw new Error(loc.connect.error_not_connected);
       const cacaoPayload = buildCacaoPayload(payload, chainId, chosenAddress);
-      const signature = await signConnectMessage(asConnectWallet(wallet), chosenAddress, formatAuthMessage(cacaoPayload));
+      const signature = await signConnectMessage(asConnectWallet(wallet), chosenAddress, formatAuthMessage(cacaoPayload), {
+        connectDevice: isHardware ? hw.connect : undefined,
+      });
       await client.approveAuth(id, { cacaos: [buildCacao(cacaoPayload, { t: signature.type, s: signature.signature })] });
       // Only now is the identity really "used": recording it earlier would leave
       // one behind for a login the user rejected.
@@ -198,9 +199,10 @@ const ConnectLogin: React.FC = () => {
     } catch (error: unknown) {
       presentAlert({ message: describeError(error) });
     } finally {
+      if (isHardware) await hw.disconnect().catch(() => {});
       setBusy(false);
     }
-  }, [payload, chainId, chosenAddress, wallet, id, navigation, requireUnlock, identity]);
+  }, [payload, chainId, chosenAddress, wallet, id, navigation, requireUnlock, identity, isHardware, hw]);
 
   const onReject = useCallback(async () => {
     setBusy(true);
@@ -257,22 +259,19 @@ const ConnectLogin: React.FC = () => {
         <>
           <ConnectSectionTitle title={loc.connect.login_select_wallet} />
           {neuraiWallets.map(candidate => {
-            const hardware = candidate.type === NeuraiHardwareWallet.type;
             const walletNetwork = candidate.getNeuraiNetwork();
             const wrongNetwork = network !== undefined && walletNetwork !== network;
             return (
               <ConnectChoice
                 key={candidate.getID()}
                 selected={candidate.getID() === wallet?.getID()}
-                disabled={hardware || wrongNetwork}
+                disabled={wrongNetwork}
                 title={candidate.getLabel()}
                 badge={walletNetwork === 'testnet' ? loc.wallets.neurai_network_testnet : loc.wallets.neurai_network_mainnet}
                 description={
                   wrongNetwork
                     ? loc.formatString(loc.connect.login_wallet_wrong_network, { network: networkLabel ?? CONNECT_EMPTY_FIELD }).toString()
-                    : hardware
-                      ? loc.connect.login_wallet_cannot_sign
-                      : undefined
+                    : undefined
                 }
                 onPress={() => setWalletID(candidate.getID())}
                 testID={`ConnectWalletOption-${candidate.getID()}`}
@@ -315,6 +314,7 @@ const ConnectLogin: React.FC = () => {
         <ConnectMonospaceBlock text={canonical.text} testID="ConnectCanonicalMessage" />
       )}
       {blocked !== undefined && <ConnectNotice tone="danger" text={blocked} />}
+      {isHardware && <ConnectNotice tone="quiet" text={loc.connect.login_hardware_confirm} testID="ConnectHardwareNotice" />}
 
       <ConnectActions
         primary={{

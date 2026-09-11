@@ -18,13 +18,15 @@ import { normalizeAmount, parseRevealed } from '../components/depinChat/utils';
 export type DepinRpc = <T = unknown>(method: string, params: unknown[]) => Promise<T>;
 
 interface UseDepinChatSetupParams {
+  /** Cached on-chain fact: the pubkey is already revealed, so the poll can be skipped from the first render. */
+  knownRevealed?: boolean;
   identity: DepinChatIdentity | null;
   network: NeuraiNetwork;
   supported: boolean;
 }
 
 /** Provides the RPC-backed state needed before a token conversation is opened. */
-const useDepinChatSetup = ({ identity, network, supported }: UseDepinChatSetupParams) => {
+const useDepinChatSetup = ({ identity, network, supported, knownRevealed = false }: UseDepinChatSetupParams) => {
   const backendRef = useRef<{ key: string; backend: NeuraiBackend } | null>(null);
   const rpc = useMemo<DepinRpc | null>(() => {
     if (!supported) return null;
@@ -54,7 +56,7 @@ const useDepinChatSetup = ({ identity, network, supported }: UseDepinChatSetupPa
     fingerprint: string | null;
     error: Error | null;
   }>({ firstContact: false, fingerprint: null, error: null });
-  const [pubkeyRevealed, setPubkeyRevealed] = useState<boolean | null>(null);
+  const [pubkeyRevealed, setPubkeyRevealed] = useState<boolean | null>(knownRevealed ? true : null);
   const [depinBalance, setDepinBalance] = useState<number | null>(null);
 
   const refreshServerInfo = useCallback(() => {

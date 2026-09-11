@@ -90,8 +90,6 @@ export function defaultAddressKind(policy: unknown, identityAvailable: boolean):
 export type ConnectApprovalBlocker =
   /** No wallet of the network the site asks for. */
   | 'no_wallet'
-  /** Hardware wallet: the key never leaves the device, so nothing can be signed here yet. */
-  | 'hardware'
   /** The request lapsed while the approval screen was open. */
   | 'expired'
   /** A per-domain identity was chosen but this wallet cannot derive one. */
@@ -108,21 +106,20 @@ export interface ConnectApproval {
  * Whether the login may be approved, and why not when it may not.
  *
  * The order of the checks is the order in which the reasons are worth
- * reporting: a missing wallet explains everything else, a hardware wallet
- * cannot be fixed by changing the address, an expired request must not be
- * signed even if everything else is in place (`approveAuth` re-checks the
- * window and throws), and only then do the per-choice reasons apply.
+ * reporting: a missing wallet explains everything else, an expired request
+ * must not be signed even if everything else is in place (`approveAuth`
+ * re-checks the window and throws), and only then do the per-choice reasons
+ * apply. A hardware wallet is not a reason: it signs on the device, with the
+ * address `getConnectAddressAsync` resolved for it.
  */
 export function loginApproval(input: {
   hasWallet: boolean;
-  isHardwareWallet: boolean;
   addressKind: ConnectAddressKind;
   identityAvailable: boolean;
   address?: string;
   expired?: boolean;
 }): ConnectApproval {
   if (!input.hasWallet) return { canApprove: false, blocker: 'no_wallet' };
-  if (input.isHardwareWallet) return { canApprove: false, blocker: 'hardware' };
   if (input.expired) return { canApprove: false, blocker: 'expired' };
   if (input.addressKind === 'identity' && !input.identityAvailable) return { canApprove: false, blocker: 'no_identity' };
   if (!input.address) return { canApprove: false, blocker: 'no_address' };

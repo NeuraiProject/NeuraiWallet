@@ -27,11 +27,15 @@ import { useSettings } from '../../hooks/context/useSettings';
 import useMenuElements from '../../hooks/useMenuElements';
 import SafeAreaSectionList from '../../components/SafeAreaSectionList';
 import { scanQrHelper } from '../../helpers/scan-qr';
+import { useNetworkSelection } from '../../hooks/useNetworkSelection';
 
 const WalletsListSections = { CAROUSEL: 'CAROUSEL', TRANSACTIONS: 'TRANSACTIONS' };
 
 /** Electrum `ping` while the list is visible; detects mid-session drops without polling when user is elsewhere. */
 const ELECTRUM_HEALTH_POLL_WHILE_WALLETS_LIST_FOCUSED_MS = 30_000;
+
+/** Recent activity shown under the carousel. */
+const RECENT_TRANSACTIONS_LIMIT = 10;
 
 type SectionData = {
   key: string;
@@ -107,14 +111,30 @@ const WalletsList: React.FC = () => {
   const connectionPoll = useContext(ConnectionPollContext);
   const currentWalletIndex = useRef<number>(0);
   const { registerTransactionsHandler, unregisterTransactionsHandler } = useMenuElements();
-  const { wallets, getTransactions, refreshAllWalletTransactions } = useStorage();
+  const { wallets, refreshAllWalletTransactions } = useStorage();
   const { isTotalBalanceEnabled } = useSettings();
   const { width } = useWindowDimensions();
   const { colors, scanImage } = useTheme();
   const navigation = useExtendedNavigation<NavigationProps>();
   const isFocused = useIsFocused();
   const route = useRoute<RouteProps>();
-  const dataSource = getTransactions(undefined, 10);
+  // Only the network on screen reaches the carousel, the total and the recent
+  // list below. `wallets` (all of them) is still what gets connected and
+  // refreshed: hidden wallets keep syncing, or the switcher's dot would never
+  // light and their balances would be stale on the way back.
+  const { visibleWallets } = useNetworkSelection();
+  // Same rules as BlueApp.getTransactions (hidden-wallet flag, newest first)
+  // over the visible subset — the storage-wide getter cannot filter by network.
+  const dataSource = useMemo<ExtendedTransaction[]>(() => {
+    const txs: ExtendedTransaction[] = [];
+    for (const wallet of visibleWallets) {
+      if (wallet.getHideTransactionsInWalletsList()) continue;
+      const walletID = wallet.getID();
+      const walletPreferredBalanceUnit = wallet.getPreferredBalanceUnit();
+      for (const t of wallet.getTransactions()) txs.push({ ...t, walletID, walletPreferredBalanceUnit });
+    }
+    return txs.sort((a, b) => b.timestamp - a.timestamp).slice(0, RECENT_TRANSACTIONS_LIMIT);
+  }, [visibleWallets]);
   const walletsCount = useRef<number>(wallets.length);
   const walletActionButtonsRef = useRef<View>(null);
 
@@ -324,8 +344,8 @@ const WalletsList: React.FC = () => {
     return (
       <>
         <WalletsCarousel
-          data={wallets}
-          extraData={[wallets]}
+          data={visibleWallets}
+          extraData={[visibleWallets]}
           onPress={handleClick}
           handleLongPress={handleLongPress}
           onMomentumScrollEnd={onSnapToItem}
@@ -338,7 +358,7 @@ const WalletsList: React.FC = () => {
         />
       </>
     );
-  }, [handleClick, handleLongPress, isFocused, onSnapToItem, wallets]);
+  }, [handleClick, handleLongPress, isFocused, onSnapToItem, visibleWallets]);
 
   const renderSectionItem = useCallback(
     (item: { section: any; item: ExtendedTransaction }) => {
@@ -364,7 +384,10 @@ const WalletsList: React.FC = () => {
         case WalletsListSections.TRANSACTIONS:
           return renderListHeaderComponent();
         case WalletsListSections.CAROUSEL: {
-          const shouldShowTotalBalance = isTotalBalanceEnabled && wallets.length > 1;
+          // Any wallet at all, not two: with one network on screen the total is
+          // also where the fiat view lives, and a single-wallet mainnet user
+          // would otherwise never get it.
+          const shouldShowTotalBalance = isTotalBalanceEnabled && visibleWallets.length > 0;
           return shouldShowTotalBalance ? (
             <View style={stylesHook.walletsListWrapper}>
               <TotalWalletsBalance />
@@ -393,7 +416,7 @@ const WalletsList: React.FC = () => {
       stylesHook.listHeaderBack,
       stylesHook.listHeaderText,
       stylesHook.walletsListWrapper,
-      wallets.length,
+      visibleWallets.length,
     ],
   );
 
