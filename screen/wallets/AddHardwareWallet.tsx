@@ -15,7 +15,7 @@ import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
 import { deriveLegacyAddress } from '../../blue_modules/neurai-hw/xpubDerivation';
 import { useNeuraiHwDevice } from '../../blue_modules/neurai-hw/useNeuraiHwDevice';
-import { nextHardwareWalletLabel } from '../../blue_modules/neurai-hw/walletLabel';
+import { defaultHardwareWalletLabel } from '../../blue_modules/neurai-hw/walletLabel';
 import {
   generateSetupMnemonic,
   validateSetupMnemonic,
@@ -144,7 +144,12 @@ const AddHardwareWallet: React.FC = () => {
   // still change before it is added.
   const stageForReview = useCallback(
     (wallet: NeuraiHardwareWallet) => {
-      setWalletName(nextHardwareWalletLabel(wallets.map(w => w.getLabel())));
+      setWalletName(
+        defaultHardwareWalletLabel(
+          wallet.hwFingerprint,
+          wallets.map(w => w.getLabel()),
+        ),
+      );
       setPending(wallet);
       setPhase('review');
     },
@@ -291,9 +296,15 @@ const AddHardwareWallet: React.FC = () => {
       presentAlert({ message: loc.wallets.hardware_already_added });
       return;
     }
-    // An empty name falls back to the proposed unique one rather than to the
-    // shared type name that caused the confusion in the first place.
-    pending.setLabel(walletName.trim() || nextHardwareWalletLabel(wallets.map(w => w.getLabel())));
+    // An empty name falls back to the proposed one (base + fingerprint) rather
+    // than to the shared type name that caused the confusion in the first place.
+    pending.setLabel(
+      walletName.trim() ||
+        defaultHardwareWalletLabel(
+          pending.hwFingerprint,
+          wallets.map(w => w.getLabel()),
+        ),
+    );
     addWallet(pending);
     await saveToDisk();
     triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);

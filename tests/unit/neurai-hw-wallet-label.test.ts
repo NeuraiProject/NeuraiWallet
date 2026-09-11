@@ -1,25 +1,28 @@
 import assert from 'assert';
 
-import { HARDWARE_WALLET_TYPE_READABLE, nextHardwareWalletLabel } from '../../blue_modules/neurai-hw/walletLabel';
+import { HARDWARE_WALLET_LABEL_BASE, defaultHardwareWalletLabel } from '../../blue_modules/neurai-hw/walletLabel';
 
-const base = HARDWARE_WALLET_TYPE_READABLE;
+const base = HARDWARE_WALLET_LABEL_BASE;
 
-describe('nextHardwareWalletLabel', () => {
-  it('uses the plain type name when no hardware wallet exists yet', () => {
-    assert.strictEqual(nextHardwareWalletLabel([]), base);
-    assert.strictEqual(nextHardwareWalletLabel(['My savings', 'Testnet']), base);
+describe('defaultHardwareWalletLabel', () => {
+  it('names the device after its master fingerprint', () => {
+    assert.strictEqual(defaultHardwareWalletLabel('a1b2c3d4', []), `${base} (a1b2c3d4)`);
+    // Existing names are irrelevant: the fingerprint already makes it unique.
+    assert.strictEqual(defaultHardwareWalletLabel('a1b2c3d4', [`${base} (a1b2c3d4)`]), `${base} (a1b2c3d4)`);
   });
 
-  it('appends the lowest free number once the plain name is taken', () => {
-    assert.strictEqual(nextHardwareWalletLabel([base]), `${base} 2`);
-    assert.strictEqual(nextHardwareWalletLabel([base, `${base} 2`]), `${base} 3`);
+  it('normalises the fingerprint to trimmed lower-case hex', () => {
+    assert.strictEqual(defaultHardwareWalletLabel(' A1B2C3D4 ', []), `${base} (a1b2c3d4)`);
   });
 
-  it('fills a gap left by a renamed or deleted device', () => {
-    assert.strictEqual(nextHardwareWalletLabel([base, `${base} 3`]), `${base} 2`);
+  it('falls back to the plain base name when the device reports no fingerprint', () => {
+    assert.strictEqual(defaultHardwareWalletLabel('', []), base);
+    assert.strictEqual(defaultHardwareWalletLabel('  ', ['My savings']), base);
   });
 
-  it('ignores surrounding whitespace in existing names', () => {
-    assert.strictEqual(nextHardwareWalletLabel([`  ${base} `]), `${base} 2`);
+  it('numbers the fallback name so it never collides', () => {
+    assert.strictEqual(defaultHardwareWalletLabel('', [base]), `${base} 2`);
+    assert.strictEqual(defaultHardwareWalletLabel('', [base, `${base} 2`]), `${base} 3`);
+    assert.strictEqual(defaultHardwareWalletLabel('', [base, `${base} 3`]), `${base} 2`);
   });
 });
