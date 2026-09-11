@@ -460,6 +460,7 @@
     "hardware_field_address": "Address",
     "hardware_field_path": "Derivation path",
     "hardware_field_fingerprint": "Fingerprint",
+    "hardware_name_hint": "Name this device so you can tell it apart from other hardware wallets. You can change it later in the wallet details.",
     "hardware_add": "Add wallet",
     "hardware_locked": "This device is locked. Enter your PIN on the device, then tap Connect again.",
     "hardware_setup_title": "Set up this device",

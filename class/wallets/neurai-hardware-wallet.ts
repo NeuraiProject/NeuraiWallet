@@ -20,6 +20,7 @@
 
 import NeuraiJsWallet from '@neuraiproject/neurai-jswallet';
 import { Buffer } from 'buffer';
+import { HARDWARE_WALLET_TYPE_READABLE } from '../../blue_modules/neurai-hw/walletLabel';
 import { Transaction } from 'bitcoinjs-lib';
 import {
   buildAssetTransferDisplayMetadata,
@@ -114,7 +115,7 @@ function chainForDevice(network: string | undefined, keyType: WalletKind): Neura
 
 export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
   static readonly type = 'NeuraiHardware';
-  static readonly typeReadable = 'Neurai Hardware (USB)';
+  static readonly typeReadable = HARDWARE_WALLET_TYPE_READABLE;
   // @ts-ignore: override
   public readonly type = NeuraiHardwareWallet.type;
   // @ts-ignore: override
