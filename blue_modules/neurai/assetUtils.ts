@@ -1,3 +1,4 @@
+import { xnaToSats, satsToXna } from './amounts';
 /**
  * Helpers for Neurai Assets (tokens).
  *
@@ -26,7 +27,7 @@ export interface NeuraiHeldAsset {
   /** Classification derived from the name. */
   type: NeuraiAssetType;
   /** Spendable amount in full asset units (not satoshis). */
-  amount: number;
+  amount: string;
 }
 
 /**
@@ -50,7 +51,6 @@ export function getAssetType(name: string): NeuraiAssetType {
  * internally as integers scaled by 1e8, so dividing by 1e8 and trimming yields
  * the correct human value regardless of the asset's declared divisibility.
  */
-export function formatAssetAmount(amount: number): string {
-  if (!Number.isFinite(amount)) return '0';
-  return Number(amount.toFixed(8)).toString();
+export function formatAssetAmount(amount: string): string {
+  return satsToXna(xnaToSats(amount));
 }

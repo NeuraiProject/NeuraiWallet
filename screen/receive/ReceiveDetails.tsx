@@ -480,18 +480,16 @@ const ReceiveDetails = () => {
 
   // Neurai-native balance poll. Hits the wallet's backend every 5 s and
   // surfaces the success / pending UI when funds arrive at the displayed
-  // address. Balances come back as XNA full units; multiply by 1e8 to compare
-  // in satoshis (consistent with the formatter expectations).
-  const neuraiPrevSatRef = useRef<number | null>(null);
+  // address. Backend balances are exact bigint satoshis.
+  const neuraiPrevSatRef = useRef<bigint | null>(null);
   useEffect(() => {
     if (!isNeuraiWallet(wallet)) return;
     if (!address) return;
     neuraiPrevSatRef.current = null;
-    const ONE_FULL_COIN = 1e8;
     const intervalId = setInterval(async () => {
       try {
         const xnaBalance = await wallet.getBackend().getBalance([address]);
-        const satNow = Math.round(xnaBalance * ONE_FULL_COIN);
+        const satNow = xnaBalance;
         const prev = neuraiPrevSatRef.current;
         neuraiPrevSatRef.current = satNow;
         if (prev === null) return;
@@ -802,15 +800,15 @@ const ReceiveDetails = () => {
    * @returns {string} BTC amount, accounting for current `customUnit` and `customUnit`
    */
   const getDisplayAmount = (): string | null => {
-    const number = Number(customAmount);
-    if (number > 0) {
+    const number = customAmount;
+    if (/^\d+(?:\.\d+)?$/.test(number) && /[1-9]/.test(number)) {
       switch (customUnit) {
         case XnaUnit.XNA:
-          return customAmount + ' BTC';
+          return customAmount + ' XNA';
         case XnaUnit.SATS:
-          return satoshiToXNA(number) + ' BTC';
+          return satoshiToXNA(number) + ' XNA';
         case XnaUnit.LOCAL_CURRENCY:
-          return fiatToXNA(number) + ' BTC';
+          return fiatToXNA(number) + ' XNA';
       }
       return customAmount + ' ' + customUnit;
     } else {

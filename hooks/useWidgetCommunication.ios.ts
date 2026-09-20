@@ -1,3 +1,4 @@
+import { satsToDisplayNumber } from '../blue_modules/neurai/amounts';
 import { useEffect, useRef } from 'react';
 import DefaultPreference from 'react-native-default-preference';
 import { Transaction, TWallet } from '../class/wallets/types';
@@ -74,9 +75,9 @@ export const calculateBalanceAndTransactionTime = async (
       // Real money only: the widget has no network label, so a testnet
       // balance would read as spendable XNA on the lock screen.
       const isTestnet = isNeuraiWallet(wallet) && wallet.getNeuraiNetwork() === 'testnet';
-      if (wallet.hideBalance || isTestnet) return { balance: 0, latestTransactionTime: 0 };
+      if (wallet.hideBalance || isTestnet || wallet.amountsStale) return { balance: 0n, latestTransactionTime: 0 };
 
-      const balance = await wallet.getBalance();
+      const balance = wallet.getBalance();
       const transactions: Transaction[] = await wallet.getTransactions();
       const confirmedTransactions = transactions.filter(t => t.confirmations > 0);
       const latestTransactionTime =
@@ -88,7 +89,7 @@ export const calculateBalanceAndTransactionTime = async (
     }),
   );
 
-  const allWalletsBalance = results.reduce((acc, result) => acc + (result.status === 'fulfilled' ? result.value.balance : 0), 0);
+  const allWalletsBalance = results.reduce((acc, result) => acc + (result.status === 'fulfilled' ? result.value.balance : 0n), 0n);
   const latestTransactionTime = results.reduce(
     (max, result) =>
       result.status === 'fulfilled' && typeof result.value.latestTransactionTime === 'number' && result.value.latestTransactionTime > max
@@ -97,7 +98,7 @@ export const calculateBalanceAndTransactionTime = async (
     0,
   );
 
-  return { allWalletsBalance, latestTransactionTime };
+  return { allWalletsBalance: satsToDisplayNumber(allWalletsBalance), latestTransactionTime };
 };
 
 export const syncWidgetBalanceWithWallets = async (

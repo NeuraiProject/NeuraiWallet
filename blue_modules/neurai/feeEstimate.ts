@@ -54,7 +54,10 @@ const SUB_SAT_EPSILON = 1e-6;
  * addresses at `feeRateXnaPerKb` (XNA per kilobyte, the unit the engine and the
  * backend's `estimateFee` use). Rounded up so we never under-pay the node.
  */
-export const estimateNeuraiFeeSats = (inputScripts: (string | undefined)[], outputAddresses: string[], feeRateXnaPerKb: number): number => {
+export const estimateNeuraiFeeSats = (inputScripts: (string | undefined)[], outputAddresses: string[], feeRateXnaPerKb: number): bigint => {
   const sizeKb = estimateNeuraiTxSizeKb(inputScripts, outputAddresses);
-  return Math.ceil(sizeKb * feeRateXnaPerKb * SATS_PER_XNA - SUB_SAT_EPSILON);
+  const fee = Math.ceil(sizeKb * feeRateXnaPerKb * SATS_PER_XNA - SUB_SAT_EPSILON);
+  if (!Number.isFinite(feeRateXnaPerKb) || feeRateXnaPerKb < 0 || !Number.isSafeInteger(fee) || fee < 0)
+    throw new Error('Invalid fee rate');
+  return BigInt(fee);
 };

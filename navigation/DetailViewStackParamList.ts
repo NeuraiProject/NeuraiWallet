@@ -51,7 +51,7 @@ export type DetailViewStackParamList = {
   SendNeurai: {
     walletID: string;
     address?: string;
-    amount?: number;
+    amount?: string;
     onBarScanned?: string;
   };
   ImportNeurai: undefined;

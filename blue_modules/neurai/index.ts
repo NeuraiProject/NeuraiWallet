@@ -11,7 +11,7 @@ import { CHAIN_PARAMS, NeuraiChainType, NeuraiNetwork, WalletKind, chainFor } fr
 import { ElectrumXBackend } from './ElectrumXBackend';
 import { RpcBackend } from './RpcBackend';
 import { WssBackend } from './WssBackend';
-import { getWssUrlOverride } from './backendOverrides';
+import { getWssUrlOverride, getWalletRpcUrlOverride } from './backendOverrides';
 import { getDepinRpcConfig } from './depinRpcOverrides';
 
 export * from './networkConfig';
@@ -41,7 +41,7 @@ const MAINNET_BACKEND_DISABLED = false;
 /** Inert backend: returns empty data, no network calls, no errors. Used to
  * neuter mainnet wallets while the mainnet WSS service is not yet deployed. */
 class DisabledBackend implements NeuraiBackend {
-  readonly kind: 'wss' = 'wss';
+  readonly kind = 'wss' as const;
   readonly chain: NeuraiChainType;
   constructor(chain: NeuraiChainType) {
     this.chain = chain;
@@ -55,8 +55,8 @@ class DisabledBackend implements NeuraiBackend {
     return 0;
   }
 
-  async getBalance(): Promise<number> {
-    return 0;
+  async getBalance(): Promise<bigint> {
+    return 0n;
   }
 
   async getAddressHistory(): Promise<AddressDelta[]> {
@@ -116,6 +116,8 @@ export function createDefaultBackend(network: NeuraiNetwork, kind: WalletKind): 
     chain,
     url: getWssUrlOverride(network) ?? params.defaultWssUrl,
     authToken: params.defaultWssAuthToken,
+    // Built-in endpoints are an explicit pair. Custom WSS must configure its own RPC.
+    rpcUrl: getWalletRpcUrlOverride(network) ?? (getWssUrlOverride(network) ? undefined : params.defaultRpcUrl),
   });
 }
 

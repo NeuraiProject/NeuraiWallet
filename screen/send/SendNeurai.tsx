@@ -1,3 +1,4 @@
+import { amountFromInput, xnaToSats, satsToXna } from '../../blue_modules/neurai/amounts';
 /**
  * Simplified Send screen for Neurai wallets.
  *
@@ -122,9 +123,9 @@ const SendNeurai: React.FC = () => {
   // Available balance is stored in sats on the wallet; convert to whole XNA
   // for display next to the amount field so the user knows the cap without
   // backing out to the wallet view.
-  const availableSats = wallet?.getBalance() ?? 0;
-  const availableXna = availableSats / 1e8;
-  const assetAvailable = selectedAsset?.amount ?? 0;
+  const availableSats = wallet?.getBalance() ?? 0n;
+  const availableXna = satsToXna(availableSats);
+  const assetAvailable = selectedAsset?.amount ?? '0';
   const amountUnit = isAssetMode && selectedAsset ? selectedAsset.name : 'XNA';
 
   const onToggleAssetMode = useCallback(
@@ -217,8 +218,10 @@ const SendNeurai: React.FC = () => {
       presentAlert({ message: loc.send.details_address_field_is_not_valid });
       return;
     }
-    const xna = Number(amount);
-    if (!isSendMax && !isAssetMode && (!Number.isFinite(xna) || xna <= 0)) {
+    let xna = '0';
+    try {
+      if (!isSendMax || isAssetMode) xna = amountFromInput(amount.replace(',', '.'));
+    } catch {
       presentAlert({ message: loc.send.details_amount_field_is_not_valid });
       return;
     }
@@ -236,9 +239,9 @@ const SendNeurai: React.FC = () => {
         if (isAssetMode && selectedAsset) {
           unsigned = await hwWallet.buildUnsignedAssetSend(address.trim(), selectedAsset.name, xna);
         } else if (isSendMax) {
-          unsigned = await hwWallet.buildUnsignedSend(address.trim(), 0, { sendMax: true });
+          unsigned = await hwWallet.buildUnsignedSend(address.trim(), 0n, { sendMax: true });
         } else {
-          unsigned = await hwWallet.buildUnsignedSend(address.trim(), Math.round(xna * 1e8));
+          unsigned = await hwWallet.buildUnsignedSend(address.trim(), xnaToSats(xna));
         }
         setHwDraft(unsigned);
       } catch (err: any) {
@@ -452,11 +455,11 @@ const SendNeurai: React.FC = () => {
             if (selectedAsset) setAmount(formatAssetAmount(selectedAsset.amount));
           } else {
             setIsSendMax(true);
-            setAmount(availableXna.toFixed(8));
+            setAmount(availableXna);
           }
           resetDrafts();
         }}
-        disabled={isBuilding || isBroadcasting || (isAssetMode ? !selectedAsset || assetAvailable === 0 : availableSats === 0)}
+        disabled={isBuilding || isBroadcasting || (isAssetMode ? !selectedAsset || assetAvailable === '0' : availableSats === 0n)}
         style={styles.balanceHintRow}
       >
         <Text style={[styles.balanceHint, stylesHook.balanceHint]}>
@@ -464,7 +467,7 @@ const SendNeurai: React.FC = () => {
             ? selectedAsset
               ? loc.formatString(loc.assets.send_avail_max, { amount: formatAssetAmount(assetAvailable), asset: selectedAsset.name })
               : ''
-            : loc.formatString(loc.send.create_avail_max, { amount: availableXna.toFixed(8) })}
+            : loc.formatString(loc.send.create_avail_max, { amount: availableXna })}
         </Text>
       </Pressable>
 
@@ -476,10 +479,10 @@ const SendNeurai: React.FC = () => {
               ? `${formatAssetAmount(draft.asset.amount)} ${draft.asset.name}`
               : hwDraft?.asset
                 ? `${formatAssetAmount(hwDraft.asset.amount)} ${hwDraft.asset.name}`
-                : `${((draft ? draft.sentAmountSats : hwDraft!.amountSats) / 1e8).toFixed(8)} XNA`}
+                : `${satsToXna(draft ? draft.sentAmountSats : hwDraft!.amountSats)} XNA`}
           </Text>
           <Text style={[styles.feeLabel, stylesHook.feeLabel, styles.feeLabelSpacer]}>{loc.send.create_fee}</Text>
-          <Text style={[styles.feeValue, stylesHook.feeValue]}>{(draft ? draft.fee : hwDraft!.feeSats / 1e8).toFixed(8)} XNA</Text>
+          <Text style={[styles.feeValue, stylesHook.feeValue]}>{satsToXna(draft ? draft.feeSats : hwDraft!.feeSats)} XNA</Text>
         </View>
       )}
 

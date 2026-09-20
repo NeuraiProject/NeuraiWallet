@@ -26,7 +26,7 @@ export function otherNetwork(network: NeuraiNetwork): NeuraiNetwork {
 export interface NetworkWalletLike {
   getID(): string;
   getNeuraiNetwork?: () => NeuraiNetwork;
-  getTransactions(): ReadonlyArray<{ value?: number }>;
+  getTransactions(): ReadonlyArray<{ value?: number | bigint }>;
 }
 
 /**
@@ -69,7 +69,7 @@ export function resolveNetworkView(
 }
 
 /** Received transactions only: a send from the other network is the user's own doing and needs no reminder. */
-export function incomingTxCount(txs: ReadonlyArray<{ value?: number }>): number {
+export function incomingTxCount(txs: ReadonlyArray<{ value?: number | bigint }>): number {
   let count = 0;
   for (const tx of txs) if ((tx.value ?? 0) > 0) count++;
   return count;

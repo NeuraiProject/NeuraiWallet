@@ -1,0 +1,77 @@
+import {
+  parseRawSats,
+  parseMoneySats,
+  amountFromInput,
+  xnaToSats,
+  satsToXna,
+  sumSats,
+  MAX_MONEY,
+  formatXnaGrouped,
+  formatSatsGrouped,
+  splitFormattedAmount,
+} from '../../blue_modules/neurai/amounts';
+import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
+import { formatAssetAmount } from '../../blue_modules/neurai/assetUtils';
+import { parseRpcJson, stringifyRpcJson } from '@neuraiproject/neurai-rpc';
+
+describe('exact amounts', () => {
+  test.each([0n, 1n, 9007199254740990n, 9007199254740991n, 9007199254740992n, 9007199254740993n, MAX_MONEY, -9007199254740993n])(
+    'round trips %s without a double',
+    raw => {
+      expect(parseRawSats(raw.toString())).toBe(raw);
+      expect(xnaToSats(satsToXna(raw))).toBe(raw);
+      expect(parseRawSats(parseRpcJson(stringifyRpcJson(raw)))).toBe(raw);
+    },
+  );
+  test.each([null, undefined, NaN, Infinity, 1.1, Number('9007199254740993'), {}, '1e8', '1.0'])('rejects invalid raw input %s', value => {
+    expect(() => parseRawSats(value)).toThrow();
+  });
+  it('distinguishes signed deltas, outputs and aggregates', () => {
+    expect(parseRawSats('-300000')).toBe(-300000n);
+    expect(() => parseMoneySats(-1n)).toThrow();
+    expect(() => parseMoneySats(MAX_MONEY + 1n)).toThrow();
+    expect(sumSats([MAX_MONEY, MAX_MONEY, 1n])).toBe(2n * MAX_MONEY + 1n);
+  });
+  it('preserves both the Bitcoin-limit and IEEE-754 regression values', () => {
+    expect(xnaToSats(amountFromInput('63175176.62230948'))).toBe(6317517662230948n);
+    expect(xnaToSats(amountFromInput('100000000.00000001'))).toBe(10000000000000001n);
+    expect(satsToXna(xnaToSats('100000000.00000001') - 100000000n)).toBe('99999999.00000001');
+  });
+  test.each(['1e8', '0', '-1', '0.123456789', '21000000000.00000001', 'NaN'])('rejects invalid user amount %s', amount => {
+    expect(() => amountFromInput(amount)).toThrow();
+  });
+  it('formats signed fractional amounts and locales exactly', () => {
+    expect(formatSatsGrouped(9007199254740993n, 'en-US')).toBe('9,007,199,254,740,993');
+    expect(formatXnaGrouped(-1n, 'de-DE')).toBe('-0,00000001');
+    expect(formatXnaGrouped(10000000000000001n, 'es-ES')).toBe('100.000.000,00000001');
+    expect(splitFormattedAmount('1,284', '.')).toEqual(['1,284', '', '']);
+    expect(splitFormattedAmount('1,284 XNA', ',')).toEqual(['1', ',284', ' XNA']);
+    expect(formatAssetAmount('123456789.00000001')).toBe('123456789.00000001');
+  });
+  it('rejects invalid or unrepresentable fees', () => {
+    for (const rate of [NaN, Infinity, -1, 1e20]) expect(() => estimateNeuraiFeeSats(['76a914'], ['N'], rate)).toThrow();
+  });
+});
+
+it('formats aggregated balances above the safe integer limit', () => {
+  expect(satsToXna(sumSats([9007199254740992n, 9007199254740992n]))).toBe('180143985.09481984');
+});
+
+it('keeps the fallback grouping exact when Intl cannot format bigint', () => {
+  const real = Intl.NumberFormat;
+  const replacement = jest.spyOn(Intl, 'NumberFormat').mockImplementation((locale, options) => {
+    const formatter = new real(locale, options);
+    return {
+      format: () => {
+        throw new TypeError('BigInt not supported');
+      },
+      formatToParts: formatter.formatToParts.bind(formatter),
+    } as unknown as Intl.NumberFormat;
+  });
+  try {
+    expect(formatSatsGrouped(10000000000000001n, 'en-US')).toBe('10,000,000,000,000,001');
+    expect(formatXnaGrouped(-10000000000000001n, 'es-ES')).toBe('-100.000.000,00000001');
+  } finally {
+    replacement.mockRestore();
+  }
+});

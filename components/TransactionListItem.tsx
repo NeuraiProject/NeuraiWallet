@@ -1,3 +1,4 @@
+import { xnaToSats, satsToXna, absSats } from '../blue_modules/neurai/amounts';
 import React, { useCallback, useMemo, memo, useRef } from 'react';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { Animated, Easing, Linking, Pressable, Text, TextStyle, ViewStyle, StyleSheet, View } from 'react-native';
@@ -149,7 +150,7 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
     // A Neurai asset (token) transaction: direction and amount come from the
     // asset, not the XNA value (which only reflects the fee/change).
     const isAsset = !!item.assetName;
-    const assetSent = (item.assetAmount ?? 0) < 0;
+    const assetSent = xnaToSats(item.assetAmount ?? '0') < 0n;
 
     const listTitleKey = useMemo((): 'pending' | 'sent' | 'received' => {
       if (!item.confirmations) return 'pending';
@@ -177,7 +178,7 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
     }, [item.value, itemPriceUnit]);
 
     const rowTitle = useMemo(() => {
-      if (isAsset) return `${formatAssetAmount(Math.abs(item.assetAmount ?? 0))} ${item.assetName}`;
+      if (isAsset) return `${formatAssetAmount(satsToXna(absSats(xnaToSats(item.assetAmount ?? '0'))))} ${item.assetName}`;
       return formattedAmount;
     }, [isAsset, item.assetAmount, item.assetName, formattedAmount]);
 
@@ -186,7 +187,7 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
       if (isAsset) {
         // Asset moved: red when it leaves, green when it arrives.
         color = assetSent ? '#d0021b' : colors.successColor;
-      } else if (item.value! / 100000000 < 0) {
+      } else if (item.value! < 0n) {
         color = colors.foregroundColor;
       }
       return {

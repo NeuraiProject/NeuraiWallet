@@ -19,6 +19,7 @@ const KEY_BY_NETWORK: Record<NeuraiNetwork, string> = {
 };
 
 const cache = new Map<NeuraiNetwork, string>();
+const rpcCache = new Map<NeuraiNetwork, string>();
 let loaded = false;
 let loading: Promise<void> | null = null;
 
@@ -26,6 +27,8 @@ async function load(): Promise<void> {
   await DefaultPreference.setName(GROUP_IO_BLUEWALLET);
   for (const network of Object.keys(KEY_BY_NETWORK) as NeuraiNetwork[]) {
     const value = (await DefaultPreference.get(KEY_BY_NETWORK[network])) as string | null;
+    const rpc = await DefaultPreference.get(KEY_BY_NETWORK[network] + '_RPC');
+    if (typeof rpc === 'string' && rpc.length > 0) rpcCache.set(network, rpc);
     if (typeof value === 'string' && value.length > 0) cache.set(network, value);
   }
   loaded = true;
@@ -66,3 +69,20 @@ export async function setWssUrlOverride(network: NeuraiNetwork, url: string | nu
 loadOverrides().catch(() => {
   // Storage errors are non-fatal; defaults will be used.
 });
+
+/** Companion RPC is explicit; a custom WSS must never fall back to a public node. */
+export function getWalletRpcUrlOverride(network: NeuraiNetwork): string | undefined {
+  return rpcCache.get(network);
+}
+export async function setWalletRpcUrlOverride(network: NeuraiNetwork, url: string | null): Promise<void> {
+  await DefaultPreference.setName(GROUP_IO_BLUEWALLET);
+  const key = KEY_BY_NETWORK[network] + '_RPC';
+  const text = (url ?? '').trim();
+  if (text) {
+    await DefaultPreference.set(key, text);
+    rpcCache.set(network, text);
+  } else {
+    await DefaultPreference.clear(key);
+    rpcCache.delete(network);
+  }
+}

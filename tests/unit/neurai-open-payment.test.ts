@@ -18,7 +18,7 @@ describe('openNeuraiPaymentUri', () => {
     const navigation = { navigate: (...args: unknown[]) => calls.push(args) };
 
     expect(openNeuraiPaymentUri(navigation as never, [wallet('a'), wallet('watch-only', false)], PAYMENT)).toBe(true);
-    expect(calls).toEqual([['SendNeurai', { walletID: 'a', address: PAYMENT.address, amount: 2.5 }]]);
+    expect(calls).toEqual([['SendNeurai', { walletID: 'a', address: PAYMENT.address, amount: '2.5' }]]);
   });
 
   it('leaves the amount out when the request does not carry one', () => {
@@ -44,7 +44,7 @@ describe('openNeuraiPaymentUri', () => {
     const inner: unknown[][] = [];
     const wrapper = { pop: () => inner.push(['pop']), navigate: (...args: unknown[]) => inner.push(args) };
     (params.onWalletSelect as (w: TWallet, ctx: unknown) => void)(wallet('b'), { navigation: wrapper });
-    expect(inner).toEqual([['pop'], ['SendNeurai', { walletID: 'b', address: PAYMENT.address, amount: 2.5 }]]);
+    expect(inner).toEqual([['pop'], ['SendNeurai', { walletID: 'b', address: PAYMENT.address, amount: '2.5' }]]);
   });
 
   it('refuses instead of navigating when no wallet can spend', () => {
@@ -55,4 +55,11 @@ describe('openNeuraiPaymentUri', () => {
     expect(openNeuraiPaymentUri(navigation as never, [], PAYMENT)).toBe(false);
     expect(calls).toEqual([]);
   });
+});
+
+it('preserves an odd large URI amount all the way into navigation', () => {
+  const navigate = jest.fn();
+  const amount = '100000000.00000001';
+  openNeuraiPaymentUri({ navigate } as never, [wallet('a')], { address: PAYMENT.address, amount });
+  expect(navigate).toHaveBeenCalledWith('SendNeurai', { walletID: 'a', address: PAYMENT.address, amount });
 });

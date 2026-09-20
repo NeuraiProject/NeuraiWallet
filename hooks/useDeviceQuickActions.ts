@@ -7,7 +7,6 @@ import NeuraiUriMatch from '../class/neurai-uri-match';
 import DeeplinkSchemaMatch from '../class/deeplink-schema-match';
 import { openNeuraiPaymentUri } from '../helpers/open-neurai-payment';
 import presentAlert from '../components/Alert';
-import { TWallet } from '../class/wallets/types';
 import loc, { formatBalance } from '../loc';
 import * as NavigationService from '../NavigationService';
 import { useSettings } from '../hooks/context/useSettings';
@@ -48,7 +47,7 @@ const useDeviceQuickActions = () => {
         })
         .catch(() => removeShortcuts());
     }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallets, walletsInitialized, preferredFiatCurrency, isStorageEncrypted]);
 
   useEffect(() => {
@@ -61,7 +60,7 @@ const useDeviceQuickActions = () => {
         });
       return () => DeviceEventEmitter.removeAllListeners('quickActionShortcut');
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletsInitialized]);
 
   useEffect(() => {
@@ -72,7 +71,7 @@ const useDeviceQuickActions = () => {
         removeShortcuts();
       }
     }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isQuickActionsEnabled, walletsInitialized]);
 
   const popInitialShortcutAction = async (): Promise<any> => {
@@ -160,16 +159,17 @@ const useDeviceQuickActions = () => {
             type: 'Wallets',
             title: wallet.getLabel(),
             subtitle:
-              wallet.hideBalance || wallet.getBalance() <= 0
+              wallet.hideBalance || wallet.getBalance() <= 0n
                 ? ''
-                : formatBalance(Number(wallet.getBalance()), wallet.getPreferredBalanceUnit(), true),
+                : formatBalance(wallet.getBalance(), wallet.getPreferredBalanceUnit(), true),
             userInfo: {
               url: `bluewallet://wallet/${wallet.getID()}`,
             },
-            icon: Platform.select({
-              android: 'quickactions',
-              ios: index === 0 ? 'Favorite' : 'Bookmark',
-            }) || 'quickactions',
+            icon:
+              Platform.select({
+                android: 'quickactions',
+                ios: index === 0 ? 'Favorite' : 'Bookmark',
+              }) || 'quickactions',
           }));
           QuickActions.setShortcutItems(shortcutItems);
         }
@@ -180,6 +180,6 @@ const useDeviceQuickActions = () => {
   };
 
   return { popInitialAction };
-}
+};
 
 export default useDeviceQuickActions;

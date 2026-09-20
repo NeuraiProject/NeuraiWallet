@@ -1,3 +1,4 @@
+import { satsToDisplayNumber } from '../blue_modules/neurai/amounts';
 import { useCallback, useEffect, useRef } from 'react';
 import {
   transferCurrentComplicationUserInfo,
@@ -7,8 +8,6 @@ import {
   useReachability,
   watchEvents,
 } from 'react-native-watch-connectivity';
-import loc from '../loc';
-import { Chain } from '../models/xnaUnits';
 import { FiatUnit } from '../models/fiatUnit';
 import { useSettings } from '../hooks/context/useSettings';
 import { useStorage } from '../hooks/context/useStorage';
@@ -89,7 +88,7 @@ export function useWatchConnectivity() {
 
           const walletData = {
             label: wallet.getLabel(),
-            balance: Number(wallet.getBalance()),
+            balance: satsToDisplayNumber(wallet.getBalance()),
             type: wallet.type,
             preferredBalanceUnit: wallet.getPreferredBalanceUnit(),
             receiveAddress,

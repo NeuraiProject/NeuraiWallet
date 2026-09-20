@@ -1,0 +1,127 @@
+import { BlueApp } from '../../class/blue-app';
+import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
+import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
+import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
+import { decodeWalletAmounts, encodeWalletAmounts } from '../../blue_modules/neurai/walletAmountsCodec';
+import { MAX_MONEY } from '../../blue_modules/neurai/amounts';
+import * as encryption from '../../blue_modules/encryption';
+
+const mnemonic = 'result pact model attract result puzzle final boss private educate luggage era';
+
+it('round trips every monetary cache without converting identifiers or metadata', () => {
+  const dto = {
+    balance: MAX_MONEY,
+    unconfirmed_balance: -1n,
+    secret: mnemonic,
+    label: '00123',
+    _utxo: [{ value: 10000000000000001n, txid: '00123' }],
+    _txCache: [
+      { value: -9007199254740993n, assetAmount: '-123.00000001', inputs: [{ value: 9007199254740993n }], outputs: [{ value: 1n }] },
+    ],
+    _pendingTxs: [{ txid: 'pending', value: -1n }],
+    _historyItems: [{ fee: '0.1', assets: [{ satoshis: -1n, value: '-0.00000001' }] }],
+    _heldAssets: [{ name: 'TOKEN', amount: '123456789.00000001' }],
+    _utxoMetadata: { '00123:0': { memo: '9007199254740993', frozen: true } },
+  };
+  const restored = decodeWalletAmounts(JSON.parse(JSON.stringify(encodeWalletAmounts(dto))));
+  expect(restored).toEqual({ ...dto, amountsVersion: 1 });
+  expect(dto.balance).toBe(MAX_MONEY);
+});
+
+test.each([
+  ['HD', NeuraiHDWallet],
+  ['PQ', NeuraiPQWallet],
+  ['hardware', NeuraiHardwareWallet],
+] as const)('upgrades a legacy %s without changing wallet identity', (_name, Constructor) => {
+  const original = new Constructor();
+  original.setSecret(mnemonic);
+  const json = JSON.parse(JSON.stringify(original));
+  delete json.amountsVersion;
+  json.balance = 6317517662230948;
+  json.unconfirmed_balance = -300000;
+  json._heldAssets = [{ name: 'TOKEN', type: 'root', amount: 1.25 }];
+  const migrated = Constructor.fromJson(JSON.stringify(json)) as unknown as NeuraiHDWallet;
+  expect(migrated.getID()).toBe(original.getID());
+  expect(migrated.secret).toBe(mnemonic);
+  expect(migrated.getBalance()).toBe(6317517661930948n);
+  expect(migrated.getHeldAssetsCached()[0].amount).toBe('1.25');
+  expect(migrated.amountsStale).toBe(false);
+});
+
+it('retains a legacy wallet with unsafe cached numbers and prevents spending until refresh', async () => {
+  const original = NeuraiHDWallet.forNetwork('testnet', mnemonic);
+  original.setLabel('Savings');
+  const dto = JSON.parse(JSON.stringify(original));
+  delete dto.amountsVersion;
+  dto.balance = Number('10000000000000001');
+  dto._pendingTxs = [{ txid: 'pending', value: -100, timestamp: Math.floor(Date.now() / 1000) }];
+  const migrated = NeuraiHDWallet.fromJson(JSON.stringify(dto)) as unknown as NeuraiHDWallet;
+  expect(migrated.getID()).toBe(original.getID());
+  expect(migrated.getLabel()).toBe('Savings');
+  expect(migrated.amountsStale).toBe(true);
+  expect(migrated.getTransactions().map(t => t.txid)).toContain('pending');
+  await expect(migrated.buildSendTransaction([{ address: 'unused', amount: '1' }])).rejects.toThrow('Refresh');
+  expect((NeuraiHDWallet.fromJson(JSON.stringify(migrated)) as unknown as NeuraiHDWallet).amountsStale).toBe(true);
+});
+
+test.each([false, true])('saves and loads through the actual BlueApp clone path (encrypted=%s)', async encrypted => {
+  const disk = new Map<string, string>();
+  const app = new BlueApp();
+  const setup = (instance: BlueApp) => {
+    jest.spyOn(instance, 'getRealmForTransactions').mockResolvedValue({ close: jest.fn() } as never);
+    jest.spyOn(instance, 'openRealmKeyValue').mockResolvedValue({ close: jest.fn() } as never);
+    jest.spyOn(instance, 'saveToRealmKeyValue').mockImplementation(() => {});
+    jest.spyOn(instance, 'moveRealmFilesToCacheDirectory').mockResolvedValue(undefined);
+    jest.spyOn(instance, 'setItem').mockImplementation(async (key, value) => {
+      disk.set(key, value);
+    });
+    jest.spyOn(instance, 'getItemWithFallbackToRealm').mockImplementation(async key => disk.get(key) ?? null);
+  };
+  setup(app);
+  const wallet = NeuraiHDWallet.forNetwork('testnet', mnemonic);
+  wallet.balance = MAX_MONEY;
+  wallet.addPendingTx('pending', -1n);
+  app.wallets = [wallet];
+  if (encrypted) {
+    app.cachedPassword = 'test-password';
+    disk.set('data', JSON.stringify([encryption.encrypt(JSON.stringify({ wallets: [] }), 'test-password')]));
+  }
+  await app.saveToDisk();
+  expect(disk.has('data')).toBe(true);
+  if (encrypted) expect(disk.get('data')).not.toContain(mnemonic);
+  const restored = new BlueApp();
+  setup(restored);
+  expect(await restored.loadFromDisk(encrypted ? 'test-password' : undefined)).toBe(true);
+  expect(restored.wallets).toHaveLength(1);
+  expect(restored.wallets[0].getID()).toBe(wallet.getID());
+  expect(restored.wallets[0].getBalance()).toBe(MAX_MONEY - 1n);
+});
+
+test.each([false, true])('loads a pre-migration storage bucket without dropping funded wallets (encrypted=%s)', async encrypted => {
+  const originals = [new NeuraiHDWallet(), new NeuraiPQWallet(), new NeuraiHardwareWallet()];
+  const wallets = originals.map((wallet, index) => {
+    wallet.setSecret(mnemonic);
+    wallet.setLabel('Existing wallet ' + index);
+    const dto = JSON.parse(JSON.stringify(wallet));
+    delete dto.amountsVersion;
+    dto.balance = index === 0 ? Number('10000000000000001') : 100000001;
+    dto.unconfirmed_balance = 0;
+    return JSON.stringify(dto);
+  });
+  const plain = JSON.stringify({ wallets, tx_metadata: { known: { memo: 'Keep this label' } }, counterparty_metadata: {} });
+  const stored = encrypted ? JSON.stringify([encryption.encrypt(plain, 'existing-password')]) : plain;
+  const app = new BlueApp();
+  jest.spyOn(app, 'getItemWithFallbackToRealm').mockResolvedValue(stored);
+  jest.spyOn(app, 'getRealmForTransactions').mockResolvedValue({ close: jest.fn() } as never);
+  jest.spyOn(app, 'moveRealmFilesToCacheDirectory').mockResolvedValue(undefined);
+  expect(await app.loadFromDisk(encrypted ? 'existing-password' : undefined)).toBe(true);
+  expect(app.wallets).toHaveLength(3);
+  for (let i = 0; i < originals.length; i++) {
+    expect(app.wallets[i].getID()).toBe(originals[i].getID());
+    expect(app.wallets[i].getSecret()).toBe(originals[i].getSecret());
+    expect(app.wallets[i].getLabel()).toBe(originals[i].getLabel());
+    expect(app.wallets[i].amountsStale).toBe(i === 0);
+    if (i > 0) expect(app.wallets[i].getBalance()).toBe(100000001n);
+  }
+  expect(app.tx_metadata.known.memo).toBe('Keep this label');
+});

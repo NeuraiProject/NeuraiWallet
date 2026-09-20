@@ -8,6 +8,8 @@ module.exports = {
   moduleFileExtensions: ['js', 'json', 'ts', 'tsx'],
   transformIgnorePatterns: ['node_modules/(?!((jest-)?react-native(-.*)?|@react-native(-community)?)|silent-payments|@arkade-os)/'],
   moduleNameMapper: {
+    // The RN SDK subpath is import-only; its Node entry exports the same transaction builders.
+    '^@neuraiproject/neurai-sign-esp32/react-native$': '<rootDir>/node_modules/@neuraiproject/neurai-sign-esp32/dist/index.cjs',
     '^expo/fetch$': '<rootDir>/util/expo-fetch-nodejs.js',
     '^@react-native-vector-icons/(.*)$': '<rootDir>/tests/mocks/vector-icons.js',
     '^react-native-svg$': '<rootDir>/tests/mocks/react-native-svg.js',

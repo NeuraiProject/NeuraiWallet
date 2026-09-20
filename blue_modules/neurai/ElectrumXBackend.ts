@@ -54,7 +54,7 @@ export class ElectrumXBackend implements NeuraiBackend {
     throw new NotImplementedError('getTipHeight', 'wire blockchain.headers.subscribe');
   }
 
-  getBalance(_addresses: string[]): Promise<number> {
+  getBalance(_addresses: string[]): Promise<bigint> {
     throw new NotImplementedError('getBalance', 'wire blockchain.scripthash.get_balance');
   }
 

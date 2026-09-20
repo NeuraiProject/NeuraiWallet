@@ -387,7 +387,9 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
     const isCompact = sizeVariant === 'compact';
     const { direction } = useLocale();
     const previousBalance = useRef<string | undefined>(undefined);
-    const balance = !item.hideBalance && formatBalance(Number(item.getBalance()), item.getPreferredBalanceUnit(), true);
+    const balance =
+      !item.hideBalance &&
+      (item.amountsStale ? loc.wallets.pull_to_refresh : formatBalance(item.getBalance(), item.getPreferredBalanceUnit(), true));
     const safeBalance = balance || undefined;
     // Count of Neurai assets (tokens) this wallet holds, read from the persisted
     // cache (no network / engine cost). Shown as a small badge on the card.
@@ -493,7 +495,7 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
     const txs = item.getTransactions();
     const latestTimestamp = txs.reduce((max, tx) => Math.max(max, tx.timestamp ?? 0), 0);
 
-    if (item.getBalance() !== 0 && latestTimestamp === 0) {
+    if (item.getBalance() !== 0n && latestTimestamp === 0) {
       latestTransactionText = loc.wallets.pull_to_refresh;
     } else if (txs.find((tx: Transaction) => tx.confirmations === 0)) {
       latestTransactionText = loc.transactions.pending;

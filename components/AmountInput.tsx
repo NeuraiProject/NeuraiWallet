@@ -76,7 +76,7 @@ type AmountInputProps = Omit<TextInputProps, 'onChangeText' | 'value'> & {
    * Estimated sendable amount in satoshis when MAX is selected.
    * Displayed below the MAX label. Pass null to hide.
    */
-  maxSendableAmount?: number | null;
+  maxSendableAmount?: bigint | null;
   /**
    * When true, shows ≈ prefix for maxSendableAmount (indicates estimate).
    */
@@ -103,11 +103,11 @@ export const AmountInput: React.FC<AmountInputProps> = props => {
   const maxLength = useMemo(() => {
     switch (unit) {
       case XnaUnit.XNA:
-        return 11;
+        return 20;
       case XnaUnit.SATS:
-        return 15;
+        return 19;
       default:
-        return 15;
+        return 19;
     }
   }, [unit]);
 
@@ -117,19 +117,19 @@ export const AmountInput: React.FC<AmountInputProps> = props => {
     }
     switch (unit) {
       case XnaUnit.XNA: {
-        const sat = new BigNumber(amount).multipliedBy(100000000).toNumber();
+        const sat = new BigNumber(amount || '0').multipliedBy(100000000).integerValue(BigNumber.ROUND_DOWN).toFixed();
         return formatBalanceWithoutSuffix(sat, XnaUnit.LOCAL_CURRENCY, false);
       }
       case XnaUnit.SATS:
-        return formatBalanceWithoutSuffix(Number(amount), XnaUnit.LOCAL_CURRENCY, false);
+        return formatBalanceWithoutSuffix(amount || '0', XnaUnit.LOCAL_CURRENCY, false);
       case XnaUnit.LOCAL_CURRENCY: {
         let res: string = '';
         if (conversionCache[amount + XnaUnit.LOCAL_CURRENCY]) {
           // cache hit! we reuse old value that supposedly doesn't have rounding errors
           const sats = conversionCache[amount + XnaUnit.LOCAL_CURRENCY];
-          res = satoshiToXNA(Number(sats));
+          res = satoshiToXNA(sats);
         } else {
-          res = fiatToXNA(Number(amount));
+          res = fiatToXNA(amount || '0');
         }
         res = removeTrailingZeros(res);
         return `${res} ${loc.units[XnaUnit.XNA]}`;
@@ -184,13 +184,13 @@ export const AmountInput: React.FC<AmountInputProps> = props => {
     let sats: string = '0';
     switch (previousUnit) {
       case XnaUnit.XNA:
-        sats = new BigNumber(amount).multipliedBy(100000000).toString();
+        sats = new BigNumber(amount).multipliedBy(100000000).integerValue(BigNumber.ROUND_DOWN).toFixed();
         break;
       case XnaUnit.SATS:
         sats = amount;
         break;
       case XnaUnit.LOCAL_CURRENCY:
-        sats = new BigNumber(fiatToXNA(+amount)).multipliedBy(100000000).toString();
+        sats = new BigNumber(fiatToXNA(amount || '0')).multipliedBy(100000000).integerValue(BigNumber.ROUND_DOWN).toFixed();
         break;
     }
     if (previousUnit === XnaUnit.LOCAL_CURRENCY && conversionCache[amount + previousUnit]) {
@@ -198,7 +198,7 @@ export const AmountInput: React.FC<AmountInputProps> = props => {
       sats = conversionCache[amount + previousUnit];
     }
 
-    const newInputValue = formatBalancePlain(+sats, newUnit, false);
+    const newInputValue = formatBalancePlain(sats, newUnit, false);
     console.log(`${log} ${sats}(sats) -> ${newInputValue}(${newUnit})`);
 
     if (newUnit === XnaUnit.LOCAL_CURRENCY && previousUnit === XnaUnit.SATS) {
@@ -220,9 +220,9 @@ export const AmountInput: React.FC<AmountInputProps> = props => {
         text = text.replace(',', '.');
         const split = text.split('.');
         if (split.length >= 2) {
-          text = `${parseInt(split[0], 10)}.${split[1]}`;
+          text = `${split[0].replace(/^0+(?=\d)/, '') || '0'}.${split[1]}`;
         } else {
-          text = `${parseInt(split[0], 10)}`;
+          text = `${split[0].replace(/^0+(?=\d)/, '') || '0'}`;
         }
 
         text = unit === XnaUnit.XNA ? text.replace(/[^0-9.]/g, '') : text.replace(/[^0-9]/g, '');
@@ -248,7 +248,7 @@ export const AmountInput: React.FC<AmountInputProps> = props => {
         text = text.replace(/(\..*)\./g, '$1');
       }
       if (text.startsWith('.')) {
-        text = '0.';
+        text = '0' + text;
       }
       onChangeText(text);
     },
@@ -263,7 +263,7 @@ export const AmountInput: React.FC<AmountInputProps> = props => {
 
   const copyMaxEstimate = useCallback(() => {
     if (maxSendableAmount == null) return;
-    const btcValue = removeTrailingZeros(new BigNumber(maxSendableAmount).dividedBy(100000000).toFixed(8));
+    const btcValue = removeTrailingZeros(new BigNumber(String(maxSendableAmount)).dividedBy(100000000).toFixed(8));
     Clipboard.setString(btcValue);
     triggerHapticFeedback(HapticFeedbackTypes.Selection);
   }, [maxSendableAmount]);
@@ -304,7 +304,7 @@ export const AmountInput: React.FC<AmountInputProps> = props => {
                 maxLength={maxLength}
                 ref={textInputRef}
                 editable={!isLoading && !disabled}
-                value={amount === XnaUnit.MAX ? loc.units.MAX : parseFloat(amount) >= 0 ? String(amount) : undefined}
+                value={amount === XnaUnit.MAX ? loc.units.MAX : !new BigNumber(amount || '0').isNegative() ? String(amount) : undefined}
                 placeholderTextColor={disabled ? colors.buttonDisabledTextColor : colors.alternativeTextColor2}
                 style={[styles.input, stylesHook.input]}
                 {...otherProps}
@@ -315,7 +315,7 @@ export const AmountInput: React.FC<AmountInputProps> = props => {
                 {maxSendableAmount != null && (
                   <Text style={[styles.maxEstimate, stylesHook.localCurrency]} onLongPress={copyMaxEstimate}>
                     {(isMaxAmountEstimate ? '≈ ' : '') +
-                      removeTrailingZeros(new BigNumber(maxSendableAmount).dividedBy(100000000).toFixed(8)) +
+                      removeTrailingZeros(new BigNumber(String(maxSendableAmount)).dividedBy(100000000).toFixed(8)) +
                       ' ' +
                       loc.units[XnaUnit.XNA]}
                   </Text>

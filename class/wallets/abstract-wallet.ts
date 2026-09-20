@@ -9,6 +9,8 @@
  * that in `AbstractNeuraiWallet` for `_engine`/`_backend`/etc).
  */
 
+import { decodeWalletAmounts, encodeWalletAmounts } from '../../blue_modules/neurai/walletAmountsCodec';
+
 import { sha256 } from '@noble/hashes/sha256';
 
 import { XnaUnit, Chain } from '../../models/xnaUnits';
@@ -30,7 +32,7 @@ export class AbstractWallet {
   public readonly typeReadable = AbstractWallet.typeReadable;
 
   static fromJson(obj: string): AbstractWallet {
-    const obj2 = JSON.parse(obj);
+    const obj2 = decodeWalletAmounts(JSON.parse(obj));
     const temp = new this();
     for (const key2 of Object.keys(obj2)) {
       // @ts-ignore: dynamic property copy is intentional
@@ -39,11 +41,18 @@ export class AbstractWallet {
     return temp;
   }
 
+  amountsStale = false;
+  amountsVersion = 1;
+
+  toJSON(): object {
+    return encodeWalletAmounts(this);
+  }
+
   _derivationPath?: string;
   label: string;
   secret: string;
-  balance: number;
-  unconfirmed_balance: number;
+  balance: bigint;
+  unconfirmed_balance: bigint;
   _address: string | false;
   _utxo: Utxo[];
   _lastTxFetch: number;
@@ -60,8 +69,8 @@ export class AbstractWallet {
   constructor() {
     this.label = '';
     this.secret = '';
-    this.balance = 0;
-    this.unconfirmed_balance = 0;
+    this.balance = 0n;
+    this.unconfirmed_balance = 0n;
     this._address = false;
     this._utxo = [];
     this._lastTxFetch = 0;
@@ -131,8 +140,8 @@ export class AbstractWallet {
   }
 
   /** @returns available balance (in sats) accounting for negative unconfirmed deltas */
-  getBalance(): number {
-    return this.balance + (this.getUnconfirmedBalance() < 0 ? this.getUnconfirmedBalance() : 0);
+  getBalance(): bigint {
+    return this.balance + (this.getUnconfirmedBalance() < 0 ? this.getUnconfirmedBalance() : 0n);
   }
 
   getPreferredBalanceUnit(): XnaUnit {
@@ -144,7 +153,7 @@ export class AbstractWallet {
     this.preferredBalanceUnit = Object.values(XnaUnit).includes(unit) ? unit : XnaUnit.XNA;
   }
 
-  getUnconfirmedBalance(): number {
+  getUnconfirmedBalance(): bigint {
     return this.unconfirmed_balance;
   }
 

@@ -1,3 +1,4 @@
+import { getWalletRpcUrlOverride, setWalletRpcUrlOverride } from '../../blue_modules/neurai/backendOverrides';
 /**
  * Edit the WSS backend URL for a single Neurai network.
  *
@@ -30,6 +31,8 @@ const NeuraiBackendEdit: React.FC = () => {
 
   const defaultUrl = useMemo(() => CHAIN_PARAMS[chainFor(network, 'legacy')].defaultWssUrl, [network]);
   const [url, setUrl] = useState<string>(defaultUrl);
+  const defaultRpc = CHAIN_PARAMS[chainFor(network, 'legacy')].defaultRpcUrl;
+  const [rpcUrl, setRpcUrl] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -39,11 +42,12 @@ const NeuraiBackendEdit: React.FC = () => {
       if (cancelled) return;
       const override = getWssUrlOverride(network);
       setUrl(override ?? defaultUrl);
+      setRpcUrl(getWalletRpcUrlOverride(network) ?? (override ? '' : defaultRpc));
     })();
     return () => {
       cancelled = true;
     };
-  }, [network, defaultUrl]);
+  }, [network, defaultUrl, defaultRpc]);
 
   const stylesHook = {
     root: { backgroundColor: colors.elevated, flex: 1 },
@@ -59,9 +63,14 @@ const NeuraiBackendEdit: React.FC = () => {
       presentAlert({ message: loc.settings.neurai_backend_edit_invalid });
       return;
     }
+    if (!/^https?:\/\/.+/i.test(rpcUrl.trim())) {
+      presentAlert({ message: loc.settings.neurai_backend_rpc_hint });
+      return;
+    }
     setSaving(true);
     try {
       const override = trimmed === defaultUrl ? null : trimmed;
+      await setWalletRpcUrlOverride(network, rpcUrl.trim() === defaultRpc && !override ? null : rpcUrl.trim());
       await setWssUrlOverride(network, override);
       navigation.goBack();
     } catch (err: any) {
@@ -69,11 +78,13 @@ const NeuraiBackendEdit: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [url, defaultUrl, network, navigation]);
+  }, [url, rpcUrl, defaultRpc, defaultUrl, network, navigation]);
 
   const onReset = useCallback(async () => {
     setSaving(true);
     try {
+      await setWalletRpcUrlOverride(network, null);
+      setRpcUrl(defaultRpc);
       await setWssUrlOverride(network, null);
       setUrl(defaultUrl);
     } catch (err: any) {
@@ -81,10 +92,9 @@ const NeuraiBackendEdit: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [network, defaultUrl]);
+  }, [network, defaultUrl, defaultRpc]);
 
-  const networkLabel =
-    network === 'mainnet' ? loc.wallets.neurai_network_mainnet : loc.wallets.neurai_network_testnet;
+  const networkLabel = network === 'mainnet' ? loc.wallets.neurai_network_mainnet : loc.wallets.neurai_network_testnet;
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} style={stylesHook.root} keyboardShouldPersistTaps="handled">
@@ -106,14 +116,25 @@ const NeuraiBackendEdit: React.FC = () => {
       </View>
 
       <BlueSpacing20 />
+      <BlueFormLabel>{loc.settings.neurai_backend_rpc_label}</BlueFormLabel>
+      <TextInput
+        testID="NeuraiBackendRpcInput"
+        value={rpcUrl}
+        onChangeText={setRpcUrl}
+        placeholder="https://your-service/rpc"
+        autoCapitalize="none"
+        autoCorrect={false}
+        editable={!saving}
+        style={[styles.inputBox, stylesHook.inputBox, stylesHook.input]}
+      />
+      <BlueText>{loc.settings.neurai_backend_rpc_hint}</BlueText>
+      <BlueSpacing20 />
       <Button testID="NeuraiBackendSave" title={loc.settings.save} onPress={onSave} disabled={saving} />
       <BlueSpacing20 />
       <Button testID="NeuraiBackendReset" title={loc.settings.neurai_backend_edit_reset} onPress={onReset} disabled={saving} />
 
       <BlueSpacing20 />
-      <BlueText style={[styles.hint, stylesHook.hint]}>
-        {loc.formatString(loc.settings.neurai_backend_edit_hint, { defaultUrl })}
-      </BlueText>
+      <BlueText style={[styles.hint, stylesHook.hint]}>{loc.formatString(loc.settings.neurai_backend_edit_hint, { defaultUrl })}</BlueText>
     </ScrollView>
   );
 };

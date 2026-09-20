@@ -1,3 +1,4 @@
+import { splitFormattedAmount } from '../blue_modules/neurai/amounts';
 import React, { useMemo, useCallback } from 'react';
 import { TouchableOpacity, Text, StyleSheet, LayoutAnimation, View } from 'react-native';
 import loc, { formatBalanceWithoutSuffix } from '../loc';
@@ -26,7 +27,7 @@ const TotalWalletsBalance: React.FC = React.memo(() => {
   // One number for the network on screen. The header switcher already names
   // it, so there is no badge and no second line for the other network.
   const totalSats = useMemo(
-    () => visibleWallets.reduce((sum, w) => (w.hideBalance ? sum : sum + (w.getBalance() || 0)), 0),
+    () => visibleWallets.reduce((sum, w) => (w.hideBalance ? sum : sum + (w.getBalance() ?? 0n)), 0n),
     [visibleWallets],
   );
 
@@ -108,14 +109,16 @@ const TotalWalletsBalance: React.FC = React.memo(() => {
           {(() => {
             // Split into integer / decimal / suffix so the decimal portion can
             // render smaller (matches the wallet card treatment).
-            const balanceText = String(headlineFormatted);
-            const match = balanceText.match(/^([^.]*)(\.\d+)?(.*)$/);
-            const intPart = match?.[1] ?? balanceText;
+            const balanceText = visibleWallets.some(w => !w.hideBalance && w.amountsStale)
+              ? loc.wallets.pull_to_refresh
+              : String(headlineFormatted);
+            const [integer, decimal, trailing] = splitFormattedAmount(balanceText);
+            const intPart = integer;
             // Total view: cap visible decimals at 4. Full precision is still
             // available in the Send screen's "Available" hint.
-            const decRaw = match?.[2] ?? '';
+            const decRaw = decimal;
             const decPart = decRaw.length > 5 ? decRaw.slice(0, 5) : decRaw;
-            const suffix = match?.[3] ?? '';
+            const suffix = trailing;
             return (
               <Text style={[styles.balance, { color: colors.foregroundColor }]} numberOfLines={1} ellipsizeMode="tail">
                 {intPart}

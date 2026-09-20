@@ -48,7 +48,7 @@ const ReceiveCustomAmountSheet = () => {
       }
 
       let normalizedAmount: string | number = trimmedAmount;
-      const numericAmount = Number(trimmedAmount);
+      const numericAmount = trimmedAmount;
 
       switch (nextUnit) {
         case XnaUnit.XNA:
@@ -58,7 +58,7 @@ const ReceiveCustomAmountSheet = () => {
           break;
         case XnaUnit.LOCAL_CURRENCY:
           if (AmountInput.conversionCache[trimmedAmount + XnaUnit.LOCAL_CURRENCY]) {
-            normalizedAmount = satoshiToXNA(Number(AmountInput.conversionCache[trimmedAmount + XnaUnit.LOCAL_CURRENCY]));
+            normalizedAmount = satoshiToXNA(AmountInput.conversionCache[trimmedAmount + XnaUnit.LOCAL_CURRENCY]);
           } else {
             normalizedAmount = fiatToXNA(numericAmount);
           }

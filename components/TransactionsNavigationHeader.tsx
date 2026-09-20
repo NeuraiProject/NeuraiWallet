@@ -1,3 +1,4 @@
+import { splitFormattedAmount } from '../blue_modules/neurai/amounts';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { ImageBackground, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -196,14 +197,14 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
                   {(() => {
                     // Split into integer / decimal / suffix so the decimal
                     // portion can render smaller while the integer stays big.
-                    const balanceText = String(balance);
-                    const match = balanceText.match(/^([^.]*)(\.\d+)?(.*)$/);
-                    const intPart = match?.[1] ?? balanceText;
+                    const balanceText = wallet.amountsStale ? loc.wallets.pull_to_refresh : String(balance);
+                    const [integer, decimal, trailing] = splitFormattedAmount(balanceText);
+                    const intPart = integer;
                     // Wallet header: cap visible decimals at 4. Full precision
                     // is still available in the Send screen's "Available" hint.
-                    const decRaw = match?.[2] ?? '';
+                    const decRaw = decimal;
                     const decPart = decRaw.length > 5 ? decRaw.slice(0, 5) : decRaw;
-                    const suffix = match?.[3] ?? '';
+                    const suffix = trailing;
                     return (
                       <Animated.Text
                         key={`wallet-balance-text-${wallet.getID?.() ?? ''}-${String(balance)}`} // force recreation on balance change for RTL correctness

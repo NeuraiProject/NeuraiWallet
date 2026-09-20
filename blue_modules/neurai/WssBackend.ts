@@ -1,3 +1,6 @@
+import { parseRpcJson } from '@neuraiproject/neurai-rpc';
+import { parseRawSats, parseMoneySats, satsToXna } from './amounts';
+import { RpcBackend } from './RpcBackend';
 /**
  * Backend for neurai-wallet-services.
  *
@@ -10,7 +13,7 @@ import { AddressDelta, BackendConfig, FeeEstimate, MempoolEntry, NeuraiBackend, 
 import { CHAIN_PARAMS, type NeuraiChainType } from './networkConfig';
 
 const WIRE_PROTOCOL = 'wss';
-const APP_PROTOCOL = 'wss/1';
+const APP_PROTOCOL = 'wss/2';
 const CLIENT_NAME = 'NeuraiWallet';
 const REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_FEE_RATE_XNA_PER_KB = 0.05;
@@ -48,13 +51,16 @@ type WssResponse<T> = {
 };
 
 type WssHello = {
+  protocol?: string;
+  exact_amounts?: boolean;
+  amounts?: string;
   tip_height?: number | null;
   tip_hash?: string | null;
 };
 
 type WssBalance = {
-  confirmed?: number;
-  unconfirmed?: number;
+  confirmed?: bigint | string | number;
+  unconfirmed?: bigint | string | number;
 };
 
 type WssHistory = {
@@ -62,21 +68,21 @@ type WssHistory = {
   height: number;
   tx_index?: number;
   asset?: string;
-  satoshis?: number;
+  satoshis?: bigint | string | number;
   block_time?: number;
 };
 
 type WssUtxo = {
   txid: string;
   vout: number;
-  satoshis: number;
+  satoshis: bigint | string | number;
   height?: number;
   asset?: string;
 };
 
 type WssMempool = {
   txid: string;
-  satoshis?: number;
+  satoshis?: bigint | string | number;
   prev_txid?: string | null;
   prev_vout?: number | null;
 };
@@ -120,7 +126,7 @@ export type AddressChangedEvent = {
   status?: string;
   reason?: 'block' | 'mempool' | 'resync' | 'manual';
   height?: number;
-  balance?: { confirmed?: number; unconfirmed?: number };
+  balance?: { confirmed?: bigint | string | number; unconfirmed?: bigint | string | number };
   delta?: {
     added_txids?: string[];
     confirmed_txids?: string[];
@@ -136,6 +142,8 @@ export class WssBackend implements NeuraiBackend {
   readonly chain: NeuraiChainType;
 
   private readonly url: string;
+  private readonly rpcBackend?: RpcBackend;
+  private exactAmounts = false;
   private readonly authToken?: string;
   private ws: WebSocketLike | null = null;
   private connectPromise: Promise<void> | null = null;
@@ -157,6 +165,7 @@ export class WssBackend implements NeuraiBackend {
 
   constructor(config: Omit<BackendConfig, 'kind'>) {
     this.chain = config.chain;
+    if (config.rpcUrl) this.rpcBackend = new RpcBackend({ ...config, url: config.rpcUrl });
     this.url = config.url;
     this.authToken = config.authToken || config.password;
   }
@@ -199,10 +208,9 @@ export class WssBackend implements NeuraiBackend {
         await this.sendRequest('address.unsubscribe.bulk', { addresses: toRemove });
       }
       if (toAdd.length > 0) {
-        const result = await this.sendRequest<{ results?: Array<{ address: string; status?: string; balance?: WssBalance; height?: number }> }>(
-          'address.subscribe.bulk',
-          { addresses: toAdd },
-        );
+        const result = await this.sendRequest<{
+          results?: Array<{ address: string; status?: string; balance?: WssBalance; height?: number }>;
+        }>('address.subscribe.bulk', { addresses: toAdd });
         this._processSubscribeResults(result?.results);
       }
     } catch (err) {
@@ -252,7 +260,6 @@ export class WssBackend implements NeuraiBackend {
     for (const r of results) {
       if (!r || typeof r.address !== 'string' || typeof r.status !== 'string') continue;
       const prev = this.knownStatuses.get(r.address);
-      this.knownStatuses.set(r.address, r.status);
       if (prev === r.status) continue;
       diffs++;
       const event: AddressChangedEvent = {
@@ -260,8 +267,11 @@ export class WssBackend implements NeuraiBackend {
         status: r.status,
         reason: 'resync',
         height: r.height,
-        balance: r.balance,
+        balance: r.balance
+          ? { confirmed: this.rawAmount(r.balance.confirmed), unconfirmed: this.rawAmount(r.balance.unconfirmed) }
+          : undefined,
       };
+      this.knownStatuses.set(r.address, r.status);
       for (const listener of this.addressChangedListeners) {
         try {
           listener(event);
@@ -274,24 +284,16 @@ export class WssBackend implements NeuraiBackend {
   }
 
   async rpc<T = unknown>(method: string, params: unknown[]): Promise<T> {
-    switch (method) {
-      case 'getblockcount':
-        return (await this.getTipHeight()) as T;
-      case 'getaddressbalance':
-        return (await this.getRpcAddressBalance(params)) as T;
-      case 'getaddressdeltas':
-        return (await this.getRpcAddressDeltas(params)) as T;
-      case 'getaddressutxos':
-        return (await this.getRpcAddressUtxos(params)) as T;
-      case 'getaddressmempool':
-        return (await this.getRpcAddressMempool(params)) as T;
-      case 'sendrawtransaction':
-        return (await this.broadcast(String(params[0] || ''))) as T;
-      case 'estimatesmartfee':
-        return { feerate: DEFAULT_FEE_RATE_XNA_PER_KB, blocks: Number(params[0] || 0) } as T;
-      default:
-        throw new Error(`WSS backend does not support RPC passthrough method: ${method}`);
+    if (!this.rpcBackend) throw new Error('Configure the RPC endpoint paired with this wallet service before sending');
+    return this.rpcBackend.rpc<T>(method, params);
+  }
+
+  private rawAmount(value: unknown): bigint {
+    const raw = parseRawSats(value);
+    if (!this.exactAmounts && (raw > BigInt(Number.MAX_SAFE_INTEGER) || raw < -BigInt(Number.MAX_SAFE_INTEGER))) {
+      throw new Error('This wallet service must support exact amounts (wss/2) to read this balance');
     }
+    return raw;
   }
 
   async getTipHeight(): Promise<number> {
@@ -299,11 +301,11 @@ export class WssBackend implements NeuraiBackend {
     return this.tipHeight;
   }
 
-  async getBalance(addresses: string[]): Promise<number> {
-    if (addresses.length === 0) return 0;
+  async getBalance(addresses: string[]): Promise<bigint> {
+    if (addresses.length === 0) return 0n;
     const states = await Promise.all(addresses.map(address => this.fetchAddressState(address, false, false)));
-    const sats = states.reduce((sum, state) => sum + (state.balance?.confirmed || 0), 0);
-    return sats / 1e8;
+    const sats = states.reduce((sum, state) => sum + parseMoneySats(this.rawAmount(state.balance?.confirmed)), 0n);
+    return sats;
   }
 
   async getAddressHistory(addresses: string[]): Promise<AddressDelta[]> {
@@ -349,34 +351,6 @@ export class WssBackend implements NeuraiBackend {
     } catch {
       return false;
     }
-  }
-
-  private async getRpcAddressBalance(params: unknown[]): Promise<{ balance: number; received: number }> {
-    const addresses = this.getAddressesParam(params);
-    const states = await Promise.all(addresses.map(address => this.fetchAddressState(address, false, false)));
-    const balance = states.reduce((sum, state) => sum + (state.balance?.confirmed || 0), 0);
-    return { balance, received: balance };
-  }
-
-  private async getRpcAddressDeltas(params: unknown[]): Promise<AddressDelta[]> {
-    return this.getAddressHistory(this.getAddressesParam(params));
-  }
-
-  private async getRpcAddressUtxos(params: unknown[]): Promise<NeuraiUtxo[]> {
-    const query = (params[0] || {}) as { addresses?: unknown; assetName?: unknown };
-    const addresses = this.getAddressesParam(params);
-    const assetName = typeof query.assetName === 'string' ? query.assetName : undefined;
-    const batches = await Promise.all(addresses.map(address => this.fetchFullUtxos(address, assetName)));
-    return batches.flat();
-  }
-
-  private async getRpcAddressMempool(params: unknown[]): Promise<MempoolEntry[]> {
-    return this.getMempool(this.getAddressesParam(params));
-  }
-
-  private getAddressesParam(params: unknown[]): string[] {
-    const query = (params[0] || {}) as { addresses?: unknown };
-    return Array.isArray(query.addresses) ? query.addresses.filter((a): a is string => typeof a === 'string' && a.length > 0) : [];
   }
 
   private async fetchHistoryPage(address: string, withAssets: boolean): Promise<AddressDelta[]> {
@@ -445,7 +419,7 @@ export class WssBackend implements NeuraiBackend {
       blockindex: index,
       height: item.height,
       index,
-      satoshis: item.satoshis || 0,
+      satoshis: this.rawAmount(item.satoshis),
       txid: item.txid,
       ...(typeof item.block_time === 'number' ? { time: item.block_time } : {}),
     };
@@ -458,9 +432,9 @@ export class WssBackend implements NeuraiBackend {
       height: item.height,
       outputIndex: item.vout,
       script: '',
-      satoshis: item.satoshis,
+      satoshis: parseMoneySats(this.rawAmount(item.satoshis)),
       txid: item.txid,
-      value: item.satoshis / 1e8,
+      value: satsToXna(this.rawAmount(item.satoshis)),
     };
   }
 
@@ -470,7 +444,7 @@ export class WssBackend implements NeuraiBackend {
       assetName: 'XNA',
       txid: item.txid,
       index,
-      satoshis: item.satoshis || 0,
+      satoshis: this.rawAmount(item.satoshis),
       timestamp: Math.floor(Date.now() / 1000),
       prevtxid: item.prev_txid || '',
       prevout: item.prev_vout ?? 0,
@@ -478,14 +452,28 @@ export class WssBackend implements NeuraiBackend {
   }
 
   private async ensureConnected(): Promise<void> {
-    if (isOpen(this.ws)) return;
     if (this.connectPromise) return this.connectPromise;
+    if (isOpen(this.ws)) return;
+    const attempt = this.openConnection(APP_PROTOCOL).catch(error => {
+      if (error?.code !== 1001) throw error;
+      // Legacy services close the socket after rejecting wss/2. Negotiate v1
+      // on a fresh connection, sharing the retry with all concurrent callers.
+      return this.openConnection('wss/1');
+    });
+    this.connectPromise = attempt;
+    try {
+      await attempt;
+    } finally {
+      if (this.connectPromise === attempt) this.connectPromise = null;
+    }
+  }
 
+  private openConnection(protocol: string): Promise<void> {
     const protocols = this.authToken ? [WIRE_PROTOCOL, `auth.${this.authToken}`] : [WIRE_PROTOCOL];
     const ws = new (getWebSocketCtor())(this.url, protocols);
     this.ws = ws;
 
-    this.connectPromise = new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error(`WSS connection timeout: ${this.url}`));
         this.close();
@@ -497,17 +485,21 @@ export class WssBackend implements NeuraiBackend {
       };
       ws.onclose = () => {
         clearTimeout(timer);
+        if (this.ws !== ws) return;
         this.rejectPending(new Error('WSS connection closed'));
         this.ws = null;
-        this.connectPromise = null;
+        this.exactAmounts = false;
+        reject(new Error('WSS connection closed'));
       };
       ws.onopen = () => {
         this.sendRequest<WssHello>('hello', {
           client: CLIENT_NAME,
           network: CHAIN_PARAMS[this.chain].network,
-          protocol: APP_PROTOCOL,
+          protocol,
         })
           .then(async hello => {
+            this.exactAmounts = hello.protocol === 'wss/2' && hello.exact_amounts === true && hello.amounts === 'string-sats';
+            if (hello.protocol === 'wss/2' && !this.exactAmounts) throw new Error('Wallet service did not confirm exact amounts');
             clearTimeout(timer);
             if (typeof hello.tip_height === 'number') this.tipHeight = hello.tip_height;
             // Re-subscribe to any addresses the wallet asked for in a previous
@@ -538,8 +530,6 @@ export class WssBackend implements NeuraiBackend {
           });
       };
     });
-
-    return this.connectPromise;
   }
 
   private async serviceRequest<T>(method: string, params: Record<string, unknown>): Promise<T> {
@@ -568,7 +558,7 @@ export class WssBackend implements NeuraiBackend {
     const text = typeof data === 'string' ? data : String(data ?? '');
     let msg: WssResponse<unknown>;
     try {
-      msg = JSON.parse(text) as WssResponse<unknown>;
+      msg = parseRpcJson(text) as WssResponse<unknown>;
     } catch {
       return;
     }
@@ -596,6 +586,14 @@ export class WssBackend implements NeuraiBackend {
     if (method === 'address.changed') {
       const event = params as AddressChangedEvent;
       if (!event || typeof event.address !== 'string') return;
+      if (event.balance) {
+        try {
+          event.balance = { confirmed: this.rawAmount(event.balance.confirmed), unconfirmed: this.rawAmount(event.balance.unconfirmed) };
+        } catch (error) {
+          console.warn('Invalid wallet service amount', error);
+          return;
+        }
+      }
       if (typeof event.status === 'string') {
         const prev = this.knownStatuses.get(event.address);
         this.knownStatuses.set(event.address, event.status);
@@ -628,6 +626,6 @@ export class WssBackend implements NeuraiBackend {
       // ignore
     }
     this.ws = null;
-    this.connectPromise = null;
+    this.exactAmounts = false;
   }
 }

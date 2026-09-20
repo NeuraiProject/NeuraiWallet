@@ -14,7 +14,7 @@ export type Utxo = {
   address: string;
   txid: string;
   vout: number;
-  value: number;
+  value: bigint;
   txhex?: string;
   confirmations?: number;
   wif?: string | false;
@@ -28,11 +28,11 @@ type TransactionInput = {
   sequence: number;
   addresses?: string[];
   address?: string;
-  value?: number;
+  value?: bigint;
 };
 
 export type TransactionOutput = {
-  value: number;
+  value: bigint;
   n: number;
   scriptPubKey: {
     asm: string;
@@ -59,11 +59,11 @@ export type Transaction = {
   blocktime: number;
   /** seconds, not milliseconds */
   timestamp: number;
-  value?: number;
+  value?: bigint;
   /** Neurai asset moved by this transaction (absent for plain XNA transactions). */
   assetName?: string;
   /** Signed asset amount in full units (negative = sent, positive = received). */
-  assetAmount?: number;
+  assetAmount?: string;
 };
 
 /**

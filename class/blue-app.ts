@@ -1,3 +1,4 @@
+import { encodeWalletAmounts } from '../blue_modules/neurai/walletAmountsCodec';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sha256 } from '@noble/hashes/sha256';
 import RNFS from 'react-native-fs';
@@ -482,7 +483,7 @@ export class BlueApp {
           delete keyCloned._bip47_instance; // since it wont be restored into a proper class instance
         }
 
-        walletsToSave.push(JSON.stringify({ ...keyCloned, type: keyCloned.type }));
+        walletsToSave.push(JSON.stringify(encodeWalletAmounts({ ...keyCloned, type: keyCloned.type })));
       }
       if (realm) realm.close();
 
@@ -667,8 +668,8 @@ export class BlueApp {
   /**
    * Getter for a sum of all balances of all wallets
    */
-  getBalance = (): number => {
-    let finalBalance = 0;
+  getBalance = (): bigint => {
+    let finalBalance = 0n;
     for (const wal of this.wallets) {
       finalBalance += wal.getBalance();
     }

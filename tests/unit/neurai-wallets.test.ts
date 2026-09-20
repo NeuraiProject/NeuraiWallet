@@ -131,7 +131,7 @@ describe('Neurai wallets', () => {
   });
 
   describe('pending (optimistic) transactions', () => {
-    const confirmedTx = (txid: string, value: number, confirmations: number) => ({
+    const confirmedTx = (txid: string, value: bigint, confirmations: number) => ({
       txid,
       hash: txid,
       version: 0,
@@ -151,65 +151,65 @@ describe('Neurai wallets', () => {
 
     it('shows a just-broadcast send as a 0-conf entry and subtracts it from the balance', () => {
       const w = new NeuraiHDWallet();
-      w.balance = 1_000_000;
-      w.addPendingTx('aa', -300_000);
+      w.balance = 1_000_000n;
+      w.addPendingTx('aa', -300_000n);
       const txs = w.getTransactions();
       assert.strictEqual(txs.length, 1);
       assert.strictEqual(txs[0].txid, 'aa');
       assert.strictEqual(txs[0].confirmations, 0);
-      assert.strictEqual(txs[0].value, -300_000);
-      assert.strictEqual(w.getUnconfirmedBalance(), -300_000);
-      assert.strictEqual(w.getBalance(), 700_000);
+      assert.strictEqual(txs[0].value, -300_000n);
+      assert.strictEqual(w.getUnconfirmedBalance(), -300_000n);
+      assert.strictEqual(w.getBalance(), 700_000n);
     });
 
     it('drops the pending entry once the tx confirms in the cache', () => {
       const w = new NeuraiHDWallet();
-      w.balance = 700_000; // backend confirmed balance after the spend mined
-      w.addPendingTx('aa', -300_000);
-      (w as any)._txCache = [confirmedTx('aa', -300_000, 1)];
+      w.balance = 700_000n; // backend confirmed balance after the spend mined
+      w.addPendingTx('aa', -300_000n);
+      (w as any)._txCache = [confirmedTx('aa', -300_000n, 1)];
       const txs = w.getTransactions();
       assert.strictEqual(txs.length, 1);
       assert.strictEqual(txs[0].confirmations, 1);
-      assert.strictEqual(w.getUnconfirmedBalance(), 0);
-      assert.strictEqual(w.getBalance(), 700_000);
+      assert.strictEqual(w.getUnconfirmedBalance(), 0n);
+      assert.strictEqual(w.getBalance(), 700_000n);
     });
 
     it('hides the duplicate but keeps deducting while the tx is only 0-conf in the cache', () => {
       const w = new NeuraiHDWallet();
-      w.balance = 1_000_000; // confirmed balance unchanged while in mempool
-      w.addPendingTx('aa', -300_000);
-      (w as any)._txCache = [confirmedTx('aa', -300_000, 0)]; // backend surfaced it 0-conf
+      w.balance = 1_000_000n; // confirmed balance unchanged while in mempool
+      w.addPendingTx('aa', -300_000n);
+      (w as any)._txCache = [confirmedTx('aa', -300_000n, 0)]; // backend surfaced it 0-conf
       assert.strictEqual(w.getTransactions().length, 1, 'no duplicate row');
-      assert.strictEqual(w.getUnconfirmedBalance(), -300_000, 'still deducted until confirmed');
-      assert.strictEqual(w.getBalance(), 700_000);
+      assert.strictEqual(w.getUnconfirmedBalance(), -300_000n, 'still deducted until confirmed');
+      assert.strictEqual(w.getBalance(), 700_000n);
     });
 
     it('expires a pending entry that never confirms (TTL)', () => {
       const w = new NeuraiHDWallet();
-      w.balance = 1_000_000;
-      w.addPendingTx('aa', -300_000);
+      w.balance = 1_000_000n;
+      w.addPendingTx('aa', -300_000n);
       (w as any)._pendingTxs[0].timestamp = Math.floor(Date.now() / 1000) - 25 * 60 * 60;
       assert.strictEqual(w.getTransactions().length, 0);
-      assert.strictEqual(w.getUnconfirmedBalance(), 0);
-      assert.strictEqual(w.getBalance(), 1_000_000);
+      assert.strictEqual(w.getUnconfirmedBalance(), 0n);
+      assert.strictEqual(w.getBalance(), 1_000_000n);
     });
 
     it('does not double-count against a server-reported unconfirmed balance', () => {
       const w = new NeuraiPQWallet();
-      w.balance = 1_000_000;
-      w.unconfirmed_balance = -300_000; // PQ push already reflected the same spend
-      w.addPendingTx('aa', -300_000);
-      assert.strictEqual(w.getUnconfirmedBalance(), -300_000); // min(-300k, -300k), not -600k
-      assert.strictEqual(w.getBalance(), 700_000);
+      w.balance = 1_000_000n;
+      w.unconfirmed_balance = -300_000n; // PQ push already reflected the same spend
+      w.addPendingTx('aa', -300_000n);
+      assert.strictEqual(w.getUnconfirmedBalance(), -300_000n); // min(-300k, -300k), not -600k
+      assert.strictEqual(w.getBalance(), 700_000n);
     });
 
     it('ignores a duplicate addPendingTx for the same txid', () => {
       const w = new NeuraiHDWallet();
-      w.balance = 1_000_000;
-      w.addPendingTx('aa', -300_000);
-      w.addPendingTx('aa', -300_000);
+      w.balance = 1_000_000n;
+      w.addPendingTx('aa', -300_000n);
+      w.addPendingTx('aa', -300_000n);
       assert.strictEqual(w.getTransactions().length, 1);
-      assert.strictEqual(w.getUnconfirmedBalance(), -300_000);
+      assert.strictEqual(w.getUnconfirmedBalance(), -300_000n);
     });
   });
 
@@ -223,7 +223,7 @@ describe('Neurai wallets', () => {
     it('uses legacy input/output sizes (148 / 34) and base 10', () => {
       assert.strictEqual(estimateNeuraiTxSizeKb([legacyScript], ['NfooLegacyAddress']), 192 / 1024);
       // ceil((192/1024) * 0.05 XNA/kB * 1e8) = ceil(937500)
-      assert.strictEqual(estimateNeuraiFeeSats([legacyScript], ['NfooLegacyAddress'], 0.05), 937_500);
+      assert.strictEqual(estimateNeuraiFeeSats([legacyScript], ['NfooLegacyAddress'], 0.05), 937_500n);
     });
 
     it('uses PQ input/output sizes (977 / 43) and base 12 for AuthScript', () => {
@@ -233,7 +233,36 @@ describe('Neurai wallets', () => {
       // "min relay fee not met".
       assert.strictEqual(estimateNeuraiTxSizeKb([pqScript], ['nq1footestaddress']), 1032 / 1024);
       // ceil((1032/1024) * 0.05 XNA/kB * 1e8) = ceil(5039062.5)
-      assert.strictEqual(estimateNeuraiFeeSats([pqScript], ['nq1footestaddress'], 0.05), 5_039_063);
+      assert.strictEqual(estimateNeuraiFeeSats([pqScript], ['nq1footestaddress'], 0.05), 5_039_063n);
     });
   });
+});
+
+describe('exact send preflight', () => {
+  it('rejects duplicated recipients and invalid precision before building', async () => {
+    const wallet = NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC);
+    await expect(
+      wallet.buildSendTransaction([
+        { address: 'same', amount: '1' },
+        { address: 'same', amount: '2' },
+      ]),
+    ).rejects.toThrow('Duplicate');
+    await expect(wallet.buildSendTransaction([{ address: 'same', amount: '0.000000001' }])).rejects.toThrow('8 decimal');
+  });
+  it('does not unlock an obsolete wallet when balance refresh fails', async () => {
+    const wallet = NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC);
+    wallet.amountsStale = true;
+    const backend = createDefaultRpcBackend('testnet', 'legacy');
+    jest.spyOn(backend, 'getBalance').mockRejectedValue(new Error('Offline'));
+    wallet.setBackend(backend);
+    await expect(wallet.fetchBalance()).rejects.toThrow('Offline');
+    expect(wallet.amountsStale).toBe(true);
+  });
+});
+
+it('subtracts a one-satoshi pending debit above the safe integer boundary exactly', () => {
+  const wallet = new NeuraiHDWallet();
+  wallet.balance = 9007199254740993n;
+  wallet.addPendingTx('one-satoshi', -1n);
+  expect(wallet.getBalance()).toBe(9007199254740992n);
 });

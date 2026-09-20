@@ -30,7 +30,8 @@ describe('currency', () => {
     assert.strictEqual(satoshiToXNA(1), '0.00000001');
     assert.strictEqual(satoshiToXNA(-1), '-0.00000001');
     assert.strictEqual(satoshiToXNA(100000000), '1');
-    assert.strictEqual(satoshiToXNA(123456789123456789), '1234567891.2345678'); // eslint-disable-line @typescript-eslint/no-loss-of-precision
+    assert.strictEqual(satoshiToXNA(123456789123456789n), '1234567891.23456789');
+    assert.throws(() => satoshiToXNA(Number('123456789123456789')), /exact integer/);
 
     _setPreferredFiatCurrency(FiatUnit.JPY);
     _setExchangeRate('XNA_JPY', 1043740.8614);

@@ -7,6 +7,9 @@
  * declare the (small) surface we use locally.
  */
 declare module '@neuraiproject/neurai-rpc' {
+  export function parseRpcJson(text: string): unknown;
+  export function stringifyRpcJson(value: unknown): string;
+  export function rpcNumber(value: string): unknown;
   /** All known JSON-RPC method names exposed by a Neurai full node. */
   export const methods: Record<string, string>;
 

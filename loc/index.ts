@@ -1,3 +1,4 @@
+import { parseRawSats, formatSatsGrouped, formatXnaGrouped, type SatsInput } from '../blue_modules/neurai/amounts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import BigNumber from 'bignumber.js';
 import dayjs from 'dayjs';
@@ -366,15 +367,16 @@ export const removeTrailingZeros = (value: number | string): string => {
  * @param withFormatting {boolean} Works only with `XnaUnit.SATS`, makes spaces wetween groups of 000
  * @returns {string}
  */
-export function formatBalance(balance: number, toUnit: string, withFormatting = false): string {
+export function formatBalance(balance: SatsInput, toUnit: string, withFormatting = false): string {
+  balance = parseRawSats(balance);
   if (toUnit === undefined) {
     return balance + ' ' + loc.units[XnaUnit.XNA];
   }
   if (toUnit === XnaUnit.XNA) {
-    const value = new BigNumber(balance).dividedBy(100000000).toFixed(8);
-    return removeTrailingZeros(value) + ' ' + loc.units[XnaUnit.XNA];
+    const value = new BigNumber(String(balance)).dividedBy(100000000).toFixed(8);
+    return (withFormatting ? formatXnaGrouped(balance) : removeTrailingZeros(value)) + ' ' + loc.units[XnaUnit.XNA];
   } else if (toUnit === XnaUnit.SATS) {
-    return (withFormatting ? new Intl.NumberFormat().format(balance).toString() : String(balance)) + ' ' + loc.units[XnaUnit.SATS];
+    return (withFormatting ? formatSatsGrouped(balance) : String(balance)) + ' ' + loc.units[XnaUnit.SATS];
   } else {
     console.debug('[UnitSwitch/Fiat] formatBalance to fiat', { balance, unit: toUnit, withFormatting });
     return satoshiToLocalCurrency(balance);
@@ -388,15 +390,16 @@ export function formatBalance(balance: number, toUnit: string, withFormatting = 
  * @param withFormatting {boolean} Works only with `XnaUnit.SATS`, makes spaces wetween groups of 000
  * @returns {string}
  */
-export function formatBalanceWithoutSuffix(balance = 0, toUnit: string, withFormatting = false): string | number {
+export function formatBalanceWithoutSuffix(balance: SatsInput = 0n, toUnit: string, withFormatting = false): string {
+  balance = parseRawSats(balance);
   if (toUnit === undefined) {
-    return balance;
+    return String(balance);
   }
   if (toUnit === XnaUnit.XNA) {
-    const value = new BigNumber(balance).dividedBy(100000000).toFixed(8);
-    return removeTrailingZeros(value);
+    const value = new BigNumber(String(balance)).dividedBy(100000000).toFixed(8);
+    return withFormatting ? formatXnaGrouped(balance) : removeTrailingZeros(value);
   } else if (toUnit === XnaUnit.SATS) {
-    return withFormatting ? new Intl.NumberFormat().format(balance).toString() : String(balance);
+    return withFormatting ? formatSatsGrouped(balance) : String(balance);
   } else {
     console.debug('[UnitSwitch/Fiat] formatBalanceWithoutSuffix to fiat', { balance, unit: toUnit, withFormatting });
     return satoshiToLocalCurrency(balance);
@@ -411,8 +414,13 @@ export function formatBalanceWithoutSuffix(balance = 0, toUnit: string, withForm
  * @param withFormatting {boolean} Works only with `XnaUnit.SATS`, makes spaces wetween groups of 000
  * @returns {string}
  */
-export function formatBalancePlain(balance = 0, toUnit: string, withFormatting = false) {
-  console.debug('[UnitSwitch/Fiat] formatBalancePlain', { balance, unit: toUnit, withFormatting });
+export function formatBalancePlain(balance: SatsInput = 0n, toUnit: string, withFormatting = false) {
+  if (toUnit === XnaUnit.LOCAL_CURRENCY) {
+    // Editable amounts use plain decimal text, independent of display locale.
+    const plain = satoshiToLocalCurrency(balance, false);
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+    return _leaveNumbersAndDots(/[eE]/.test(plain) ? new BigNumber(plain).toFixed() : plain);
+  }
   const newInputValue = formatBalanceWithoutSuffix(balance, toUnit, withFormatting);
   // eslint-disable-next-line @typescript-eslint/no-use-before-define
   return _leaveNumbersAndDots(newInputValue.toString());

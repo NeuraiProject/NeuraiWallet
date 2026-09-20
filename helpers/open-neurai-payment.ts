@@ -22,7 +22,7 @@ interface Navigator {
 const sendParams = (walletID: string, payment: NeuraiPaymentUri) => ({
   walletID,
   address: payment.address,
-  amount: payment.amount !== undefined && payment.amount !== '' ? Number(payment.amount) : undefined,
+  amount: payment.amount !== undefined && payment.amount !== '' ? payment.amount : undefined,
 });
 
 /**

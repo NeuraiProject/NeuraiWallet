@@ -1,3 +1,4 @@
+import { parseRawSats, parseMoneySats } from './amounts';
 /**
  * RPC backend for Neurai. Talks to a Neurai full node via JSON-RPC.
  *
@@ -12,14 +13,11 @@ import { getRPC, methods } from '@neuraiproject/neurai-rpc';
 import { AddressDelta, BackendConfig, FeeEstimate, MempoolEntry, NeuraiBackend, NeuraiUtxo } from './NeuraiBackend';
 import type { NeuraiChainType } from './networkConfig';
 
-/** One full XNA, in satoshis. Same constant the lib uses internally. */
-const ONE_FULL_COIN = 1e8;
-
 type RpcCaller = <T = unknown>(method: string, params: unknown[]) => Promise<T>;
 
 interface AddressBalanceResponse {
-  balance: number;
-  received: number;
+  balance: string | number;
+  received: string | number;
 }
 
 interface EstimateSmartFeeResponse {
@@ -48,25 +46,28 @@ export class RpcBackend implements NeuraiBackend {
     return this.rpcCaller<number>(methods.getblockcount, []);
   }
 
-  async getBalance(addresses: string[]): Promise<number> {
-    if (addresses.length === 0) return 0;
+  async getBalance(addresses: string[]): Promise<bigint> {
+    if (addresses.length === 0) return 0n;
     const response = await this.rpcCaller<AddressBalanceResponse>(methods.getaddressbalance, [{ addresses }, false]);
-    return response.balance / ONE_FULL_COIN;
+    return parseMoneySats(response.balance);
   }
 
   async getAddressHistory(addresses: string[]): Promise<AddressDelta[]> {
     if (addresses.length === 0) return [];
-    return this.rpcCaller<AddressDelta[]>(methods.getaddressdeltas, [{ addresses }]);
+    const rows = await this.rpcCaller<AddressDelta[]>(methods.getaddressdeltas, [{ addresses }]);
+    return rows.map(row => ({ ...row, satoshis: parseRawSats(row.satoshis) }));
   }
 
   async getUtxos(addresses: string[]): Promise<NeuraiUtxo[]> {
     if (addresses.length === 0) return [];
-    return this.rpcCaller<NeuraiUtxo[]>(methods.getaddressutxos, [{ addresses }]);
+    const rows = await this.rpcCaller<NeuraiUtxo[]>(methods.getaddressutxos, [{ addresses }]);
+    return rows.map(row => ({ ...row, satoshis: parseMoneySats(row.satoshis), value: undefined }));
   }
 
   async getMempool(addresses: string[]): Promise<MempoolEntry[]> {
     if (addresses.length === 0) return [];
-    return this.rpcCaller<MempoolEntry[]>(methods.getaddressmempool, [{ addresses }]);
+    const rows = await this.rpcCaller<MempoolEntry[]>(methods.getaddressmempool, [{ addresses }]);
+    return rows.map(row => ({ ...row, satoshis: parseRawSats(row.satoshis) }));
   }
 
   async broadcast(rawTxHex: string): Promise<string> {

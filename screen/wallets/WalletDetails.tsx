@@ -87,7 +87,7 @@ const WalletDetails: React.FC = () => {
       // Remove any non-numeric characters before comparison
       const cleanedConfirmation = (walletBalanceConfirmation || '').replace(/[^0-9]/g, '');
 
-      if (Number(cleanedConfirmation) === wallet.getBalance()) {
+      if (cleanedConfirmation.length > 0 && BigInt(cleanedConfirmation) === wallet.getBalance()) {
         navigateToOverviewAndDeleteWallet();
         triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
       } else {

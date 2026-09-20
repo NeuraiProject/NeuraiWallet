@@ -1,3 +1,4 @@
+import { parseRawSats, xnaToSats, satsToXna, type SatsInput } from './neurai/amounts';
 import BigNumber from 'bignumber.js';
 import DefaultPreference from 'react-native-default-preference';
 import * as RNLocalize from 'react-native-localize';
@@ -268,7 +269,7 @@ async function initCurrencyDaemon(clearLastUpdatedTime: boolean = false): Promis
   await updateExchangeRate();
 }
 
-function satoshiToLocalCurrency(satoshi: number, format: boolean = true): string {
+function satoshiToLocalCurrency(satoshi: SatsInput, format: boolean = true): string {
   const exchangeRateKey = XNA_PREFIX + preferredFiatCurrency.endPointKey;
   const exchangeRate = exchangeRates[exchangeRateKey];
 
@@ -277,7 +278,7 @@ function satoshiToLocalCurrency(satoshi: number, format: boolean = true): string
     return '...';
   }
 
-  const btcAmount = new BigNumber(satoshi).dividedBy(100000000);
+  const btcAmount = new BigNumber(parseRawSats(satoshi).toString()).dividedBy(100000000);
   const convertedAmount = btcAmount.multipliedBy(exchangeRate);
   let formattedAmount: string;
 
@@ -298,7 +299,7 @@ function satoshiToLocalCurrency(satoshi: number, format: boolean = true): string
 }
 
 function XNAToLocalCurrency(bitcoin: BigNumber.Value): string {
-  const sat = new BigNumber(bitcoin).multipliedBy(100000000).toNumber();
+  const sat = xnaToSats(new BigNumber(bitcoin).toFixed());
   return satoshiToLocalCurrency(sat);
 }
 
@@ -338,15 +339,15 @@ async function mostRecentFetchedRate(): Promise<CurrencyRate> {
   }
 }
 
-function satoshiToXNA(satoshi: number): string {
-  return new BigNumber(satoshi).dividedBy(100000000).toString(10);
+function satoshiToXNA(satoshi: SatsInput): string {
+  return satsToXna(parseRawSats(satoshi));
 }
 
-function xnaToSatoshi(btc: BigNumber.Value): number {
-  return new BigNumber(btc).multipliedBy(100000000).toNumber();
+function xnaToSatoshi(btc: BigNumber.Value): bigint {
+  return xnaToSats(new BigNumber(btc).toFixed());
 }
 
-function fiatToXNA(fiatFloat: number): string {
+function fiatToXNA(fiatFloat: string | number): string {
   const exchangeRateKey = XNA_PREFIX + preferredFiatCurrency.endPointKey;
   const exchangeRate = exchangeRates[exchangeRateKey];
 
@@ -355,7 +356,7 @@ function fiatToXNA(fiatFloat: number): string {
   }
 
   const btcAmount = new BigNumber(fiatFloat).dividedBy(exchangeRate);
-  return btcAmount.toFixed(8);
+  return btcAmount.toFixed(8, BigNumber.ROUND_DOWN);
 }
 
 function getCurrencySymbol(): string {

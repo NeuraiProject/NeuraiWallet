@@ -28,6 +28,8 @@ export interface BackendConfig {
   password?: string;
   /** Optional neurai-wallet-services auth token. Sent as `auth.<token>` subprotocol. */
   authToken?: string;
+  /** Explicit companion RPC endpoint for a WSS service. */
+  rpcUrl?: string;
 }
 
 /** Address-level activity item. Mirrors `IAddressDelta` from neurai-jswallet. */
@@ -37,7 +39,7 @@ export interface AddressDelta {
   blockindex: number;
   height: number;
   index: number;
-  satoshis: number;
+  satoshis: bigint;
   txid: string;
   prevtxid?: string;
   /** Unix timestamp (seconds) of the block this delta was confirmed in.
@@ -53,9 +55,9 @@ export interface NeuraiUtxo {
   height?: number;
   outputIndex: number;
   script: string;
-  satoshis: number;
+  satoshis: bigint;
   txid: string;
-  value: number;
+  value?: string;
 }
 
 export interface MempoolEntry {
@@ -63,7 +65,7 @@ export interface MempoolEntry {
   assetName: string;
   txid: string;
   index: number;
-  satoshis: number;
+  satoshis: bigint;
   timestamp: number;
   prevtxid: string;
   prevout: number;
@@ -99,8 +101,8 @@ export interface NeuraiBackend {
   /** Latest block height. */
   getTipHeight(): Promise<number>;
 
-  /** Aggregate XNA balance across the given addresses. */
-  getBalance(addresses: string[]): Promise<number>;
+  /** Aggregate balance in satoshis across the given addresses. */
+  getBalance(addresses: string[]): Promise<bigint>;
 
   /** Address deltas — basis for the transaction history list. */
   getAddressHistory(addresses: string[]): Promise<AddressDelta[]>;
