@@ -16,7 +16,14 @@ import { InteractionManager } from 'react-native';
 import NeuraiJsWallet from '@neuraiproject/neurai-jswallet';
 import NeuraiKey from '@neuraiproject/neurai-key';
 import { type IDelta, type IHistoryItem } from '@neuraiproject/neurai-history-list';
-import { createPaymentTransaction, createStandardAssetTransferTransaction } from '@neuraiproject/neurai-create-transaction';
+import {
+  createPaymentTransaction,
+  createStandardAssetTransferTransaction,
+  decimalToSatoshis,
+  toRawInteger,
+  type DecimalAmount,
+  type RawAmount,
+} from '@neuraiproject/neurai-create-transaction';
 
 import { markerForChain } from '../../blue_modules/neurai/assetMarker';
 import { sign as signNeuraiTransaction } from '@neuraiproject/neurai-sign-transaction';
@@ -46,6 +53,17 @@ import { Transaction, Utxo } from './types';
 type NeuraiEngine = Awaited<ReturnType<typeof NeuraiJsWallet.createInstance>>;
 
 const ONE_FULL_COIN = 1e8;
+
+/**
+ * neurai-create-transaction 0.8.1 / jswallet 0.15.3 widened every monetary
+ * field to `DecimalAmount` / `RawAmount` (number | string | bigint) so amounts
+ * above `Number.MAX_SAFE_INTEGER` survive without rounding. Our result shapes
+ * still speak `number`, so we normalise at the boundary through the packages'
+ * exact parsers instead of `x * 1e8` float math.
+ */
+const decimalToSats = (value: DecimalAmount): number => Number(decimalToSatoshis(value));
+const rawToSats = (value: RawAmount): number => Number(toRawInteger(value));
+const decimalToNumber = (value: DecimalAmount): number => Number(value);
 const FEE_TARGET_BLOCKS = 6;
 /** A locally-tracked pending send times out after this long if it never
  * confirms (e.g. dropped or replaced in the mempool) so it stops subtracting
@@ -1081,9 +1099,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       return {
         signedHex: result.debug.signedTransaction ?? '',
         unsignedHex: result.debug.rawUnsignedTransaction ?? '',
-        fee: result.debug.fee,
-        sentAmountSats: Math.round(result.debug.amount * ONE_FULL_COIN),
-        netDebitSats: Math.round(result.debug.xnaAmount * ONE_FULL_COIN),
+        fee: decimalToNumber(result.debug.fee),
+        sentAmountSats: decimalToSats(result.debug.amount),
+        netDebitSats: decimalToSats(result.debug.xnaAmount),
         debug: result.debug,
       };
     }
@@ -1094,9 +1112,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     return {
       signedHex: result.debug.signedTransaction ?? '',
       unsignedHex: result.debug.rawUnsignedTransaction ?? '',
-      fee: result.debug.fee,
-      sentAmountSats: Math.round(result.debug.amount * ONE_FULL_COIN),
-      netDebitSats: Math.round(result.debug.xnaAmount * ONE_FULL_COIN),
+      fee: decimalToNumber(result.debug.fee),
+      sentAmountSats: decimalToSats(result.debug.amount),
+      netDebitSats: decimalToSats(result.debug.xnaAmount),
       debug: result.debug,
     };
   }
@@ -1124,12 +1142,12 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     });
     const signedHex = result.signedTransaction ?? '';
     if (!signedHex) throw new Error('engine.transferAsset returned no signed transaction');
-    const feeSats = Math.round((result.fee ?? 0) * ONE_FULL_COIN);
+    const feeSats = decimalToSats(result.fee ?? 0);
     const totalAmount = targets.reduce((sum, t) => sum + t.amount, 0);
     return {
       signedHex,
       unsignedHex: result.rawTx ?? '',
-      fee: result.fee ?? 0,
+      fee: decimalToNumber(result.fee ?? 0),
       // An asset transfer sends ~0 XNA to the recipient; only the fee leaves the wallet.
       sentAmountSats: 0,
       netDebitSats: feeSats,
@@ -1275,9 +1293,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     // by a mempool tx so a send-max issued right after another send can't
     // double-spend them.
     const spentInMempool = new Set(mempool.map(m => `${m.prevtxid}:${m.prevout}`));
-    const utxos = allUtxos.filter(u => u.assetName === 'XNA' && u.satoshis > 0 && !spentInMempool.has(`${u.txid}:${u.outputIndex}`));
+    const utxos = allUtxos.filter(u => u.assetName === 'XNA' && rawToSats(u.satoshis) > 0 && !spentInMempool.has(`${u.txid}:${u.outputIndex}`));
     if (utxos.length === 0) throw new Error('No spendable XNA funds to send');
-    const totalIn = utxos.reduce((sum, u) => sum + u.satoshis, 0);
+    const totalIn = utxos.reduce((sum, u) => sum + rawToSats(u.satoshis), 0);
 
     const feeRateXnaPerKb = await this.estimateFeeRate();
     const feeSats = estimateNeuraiFeeSats(
