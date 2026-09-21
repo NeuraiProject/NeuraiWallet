@@ -176,14 +176,7 @@
     "info_expiring": "Expiring in 24h",
     "info_members": "Members",
     "info_close": "Close",
-    "rpc_settings_title": "DePIN RPC",
-    "rpc_url_label": "DePIN node RPC URL",
-    "rpc_username_label": "RPC username (optional)",
-    "rpc_password_label": "RPC password (optional)",
-    "rpc_invalid_url": "URL must start with http:// or https://",
-    "rpc_save": "Save",
-    "rpc_reset": "Reset to default",
-    "rpc_hint": "The chat connects to a DePIN-enabled Neurai node. Leave the default unless you run your own node. Default: {defaultUrl}"
+    "rpc_settings_title": "DePIN RPC"
   },
   "errors": {
     "error": "Error",
@@ -355,8 +348,6 @@
     "network_backend_height": "OK — block height {height}",
     "network_backend_retest": "Test again",
     "neurai_backend_edit_title": "Edit backend URL",
-    "neurai_backend_rpc_label": "Transaction RPC endpoint",
-    "neurai_backend_rpc_hint": "Enter the HTTP or HTTPS RPC endpoint paired with your wallet service. It is used to build and broadcast transactions.",
     "neurai_backend_edit_invalid": "URL must start with wss://",
     "neurai_backend_edit_reset": "Reset to default",
     "neurai_backend_edit_hint": "Leave the default unless you want to point at your own neurai-wallet-services instance. Default: {defaultUrl}",

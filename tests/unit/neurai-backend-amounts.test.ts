@@ -1,4 +1,7 @@
 import { RpcBackend } from '../../blue_modules/neurai/RpcBackend';
+import { createDefaultBackend, getDepinRpcBackend } from '../../blue_modules/neurai';
+import { getDepinRpcConfig, setDepinRpcConfig } from '../../blue_modules/neurai/depinRpcOverrides';
+import { setWssUrlOverride } from '../../blue_modules/neurai/backendOverrides';
 import { WssBackend } from '../../blue_modules/neurai/WssBackend';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 
@@ -48,7 +51,7 @@ it('routes every engine RPC call through the current selected backend', async ()
   expect(global.fetch).not.toHaveBeenCalled();
 });
 
-function service(version: 1 | 2, amount: string, confirmExact = true) {
+function service(version: 1 | 2, amount: string, confirmExact = true, network = 'testnet') {
   const methods: string[] = [];
   let socket: any;
   class FakeSocket {
@@ -78,8 +81,18 @@ function service(version: 1 | 2, amount: string, confirmExact = true) {
             protocol: `wss/${version}`,
             exact_amounts: confirmExact,
             amounts: 'string-sats',
-            ...(version === 2 ? { service_id: 'test', network: 'testnet', genesis_hash: 'a'.repeat(64) } : {}),
+            wallet_rpc:
+              version === 2
+                ? { methods: ['getaddressutxos'], amounts: 'rpc-native-units', numeric_encoding: 'safe-number-or-string' }
+                : undefined,
+            ...(version === 2 ? { service_id: 'test', network, genesis_hash: 'a'.repeat(64) } : {}),
           };
+      } else if (request.method === 'depin.msg_info') {
+        result = { body: 'signed-body', poolsig: 'signature' };
+      } else if (request.method === 'rpc.call') {
+        result = [{ satoshis: amount, script: '51' }];
+      } else if (request.method === 'tx.broadcast') {
+        result = { txid: 'signed-tx' };
       } else if (request.method === 'address.get_state') {
         result = {
           balance: { confirmed: amount, unconfirmed: '-1' },
@@ -144,7 +157,7 @@ test.each([
     if (fails) await expect(balance).rejects.toThrow('wss/2');
     else expect(await balance).toBe(BigInt(amount));
     expect(server.methods.slice(0, 2)).toEqual(['hello:wss/2', 'hello:wss/1']);
-    await expect(backend.rpc('getaddressutxos', [])).rejects.toThrow('paired');
+    await expect(backend.rpc('getaddressutxos', [])).rejects.toThrow('wss/2');
   } finally {
     server.close();
   }
@@ -172,57 +185,38 @@ it('requests asset history and falls back to native history when an older index 
   expect(paramsSeen).toEqual([[{ addresses: ['a'], assetName: '*' }], [{ addresses: ['a'] }]]);
 });
 
-function exactHttp(overrides: Record<string, unknown> = {}) {
-  const calls: string[] = [];
-  global.fetch = jest.fn(async (url, options) => {
-    if (String(url) === 'http://local/settings')
-      return new Response(
-        JSON.stringify({
-          exact_amounts: true,
-          amounts: 'rpc-native-units',
-          numeric_encoding: 'safe-number-or-string',
-          service_id: 'test',
-          network: 'testnet',
-          genesis_hash: 'a'.repeat(64),
-          ...overrides,
-        }),
-      );
-    if (String(url) !== 'http://local/rpc') throw new Error('Unexpected endpoint');
-    const { method } = JSON.parse(String(options?.body));
-    calls.push(method);
-    return new Response(JSON.stringify({ result: method === 'getblockhash' ? 'a'.repeat(64) : [] }));
+test('uses only the selected socket for builder queries and broadcast, including after reconnect', async () => {
+  const server = service(2, '10000000000000001');
+  global.fetch = jest.fn(() => {
+    throw new Error('HTTP forbidden');
   });
-  return calls;
-}
-
-test.each([1, 2] as const)('version %s constructs from validated HTTP and revalidates after reconnect', async version => {
-  const server = service(version, '1');
-  const calls = exactHttp();
-  const backend = new WssBackend({ chain: 'xna-test', url: 'ws://local/push', rpcUrl: 'http://local/rpc' });
+  const backend = new WssBackend({ chain: 'xna-test', url: 'ws://local/push', rpcUrl: 'https://obsolete/rpc' });
   try {
-    await backend.rpc('getaddressutxos', []);
-    expect(calls).toEqual(['getblockhash', 'getaddressutxos']);
+    expect(await backend.rpc('getaddressutxos', [])).toEqual([{ satoshis: '10000000000000001', script: '51' }]);
+    expect(await backend.rpc('sendrawtransaction', ['signed-hex'])).toBe('signed-tx');
     server.close();
     await backend.rpc('getaddressutxos', []);
-    expect(calls.filter(m => m === 'getblockhash')).toHaveLength(2);
+    expect(server.methods.filter(m => m === 'rpc.call:')).toHaveLength(2);
+    expect(server.methods.filter(m => m === 'hello:wss/2')).toHaveLength(2);
+    expect(global.fetch).not.toHaveBeenCalled();
   } finally {
     server.close();
   }
 });
-test.each([{ exact_amounts: false }, { service_id: 'other' }, { network: 'mainnet' }, { genesis_hash: 'b'.repeat(64) }])(
-  'blocks incompatible companion %s',
-  async mismatch => {
-    const server = service(2, '1');
-    const calls = exactHttp(mismatch);
-    try {
-      const backend = new WssBackend({ chain: 'xna-test', url: 'ws://local/push', rpcUrl: 'http://local/rpc' });
-      await expect(backend.rpc('createrawtransaction', [])).rejects.toThrow();
-      expect(calls).not.toContain('createrawtransaction');
-    } finally {
-      server.close();
-    }
-  },
-);
+test('unsupported WSS operations fail without an HTTP fallback', async () => {
+  const server = service(2, '1');
+  global.fetch = jest.fn(() => {
+    throw new Error('HTTP forbidden');
+  });
+  try {
+    const backend = new WssBackend({ chain: 'xna-test', url: 'ws://local/push' });
+    await expect(backend.rpc('dumpprivkey', [])).rejects.toThrow('over WSS');
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(server.methods).not.toContain('rpc.call:');
+  } finally {
+    server.close();
+  }
+});
 it('reports stale and recovery at unchanged monetary status', async () => {
   const server = service(2, '1');
   const backend = new WssBackend({ chain: 'xna-test', url: 'ws://local/push' });
@@ -239,6 +233,36 @@ it('reports stale and recovery at unchanged monetary status', async () => {
     expect(backend.getServiceStatus()).toBe('stale');
     expect(changed).toHaveBeenCalled();
   } finally {
+    server.close();
+  }
+});
+
+test.each(['mainnet', 'testnet'] as const)('default and custom %s wallet/DePIN backends use only the selected WSS', async network => {
+  const server = service(2, '10000000000000001', true, network);
+  global.fetch = jest.fn(() => {
+    throw new Error('HTTP forbidden');
+  });
+  const defaultBackend = createDefaultBackend(network, 'legacy') as WssBackend;
+  let custom: WssBackend | undefined;
+  let chat: WssBackend | undefined;
+  try {
+    await setDepinRpcConfig(network, { url: 'https://obsolete.example/rpc' });
+    await defaultBackend.rpc('getaddressutxos', []);
+    expect(getDepinRpcConfig(network).url).toContain(network === 'mainnet' ? 'wallet-main-wss' : 'wallet-testnet-wss');
+    await setWssUrlOverride(network, 'wss://custom.example/push');
+    custom = createDefaultBackend(network, 'legacy') as WssBackend;
+    chat = getDepinRpcBackend(network) as WssBackend;
+    expect(getDepinRpcConfig(network).url).toBe('wss://custom.example/push');
+    expect(await chat.rpc('depingetmsginfo', [])).toEqual({ body: 'signed-body', poolsig: 'signature' });
+    await custom.rpc('getaddressutxos', []);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(server.methods).toContain('depin.msg_info:');
+  } finally {
+    defaultBackend.disconnect();
+    custom?.disconnect();
+    chat?.disconnect();
+    await setWssUrlOverride(network, null);
+    await setDepinRpcConfig(network, null);
     server.close();
   }
 });

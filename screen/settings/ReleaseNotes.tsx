@@ -17,7 +17,7 @@ const NEURAI_ADAPTATION_NOTES: string[] = [
   'Native support for Neurai mainnet and testnet, with per-wallet network selection.',
   'Two wallet kinds available at creation time: Neurai Legacy (ECDSA, BIP44) and Neurai Post-Quantum (ML-DSA-44, AuthScript v1).',
   'Bech32m AuthScript receive addresses for PQ wallets (nq1… on mainnet, tnq1… on testnet).',
-  'WSS wallet-service backend for balance, history, UTXO scan and broadcast, with the direct JSON-RPC backend kept as an explicit fallback.',
+  'WSS wallet-service backend for balances, history, transaction preparation, broadcast and DePIN chat.',
   'BIP21 deeplinks moved to the xna: scheme; sender/receiver QR flows updated accordingly.',
   'Amounts and fees expressed in XNA / sats with Neurai-native unit conversion (1 XNA = 1e8 sats).',
   'Default fee estimate keyed to the node\'s estimatesmartfee (6 blocks), with the library\'s 0.05 XNA/kB fallback honored.',

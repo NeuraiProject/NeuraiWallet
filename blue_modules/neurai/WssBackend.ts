@@ -1,6 +1,5 @@
 import { parseRpcJson } from '@neuraiproject/neurai-rpc';
 import { parseRawSats, parseMoneySats, satsToXna } from './amounts';
-import { RpcBackend } from './RpcBackend';
 /**
  * Backend for neurai-wallet-services.
  *
@@ -11,6 +10,23 @@ import { RpcBackend } from './RpcBackend';
 
 import { AddressDelta, BackendConfig, FeeEstimate, MempoolEntry, NeuraiBackend, NeuraiUtxo } from './NeuraiBackend';
 import { CHAIN_PARAMS, type NeuraiChainType } from './networkConfig';
+
+// Existing service methods preserve DePIN protocol-2 authentication and quotas.
+const DEPIN_METHODS: Record<string, string> = {
+  checkdepinvalidity: 'depin.check_validity',
+  listdepinholders: 'depin.list_holders',
+  listdepinaddresses: 'depin.list_addresses',
+  getpubkey: 'depin.get_pubkey',
+  depingetancestorrecipients: 'depin.ancestor_recipients',
+  depingetmsginfo: 'depin.msg_info',
+  depinpoolstats: 'depin.pool_stats',
+  depinmcpstatus: 'depin.mcp_status',
+  depinchallenge: 'depin.challenge',
+  depinreceivemsg: 'depin.receive_msg',
+  depinsubmitmsg: 'depin.submit_msg',
+  depinlistsections: 'depin.sections',
+  depinclearmsg: 'depin.clear_msg',
+};
 
 const WIRE_PROTOCOL = 'wss';
 const APP_PROTOCOL = 'wss/2';
@@ -57,6 +73,7 @@ type WssHello = {
   protocol?: string;
   exact_amounts?: boolean;
   amounts?: string;
+  wallet_rpc?: { methods?: string[]; amounts?: string; numeric_encoding?: string };
   tip_height?: number | null;
   tip_hash?: string | null;
 };
@@ -145,13 +162,10 @@ export class WssBackend implements NeuraiBackend {
   readonly chain: NeuraiChainType;
 
   private readonly url: string;
-  private readonly rpcBackend?: RpcBackend;
   private exactAmounts = false;
-  private readonly rpcUrl?: string;
   private readonly expectedNetwork: string;
   private readonly expectedGenesisHash?: string;
   private hello?: WssHello;
-  private validatedRpc?: Promise<void>;
   private staleAddresses = new Set<string>();
   private syncListeners = new Set<() => void>();
 
@@ -197,11 +211,9 @@ export class WssBackend implements NeuraiBackend {
 
   constructor(config: Omit<BackendConfig, 'kind'>) {
     this.chain = config.chain;
-    this.rpcUrl = config.rpcUrl;
     this.expectedNetwork = config.expectedNetwork ?? CHAIN_PARAMS[this.chain].network;
     this.expectedGenesisHash = config.expectedGenesisHash;
     if (this.expectedNetwork === 'regtest' && !this.expectedGenesisHash) throw new Error('Regtest requires an explicit genesis hash');
-    if (config.rpcUrl) this.rpcBackend = new RpcBackend({ ...config, url: config.rpcUrl });
     this.url = config.url;
     this.authToken = config.authToken || config.password;
   }
@@ -327,66 +339,20 @@ export class WssBackend implements NeuraiBackend {
   }
 
   async rpc<T = unknown>(method: string, params: unknown[]): Promise<T> {
-    if (!this.rpcBackend) throw new Error('Configure the RPC endpoint paired with this wallet service before sending');
     await this.ensureConnected();
-    if (!this.validatedRpc) {
-      const socket = this.ws;
-      const validation = this.validateCompanion().then(() => {
-        if (this.ws !== socket || !isOpen(socket)) throw new Error('Wallet service connection changed during validation');
-      });
-      this.validatedRpc = validation;
-      validation.catch(() => {
-        if (this.validatedRpc === validation) this.validatedRpc = undefined;
-      });
+    if (!this.exactAmounts) throw new Error('Wallet operations require exact amounts (wss/2)');
+    if (method === 'sendrawtransaction') return (await this.broadcast(params[0] as string)) as T;
+    if (Object.prototype.hasOwnProperty.call(DEPIN_METHODS, method)) return this.serviceRequest<T>(DEPIN_METHODS[method], { args: params });
+    const capability = this.hello?.wallet_rpc;
+    if (
+      capability?.amounts !== 'rpc-native-units' ||
+      capability.numeric_encoding !== 'safe-number-or-string' ||
+      !Array.isArray(capability.methods) ||
+      !capability.methods.includes(method)
+    ) {
+      throw new Error(`Wallet service must support ${method} over WSS; update neurai-wallet-services`);
     }
-    await this.validatedRpc;
-    return this.rpcBackend.rpc<T>(method, params);
-  }
-
-  private async validateCompanion(): Promise<void> {
-    if (!this.rpcUrl || !this.rpcBackend) throw new Error('Missing companion RPC');
-    const settingsUrl = new URL(this.rpcUrl);
-    if (!/\/rpc\/?$/.test(settingsUrl.pathname)) throw new Error('Companion endpoint must end in /rpc');
-    const settingsEndpoint = settingsUrl.origin + settingsUrl.pathname.replace(/\/rpc\/?$/, '/settings');
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      const response = await fetch(settingsEndpoint, { signal: controller.signal });
-      if (!response.ok) throw new Error('Wallet service capabilities unavailable');
-      const parsed = parseRpcJson(await response.text());
-      if (!parsed || typeof parsed !== 'object') throw new Error('Invalid wallet service capabilities');
-      const settings = parsed as Record<string, unknown>;
-      if (
-        settings.exact_amounts !== true ||
-        settings.amounts !== 'rpc-native-units' ||
-        settings.numeric_encoding !== 'safe-number-or-string'
-      ) {
-        throw new Error('Companion RPC does not guarantee exact amounts');
-      }
-      if (
-        settings.network !== this.expectedNetwork ||
-        typeof settings.genesis_hash !== 'string' ||
-        !/^[a-f0-9]{64}$/.test(settings.genesis_hash)
-      ) {
-        throw new Error('Companion RPC chain mismatch');
-      }
-      if (this.expectedGenesisHash && settings.genesis_hash !== this.expectedGenesisHash) throw new Error('Companion RPC genesis mismatch');
-      const genesis = await this.rpcBackend.rpc<string>('getblockhash', [0]);
-      if (genesis !== settings.genesis_hash) throw new Error('Companion RPC identity mismatch');
-      const hello = this.hello;
-      if (hello?.protocol === 'wss/2' || hello?.service_id || hello?.genesis_hash) {
-        if (
-          !settings.service_id ||
-          hello?.service_id !== settings.service_id ||
-          hello?.genesis_hash !== genesis ||
-          hello?.network !== settings.network
-        ) {
-          throw new Error('WSS and HTTP wallet services do not match');
-        }
-      }
-    } finally {
-      clearTimeout(timer);
-    }
+    return this.serviceRequest<T>('rpc.call', { method, params });
   }
 
   private rawAmount(value: unknown): bigint {
@@ -585,7 +551,6 @@ export class WssBackend implements NeuraiBackend {
     const protocols = this.authToken ? [WIRE_PROTOCOL, `auth.${this.authToken}`] : [WIRE_PROTOCOL];
     const ws = new (getWebSocketCtor())(this.url, protocols);
     this.ws = ws;
-    this.validatedRpc = undefined;
     for (const address of this.subscribedAddresses) this.staleAddresses.add(address);
 
     return new Promise((resolve, reject) => {
@@ -604,7 +569,6 @@ export class WssBackend implements NeuraiBackend {
         this.rejectPending(new Error('WSS connection closed'));
         this.ws = null;
         this.exactAmounts = false;
-        this.validatedRpc = undefined;
         this.syncChanged();
         reject(new Error('WSS connection closed'));
       };
@@ -747,6 +711,10 @@ export class WssBackend implements NeuraiBackend {
     this.pending.clear();
   }
 
+  disconnect(): void {
+    this.close();
+  }
+
   private close(): void {
     try {
       this.ws?.close();
@@ -755,7 +723,6 @@ export class WssBackend implements NeuraiBackend {
     }
     this.ws = null;
     this.exactAmounts = false;
-    this.validatedRpc = undefined;
     this.rejectPending(new Error('WSS connection closed'));
     this.syncChanged();
   }

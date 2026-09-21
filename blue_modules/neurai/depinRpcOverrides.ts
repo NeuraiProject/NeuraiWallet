@@ -1,23 +1,14 @@
 /**
- * User configuration for the DePIN chat RPC endpoint, per network.
- *
- * DePIN chat talks to a node that has DePIN messaging enabled (RPC methods
- * `depinsubmitmsg` / `depinreceivemsg` / `checkdepinvalidity` …). That node is
- * NOT necessarily the same as the wallet's balance/history backend, and each
- * operator runs their own — so the chat RPC is configured separately here.
- *
- * Stored with DefaultPreference (same namespace as the rest of the app). Reads
- * are sync against an in-memory cache populated at module init; writes update
- * both the cache and the persisted store. A self-hosted node may require RPC
- * credentials, so an optional username/password is supported alongside the URL.
- *
- * Mirrors the pattern in `backendOverrides.ts`.
+ * DePIN uses the selected wallet WSS endpoint. Legacy RPC preferences remain
+ * readable for compatibility, but do not select a transport or receive traffic.
+ * Pool-key trust is keyed by the effective WSS URL, never by obsolete HTTP URLs.
  */
 
 import DefaultPreference from 'react-native-default-preference';
 
 import { GROUP_IO_BLUEWALLET } from '../currency';
-import type { NeuraiNetwork } from './networkConfig';
+import { CHAIN_PARAMS, chainFor, type NeuraiNetwork } from './networkConfig';
+import { getWssUrlOverride, loadOverrides } from './backendOverrides';
 
 export interface DepinRpcConfig {
   url: string;
@@ -32,8 +23,8 @@ const KEY_BY_NETWORK: Record<NeuraiNetwork, string> = {
 
 /** Public DePIN-enabled defaults (same as the Neurai web wallet). */
 export const DEFAULT_DEPIN_RPC_URL: Record<NeuraiNetwork, string> = {
-  mainnet: 'https://rpc-depin.neurai.org/rpc',
-  testnet: 'https://rpc-testnet.neurai.org/rpc',
+  mainnet: CHAIN_PARAMS.xna.defaultWssUrl,
+  testnet: CHAIN_PARAMS['xna-test'].defaultWssUrl,
 };
 
 const cache = new Map<NeuraiNetwork, DepinRpcConfig>();
@@ -69,7 +60,7 @@ async function load(): Promise<void> {
 }
 
 export function loadDepinRpcOverrides(): Promise<void> {
-  if (!loading) loading = load();
+  if (!loading) loading = Promise.all([load(), loadOverrides()]).then(() => undefined);
   return loading;
 }
 
@@ -82,9 +73,10 @@ export function getDepinRpcOverride(network: NeuraiNetwork): DepinRpcConfig | un
   return cache.get(network);
 }
 
-/** Effective config: user override if present, else the public DePIN default. */
+/** Effective endpoint shared with the wallet, including custom WSS settings. */
 export function getDepinRpcConfig(network: NeuraiNetwork): DepinRpcConfig {
-  return cache.get(network) ?? { url: DEFAULT_DEPIN_RPC_URL[network] };
+  // Old HTTP preferences remain stored for recovery but are never contacted.
+  return { url: getWssUrlOverride(network) ?? CHAIN_PARAMS[chainFor(network, 'legacy')].defaultWssUrl };
 }
 
 /** Persist (or clear, when `config` is null) the DePIN RPC config for a network. */
@@ -107,7 +99,7 @@ export async function setDepinRpcConfig(network: NeuraiNetwork, config: DepinRpc
 }
 
 // Warm the cache at import. Sync reads fall back to the public default until
-// this resolves; after that, saved overrides are honoured.
+// this resolves; legacy HTTP settings remain stored but inactive.
 loadDepinRpcOverrides().catch(() => {
   // Storage errors are non-fatal; defaults will be used.
 });

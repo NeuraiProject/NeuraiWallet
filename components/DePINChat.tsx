@@ -7,8 +7,8 @@
  * an end-to-end encrypted group/private chat with the other holders via
  * `react-native-gifted-chat` and the `useDePINChat` hook.
  *
- * The gear button opens `DepinRpcEdit` to point the chat at a specific DePIN
- * node. To receive group messages the address's public key must be on-chain, so
+ * The gear button opens the shared WSS service settings through `DepinRpcEdit`.
+ * The chat uses the same service as the wallet. To receive group messages the address's public key must be on-chain, so
  * when it isn't we offer a "reveal" action that burns a little XNA from the
  * DePIN address (mirrors the web wallet).
  *

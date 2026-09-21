@@ -1,6 +1,7 @@
 import assert from 'assert';
+import { RpcBackend } from '../../blue_modules/neurai/RpcBackend';
 
-import { CHAIN_PARAMS, createDefaultBackend, createDefaultRpcBackend } from '../../blue_modules/neurai';
+import { CHAIN_PARAMS, createDefaultBackend } from '../../blue_modules/neurai';
 import { estimateNeuraiFeeSats, estimateNeuraiTxSizeKb } from '../../blue_modules/neurai/feeEstimate';
 import { AbstractNeuraiWallet } from '../../class/wallets/abstract-neurai-wallet';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
@@ -15,7 +16,7 @@ describe('Neurai wallets', () => {
       assert.strictEqual(CHAIN_PARAMS['xna-test'].defaultWssUrl, 'wss://wallet-testnet-wss.neurai.org:443/push');
       assert.strictEqual(CHAIN_PARAMS['xna-test'].defaultWssAuthToken, 'testnet-wss-token-do-not-use-in-production');
       assert.strictEqual(createDefaultBackend('mainnet', 'legacy').kind, 'wss');
-      assert.strictEqual(createDefaultRpcBackend('mainnet', 'legacy').kind, 'rpc');
+      assert.strictEqual(createDefaultBackend('testnet', 'legacy').kind, 'wss');
     });
   });
 
@@ -252,7 +253,7 @@ describe('exact send preflight', () => {
   it('does not unlock an obsolete wallet when balance refresh fails', async () => {
     const wallet = NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC);
     wallet.amountsStale = true;
-    const backend = createDefaultRpcBackend('testnet', 'legacy');
+    const backend = new RpcBackend({ chain: 'xna-test', url: 'http://127.0.0.1:19215' });
     jest.spyOn(backend, 'getBalance').mockRejectedValue(new Error('Offline'));
     wallet.setBackend(backend);
     await expect(wallet.fetchBalance()).rejects.toThrow('Offline');

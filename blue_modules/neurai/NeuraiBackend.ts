@@ -28,7 +28,7 @@ export interface BackendConfig {
   password?: string;
   /** Optional neurai-wallet-services auth token. Sent as `auth.<token>` subprotocol. */
   authToken?: string;
-  /** Explicit companion RPC endpoint for a WSS service. */
+  /** Obsolete companion setting; ignored by WssBackend (WSS only). */
   rpcUrl?: string;
   /** Explicit chain identity for isolated regtest and pinned deployments. */
   expectedNetwork?: 'mainnet' | 'testnet' | 'regtest';

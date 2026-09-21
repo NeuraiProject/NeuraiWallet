@@ -2,7 +2,7 @@
  * Public surface of the Neurai network layer.
  *
  * Pick a backend with `createBackend(config)`. Default is WSS; RPC remains
- * available as an explicit fallback. ElectrumX is a stub today and will throw
+ * available for explicitly injected local/test backends. ElectrumX is a stub today and will throw
  * on every call other than `ping()`.
  */
 
@@ -11,7 +11,7 @@ import { CHAIN_PARAMS, NeuraiChainType, NeuraiNetwork, WalletKind, chainFor } fr
 import { ElectrumXBackend } from './ElectrumXBackend';
 import { RpcBackend } from './RpcBackend';
 import { WssBackend } from './WssBackend';
-import { getWssUrlOverride, getWalletRpcUrlOverride } from './backendOverrides';
+import { getWssUrlOverride } from './backendOverrides';
 import { getDepinRpcConfig } from './depinRpcOverrides';
 
 export * from './networkConfig';
@@ -116,8 +116,6 @@ export function createDefaultBackend(network: NeuraiNetwork, kind: WalletKind): 
     chain,
     url: getWssUrlOverride(network) ?? params.defaultWssUrl,
     authToken: params.defaultWssAuthToken,
-    // Built-in endpoints are an explicit pair. Custom WSS must configure its own RPC.
-    rpcUrl: getWalletRpcUrlOverride(network) ?? (getWssUrlOverride(network) ? undefined : params.defaultRpcUrl),
   });
 }
 
@@ -125,30 +123,14 @@ export function createDefaultWssBackend(network: NeuraiNetwork, kind: WalletKind
   return createDefaultBackend(network, kind);
 }
 
-/** Explicit fallback for a direct full-node JSON-RPC backend. */
-export function createDefaultRpcBackend(network: NeuraiNetwork, kind: WalletKind): NeuraiBackend {
-  const chain: NeuraiChainType = chainFor(network, kind);
-  return createBackend({
-    kind: 'rpc',
-    chain,
-    url: CHAIN_PARAMS[chain].defaultRpcUrl,
-  });
-}
-
-/**
- * RPC backend for the DePIN chat node (methods `depinsubmitmsg` /
- * `depinreceivemsg` / `checkdepinvalidity` …). Uses the user-configured DePIN
- * RPC URL/credentials (see `depinRpcOverrides.ts`) or the public default.
- * DePIN chat is Legacy-only, so the chain is always the legacy one.
- */
+/** DePIN uses the same selected WSS service, with a reusable connection. */
+const depinBackends = new Map<NeuraiNetwork, { url: string; backend: NeuraiBackend }>();
 export function getDepinRpcBackend(network: NeuraiNetwork): NeuraiBackend {
-  const chain: NeuraiChainType = chainFor(network, 'legacy');
-  const config = getDepinRpcConfig(network);
-  return createBackend({
-    kind: 'rpc',
-    chain,
-    url: config.url,
-    username: config.username,
-    password: config.password,
-  });
+  const url = getDepinRpcConfig(network).url;
+  const cached = depinBackends.get(network);
+  if (cached?.url === url) return cached.backend;
+  if (cached?.backend instanceof WssBackend) cached.backend.disconnect();
+  const backend = createDefaultBackend(network, 'legacy');
+  depinBackends.set(network, { url, backend });
+  return backend;
 }

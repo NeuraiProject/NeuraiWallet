@@ -20,8 +20,6 @@ export interface ChainParams {
   chain: NeuraiChainType;
   network: NeuraiNetwork;
   kind: WalletKind;
-  /** Default public JSON-RPC endpoint. Kept as a fallback for self-hosted/debug flows. */
-  defaultRpcUrl: string;
   /** Default wallet service endpoint (JSON-RPC-like protocol over WSS). */
   defaultWssUrl: string;
   /** Optional wallet service auth token sent as `auth.<token>` WebSocket subprotocol. */
@@ -38,8 +36,6 @@ export interface ChainParams {
   hrp?: string;
 }
 
-const URL_NEURAI_MAINNET = 'https://rpc-main.neurai.org/rpc';
-const URL_NEURAI_TESTNET = 'https://rpc-testnet.neurai.org/rpc';
 const URL_NEURAI_MAINNET_WSS = 'wss://wallet-main-wss.neurai.org:443/push';
 const URL_NEURAI_TESTNET_WSS = 'wss://wallet-testnet-wss.neurai.org:443/push';
 const AUTH_NEURAI_MAINNET_WSS = '823huiod90234SDSDS232ewwd23ewdcn9eiiworhjj9iof';
@@ -50,7 +46,6 @@ export const CHAIN_PARAMS: Record<NeuraiChainType, ChainParams> = {
     chain: 'xna',
     network: 'mainnet',
     kind: 'legacy',
-    defaultRpcUrl: URL_NEURAI_MAINNET,
     defaultWssUrl: URL_NEURAI_MAINNET_WSS,
     defaultWssAuthToken: AUTH_NEURAI_MAINNET_WSS,
     bip44CoinType: 1900,
@@ -62,7 +57,6 @@ export const CHAIN_PARAMS: Record<NeuraiChainType, ChainParams> = {
     chain: 'xna-test',
     network: 'testnet',
     kind: 'legacy',
-    defaultRpcUrl: URL_NEURAI_TESTNET,
     defaultWssUrl: URL_NEURAI_TESTNET_WSS,
     defaultWssAuthToken: AUTH_NEURAI_TESTNET_WSS,
     bip44CoinType: 1,
@@ -74,7 +68,6 @@ export const CHAIN_PARAMS: Record<NeuraiChainType, ChainParams> = {
     chain: 'xna-pq',
     network: 'mainnet',
     kind: 'pq',
-    defaultRpcUrl: URL_NEURAI_MAINNET,
     defaultWssUrl: URL_NEURAI_MAINNET_WSS,
     defaultWssAuthToken: AUTH_NEURAI_MAINNET_WSS,
     bip44CoinType: 1900,
@@ -84,7 +77,6 @@ export const CHAIN_PARAMS: Record<NeuraiChainType, ChainParams> = {
     chain: 'xna-pq-test',
     network: 'testnet',
     kind: 'pq',
-    defaultRpcUrl: URL_NEURAI_TESTNET,
     defaultWssUrl: URL_NEURAI_TESTNET_WSS,
     defaultWssAuthToken: AUTH_NEURAI_TESTNET_WSS,
     bip44CoinType: 1,
