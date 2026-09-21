@@ -125,3 +125,67 @@ test.each([false, true])('loads a pre-migration storage bucket without dropping 
   }
   expect(app.tx_metadata.known.memo).toBe('Keep this label');
 });
+
+test.each([false, true])('coalesces push bursts and waits for the latest persisted wallet (encrypted=%s)', async encrypted => {
+  const app = new BlueApp();
+  const disk = new Map<string, string>();
+  const wallet = NeuraiHDWallet.forNetwork('testnet', mnemonic);
+  wallet.balance = 10000000000000001n;
+  app.wallets = [wallet];
+  if (encrypted) {
+    app.cachedPassword = 'test-password';
+    disk.set('data', JSON.stringify([encryption.encrypt(JSON.stringify({ wallets: [] }), 'test-password')]));
+  }
+  jest.spyOn(app, 'getRealmForTransactions').mockResolvedValue({ close: jest.fn() } as never);
+  jest.spyOn(app, 'openRealmKeyValue').mockResolvedValue({ close: jest.fn() } as never);
+  jest.spyOn(app, 'saveToRealmKeyValue').mockImplementation(() => {});
+  jest.spyOn(app, 'getItemWithFallbackToRealm').mockImplementation(async key => disk.get(key) ?? null);
+  let release!: () => void;
+  let started!: () => void;
+  const firstStarted = new Promise<void>(resolve => {
+    started = resolve;
+  });
+  const blocked = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  let writes = 0;
+  let active = 0;
+  let maximumActive = 0;
+  jest.spyOn(app, 'setItem').mockImplementation(async (key, value) => {
+    if (key === 'data') {
+      active++;
+      maximumActive = Math.max(maximumActive, active);
+      if (++writes === 1) {
+        started();
+        await blocked;
+      }
+      disk.set(key, value);
+      active--;
+    } else disk.set(key, value);
+  });
+  const first = app.saveToDisk();
+  await firstStarted;
+  const burst = Array.from({ length: 40 }, (_, i) => {
+    wallet.setLabel('Updated ' + i);
+    wallet.balance = 10000000000000001n + BigInt(i);
+    return app.saveToDisk();
+  });
+  let completed = false;
+  Promise.all(burst).then(() => {
+    completed = true;
+  });
+  await Promise.resolve();
+  expect(completed).toBe(false);
+  release();
+  await Promise.all([first, ...burst]);
+  expect(writes).toBe(2);
+  expect(maximumActive).toBe(1);
+  const saved = encrypted ? encryption.decrypt(JSON.parse(disk.get('data')!)[0], 'test-password') : disk.get('data');
+  const dto = JSON.parse(JSON.parse(saved as string).wallets[0]);
+  expect(dto.label).toBe('Updated 39');
+  expect(dto.balance).toBe('10000000000000040');
+  expect(dto.secret).toBe(wallet.secret);
+  wallet.setLabel('Next save');
+  await app.saveToDisk();
+  expect(writes).toBe(3);
+});

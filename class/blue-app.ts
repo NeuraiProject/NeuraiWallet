@@ -16,7 +16,6 @@ import { ExtendedTransaction, Transaction, TWallet } from './wallets/types';
 import { hexToUint8Array, uint8ArrayToHex } from '../blue_modules/uint8array-extras';
 
 let usedBucketNum: boolean | number = false;
-let savingInProgress = 0; // its both a flag and a counter of attempts to write to disk
 
 export type TTXMetadata = {
   [txid: string]: {
@@ -53,6 +52,9 @@ export class BlueApp {
   static HANDOFF_STORAGE_KEY = 'HandOff';
 
   private static _instance: BlueApp | null = null;
+  private static diskWrites: Promise<void> = Promise.resolve();
+  private savePromise?: Promise<void>;
+  private saveRequested = false;
 
   static keys2migrate = [BlueApp.HANDOFF_STORAGE_KEY];
 
@@ -443,15 +445,30 @@ export class BlueApp {
    *
    * @returns {Promise} Result of storage save
    */
-  async saveToDisk(): Promise<void> {
-    if (savingInProgress) {
-      console.warn('saveToDisk is in progress');
-      if (++savingInProgress > 10) presentAlert({ message: 'Critical error. Last actions were not saved' }); // should never happen
-      await new Promise(resolve => setTimeout(resolve, 1000 * savingInProgress)); // sleep
-      return this.saveToDisk();
-    }
-    savingInProgress = 1;
+  saveToDisk(): Promise<void> {
+    this.saveRequested = true;
+    if (!this.savePromise) this.savePromise = this.flushPendingSaves();
+    return this.savePromise;
+  }
 
+  private async flushPendingSaves(): Promise<void> {
+    try {
+      do {
+        this.saveRequested = false;
+        // One disk writer across instances. A push arriving during a write
+        // requests another snapshot; all callers wait for that snapshot too.
+        const write = BlueApp.diskWrites.then(() => this.writeToDisk());
+        BlueApp.diskWrites = write.catch(() => {});
+        await write;
+      } while (this.saveRequested);
+    } finally {
+      // Clear in this continuation, without an extra promise callback that
+      // could strand a save requested between draining and cleanup.
+      this.savePromise = undefined;
+    }
+  }
+
+  private async writeToDisk(): Promise<void> {
     try {
       const walletsToSave: string[] = []; // serialized wallets
       let realm;
@@ -542,8 +559,6 @@ export class BlueApp {
         console.warn('purging realm key-value database file');
         this.purgeRealmKeyValueFile();
       }
-    } finally {
-      savingInProgress = 0;
     }
   }
 
