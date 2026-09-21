@@ -200,10 +200,8 @@ const TransactionsNavigationHeader: React.FC<TransactionsNavigationHeaderProps> 
                     const balanceText = wallet.amountsStale ? loc.wallets.pull_to_refresh : String(balance);
                     const [integer, decimal, trailing] = splitFormattedAmount(balanceText);
                     const intPart = integer;
-                    // Wallet header: cap visible decimals at 4. Full precision
-                    // is still available in the Send screen's "Available" hint.
-                    const decRaw = decimal;
-                    const decPart = decRaw.length > 5 ? decRaw.slice(0, 5) : decRaw;
+                    // Inside the wallet, show the full available precision.
+                    const decPart = decimal;
                     const suffix = trailing;
                     return (
                       <Animated.Text

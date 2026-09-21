@@ -1,3 +1,4 @@
+import { splitFormattedAmount } from '../blue_modules/neurai/amounts';
 import React, { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useEffect } from 'react';
 import {
   FlatList,
@@ -603,13 +604,9 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
                           // portion can render smaller (matches the timestamp
                           // label size) while keeping the integer + unit big.
                           const balanceText = `${balance} `;
-                          const match = balanceText.match(/^([^.]*)(\.\d+)?(.*)$/);
-                          const intPart = match?.[1] ?? balanceText;
-                          // Card view: cap visible decimals at 4 (`. + 4 digits = 5 chars`).
-                          // Full precision is still available in the Send screen.
-                          const decRaw = match?.[2] ?? '';
-                          const decPart = decRaw.length > 5 ? decRaw.slice(0, 5) : decRaw;
-                          const suffix = match?.[3] ?? '';
+                          const [intPart, decimal, suffix] = splitFormattedAmount(balanceText);
+                          // Only the overview card truncates display precision.
+                          const decPart = decimal.slice(0, 5);
                           return (
                             <Animated.Text
                               numberOfLines={1}
