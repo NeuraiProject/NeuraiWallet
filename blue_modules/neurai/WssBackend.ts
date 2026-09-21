@@ -10,6 +10,7 @@ import { parseRawSats, parseMoneySats, satsToXna } from './amounts';
 
 import { AddressDelta, BackendConfig, FeeEstimate, MempoolEntry, NeuraiBackend, NeuraiUtxo } from './NeuraiBackend';
 import { CHAIN_PARAMS, type NeuraiChainType } from './networkConfig';
+import { LOCAL_FEE_RATE_XNA_PER_KB } from './feePolicy';
 
 // Existing service methods preserve DePIN protocol-2 authentication and quotas.
 const DEPIN_METHODS: Record<string, string> = {
@@ -32,7 +33,6 @@ const WIRE_PROTOCOL = 'wss';
 const APP_PROTOCOL = 'wss/2';
 const CLIENT_NAME = 'NeuraiWallet';
 const REQUEST_TIMEOUT_MS = 15_000;
-const DEFAULT_FEE_RATE_XNA_PER_KB = 0.05;
 
 type WebSocketLike = {
   readyState: number;
@@ -404,7 +404,7 @@ export class WssBackend implements NeuraiBackend {
   }
 
   async estimateFee(targetBlocks: number): Promise<FeeEstimate> {
-    return { targetBlocks, feeRateXnaPerKb: DEFAULT_FEE_RATE_XNA_PER_KB };
+    return { targetBlocks, feeRateXnaPerKb: LOCAL_FEE_RATE_XNA_PER_KB };
   }
 
   async getBlockTimes(_heights: number[]): Promise<Record<number, number>> {

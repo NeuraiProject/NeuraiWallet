@@ -429,13 +429,14 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
       selected.push(u);
       if (
         !sendMax &&
-        selected.reduce((sum, input) => sum + input.satoshis, 0n) >= amountSats + this._estimatePqFee(selected.length, 2, rate)
+        selected.reduce((sum, input) => sum + input.satoshis, 0n) >=
+          amountSats + this._estimatePqFee(selected.length, [toAddress, this.address], rate)
       )
         break;
     }
     if (selected.length > 4) throw new Error('The hardware PQ signer supports at most four inputs');
     const totalIn = selected.reduce((sum, u) => sum + u.satoshis, 0n);
-    let feeSats = this._estimatePqFee(selected.length, sendMax ? 1 : 2, rate);
+    let feeSats = this._estimatePqFee(selected.length, sendMax ? [toAddress] : [toAddress, this.address], rate);
     const outputValue = sendMax ? totalIn - feeSats : amountSats;
     if (outputValue <= 0n) throw new Error('Balance too low to cover the network fee');
     let change = totalIn - outputValue - feeSats;
@@ -453,10 +454,8 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     return { keyType: 'pq', rawTxHex: rawTx, inputs, feeSats, amountSats: outputValue };
   }
 
-  private _estimatePqFee(inputs: number, outputs: number, rate: number): bigint {
-    const fee = Math.ceil((12 + inputs * 977 + outputs * 43) * rate);
-    if (!Number.isSafeInteger(fee) || fee < 0) throw new Error('Invalid fee');
-    return BigInt(fee);
+  private _estimatePqFee(inputs: number, outputs: string[], rate: number): bigint {
+    return estimateNeuraiFeeSats(Array(inputs).fill('5120'), outputs, rate / 100_000);
   }
 
   private async _buildLegacySend(toAddress: string, amountSats: bigint, rate: number, sendMax: boolean): Promise<NeuraiHwUnsignedSend> {
@@ -467,6 +466,7 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
       .sort((a, b) => compareSats(b.satoshis, a.satoshis));
     if (utxos.length === 0) throw new Error('No spendable XNA UTXOs');
 
+    const changeAddr = await this.getChangeAddressAsync();
     let selected: typeof utxos;
     let inSats: bigint;
     let fee: bigint;
@@ -476,7 +476,7 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
       // Spend every UTXO into a single output; no change.
       selected = utxos;
       inSats = utxos.reduce((s, u) => s + u.satoshis, 0n);
-      fee = this._estimateLegacyFee(selected.length, 1, rate);
+      fee = this._estimateLegacyFee(selected.length, [toAddress], rate);
       amountToSend = inSats - fee;
       if (amountToSend <= 0) throw new Error('Balance too low to cover the network fee');
       changeSats = 0n;
@@ -488,15 +488,13 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
       for (const u of utxos) {
         selected.push(u);
         inSats += u.satoshis;
-        fee = this._estimateLegacyFee(selected.length, 2, rate);
+        fee = this._estimateLegacyFee(selected.length, [toAddress, changeAddr], rate);
         if (inSats >= amountSats + fee) break;
       }
       if (inSats < amountSats + fee) throw new Error('Insufficient funds (including fee)');
       amountToSend = amountSats;
       changeSats = inSats - amountSats - fee;
     }
-
-    const changeAddr = await this.getChangeAddressAsync();
 
     // Build the unsigned raw transaction.
     const tx = new Transaction();
@@ -590,10 +588,10 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     const assetChangeRaw = selectedAsset.reduce((s, u) => s + u.satoshis, 0n) - amountRaw;
 
     // PQ-sized fee: the WSS UTXO scripts aren't populated, so feed synthetic
-    // `5120` (AuthScript) prefixes to the estimator. Backend rate (≥ min relay).
+    // `5120` (AuthScript) prefixes to the estimator. Local fee policy.
     const outAddrs = (xnaChange: boolean) => [
-      toAddress,
-      ...(assetChangeRaw > 0 ? [this.address] : []),
+      { address: toAddress, assetName },
+      ...(assetChangeRaw > 0 ? [{ address: this.address, assetName }] : []),
       ...(xnaChange ? [this.address] : []),
     ];
     const pqScripts = (n: number) => Array.from({ length: n }, () => '5120');
@@ -668,7 +666,11 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     const assetChangeRaw = selectedAsset.reduce((s, u) => s + u.satoshis, 0n) - amountRaw;
 
     const changeAddr = await this.getChangeAddressAsync();
-    const outAddrs = (xnaChange: boolean) => [toAddress, ...(assetChangeRaw > 0 ? [changeAddr] : []), ...(xnaChange ? [changeAddr] : [])];
+    const outAddrs = (xnaChange: boolean) => [
+      { address: toAddress, assetName },
+      ...(assetChangeRaw > 0 ? [{ address: changeAddr, assetName }] : []),
+      ...(xnaChange ? [changeAddr] : []),
+    ];
     const legacyScripts = (n: number) => Array.from({ length: n }, () => '76a914');
     let selectedXna = [ownedXna[0]];
     let feeSats = estimateNeuraiFeeSats(legacyScripts(selectedAsset.length + selectedXna.length), outAddrs(true), feeRateXnaPerKb);
@@ -763,19 +765,12 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
 
   private async _resolveFeeRate(feeRate?: number): Promise<number> {
     if (feeRate && feeRate > 0) return feeRate;
-    try {
-      const xnaPerKb = await this.estimateFeeRate();
-      return Math.max(1, Math.round((xnaPerKb * 1e8) / 1000));
-    } catch {
-      return 1024;
-    }
+    const xnaPerKb = await this.estimateFeeRate();
+    return Math.max(1, Math.ceil((xnaPerKb * 1e8) / 1000));
   }
 
-  /** Rough P2PKH size estimate: inputs*148 + outputs*34 + 10 (bytes). */
-  private _estimateLegacyFee(inputs: number, outputs: number, satPerByte: number): bigint {
-    const fee = Math.ceil((inputs * 148 + outputs * 34 + 10) * satPerByte);
-    if (!Number.isSafeInteger(fee) || fee < 0) throw new Error('Invalid fee');
-    return BigInt(fee);
+  private _estimateLegacyFee(inputs: number, outputs: string[], satPerByte: number): bigint {
+    return estimateNeuraiFeeSats(Array(inputs).fill('76a914'), outputs, satPerByte / 100_000);
   }
 
   private async _fetchRawTx(txid: string): Promise<string> {

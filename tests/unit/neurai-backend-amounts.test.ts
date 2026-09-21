@@ -48,6 +48,10 @@ it('routes every engine RPC call through the current selected backend', async ()
   w.setBackend(second);
   await engine.rpc('getaddressmempool', [{ addresses: ['a'] }]);
   expect(b).toHaveBeenCalledWith('getaddressmempool', [{ addresses: ['a'] }]);
+  expect(await engine.rpc('estimatesmartfee', [20])).toEqual({ feerate: '0.012' });
+  expect(await w.estimateFeeRate()).toBe(0.012);
+  expect(a).toHaveBeenCalledTimes(1);
+  expect(b).toHaveBeenCalledTimes(1);
   expect(global.fetch).not.toHaveBeenCalled();
 });
 

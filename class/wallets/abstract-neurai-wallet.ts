@@ -44,6 +44,7 @@ import {
 } from '../../blue_modules/neurai';
 import type { AddressChangedEvent } from '../../blue_modules/neurai/WssBackend';
 import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
+import { LOCAL_FEE_RATE_RPC, LOCAL_FEE_RATE_XNA_PER_KB } from '../../blue_modules/neurai/feePolicy';
 import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
 import { getAssetType, type NeuraiHeldAsset } from '../../blue_modules/neurai/assetUtils';
 import { AbstractWallet } from './abstract-wallet';
@@ -405,7 +406,11 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       assetMarker: markerForChain(this.network),
     });
     // Resolve the backend at call time: changing settings must also change the motor.
-    engine.rpc = (method, params = []) => this.getBackend().rpc(method, params);
+    // jswallet 0.15.5 (including its asset builder) requests a rate through
+    // this hook. Supply our local policy; the library selects inputs, sizes
+    // serialized outputs and calculates the exact fee. No node fee quote.
+    engine.rpc = (method, params = []) =>
+      method === 'estimatesmartfee' ? Promise.resolve({ feerate: LOCAL_FEE_RATE_RPC }) : this.getBackend().rpc(method, params);
     this._engine = engine;
     return engine;
   }
@@ -1055,7 +1060,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     const assetName = opts?.assetName;
     const isAsset = !!assetName && assetName !== 'XNA';
 
-    // Asset transfers go through `engine.transferAsset` (neurai-assets 1.3.3):
+    // Asset transfers go through `engine.transferAsset` (neurai-assets 1.6.2):
     // it supports multiple recipients and every asset type, and crucially does
     // the owner-token dance required to move soulbound DePIN / restricted assets
     // — which the plain engine send path does not. The legacy manual builder is
@@ -1104,10 +1109,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   /**
    * Build + sign an asset transfer via `engine.transferAsset` (neurai-assets
-   * 1.3.3). Handles multiple recipients, every asset type, and the owner-token
+   * 1.6.2). Handles multiple recipients, every asset type, and the owner-token
    * spend/return needed to move soulbound DePIN / restricted assets. We pass
    * `broadcast: false` and let the caller broadcast through {@link broadcastTx}
-   * so the descriptive WSS→RPC error fallback still applies. `amount` is in the
+   * through the selected backend. `amount` is in the
    * asset's display units (raw units always use a scale of 1e8).
    */
   private async _buildAssetTransferViaEngine(
@@ -1141,9 +1146,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   /**
    * Build + sign an asset transfer transaction, mirroring the reference web
-   * wallet (`neurai-addon-sign`) and our own `buildSendMaxTransaction`:
+   * wallet (`neurai-addon-sign`):
    *   - select asset UTXOs to cover the amount (asset change back to the wallet),
-   *   - select XNA UTXOs to cover a fee priced off the backend rate (≥ min relay),
+   *   - select XNA UTXOs to cover the locally configured fee,
    *   - emit recipient/asset-change `transfers` + an XNA-change `payment`,
    *   - assemble with `createStandardAssetTransferTransaction` and sign locally.
    * `amount` is in full asset units; asset amounts use the same 1e8 raw scaling
@@ -1191,8 +1196,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     // Two-pass fee: estimate with one XNA input, select to cover it, then
     // re-estimate with the chosen input count (and the change outputs present).
     const outputAddresses = (xnaChange: boolean) => [
-      toAddress,
-      ...(assetChangeRaw > 0 ? [assetChangeAddress] : []),
+      { address: toAddress, assetName },
+      ...(assetChangeRaw > 0 ? [{ address: assetChangeAddress, assetName }] : []),
       ...(xnaChange ? [xnaChangeAddress] : []),
     ];
     let selectedXna = [xnaUtxos[0]];
@@ -1260,70 +1265,19 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     };
   }
 
-  /**
-   * Build a signed "send everything" transaction: spend ALL spendable XNA UTXOs
-   * into a single output to `toAddress`, with the fee deducted from the amount
-   * so the recipient receives `totalInputs − fee` and there is no change.
-   *
-   * The engine's `createTransaction` cannot express this: it always appends a
-   * change output (a zero-value one would be rejected by the node) and its
-   * greedy coin selection is amount-driven, so it would not reliably pull in
-   * every UTXO. We therefore assemble the raw tx with `createPaymentTransaction`
-   * (which emits exactly the outputs given) and sign it with the engine's own
-   * key material via `neurai-sign-transaction`. The fee mirrors the engine's
-   * size math (see {@link estimateNeuraiFeeSats}) so the node accepts it.
-   */
+  /** Spend all available native UTXOs using the library's no-change builder. */
   async buildSendMaxTransaction(toAddress: string): Promise<NeuraiBuildTransactionResult> {
     if (this.amountsStale) throw new Error('Refresh this wallet before sending');
     const engine = await this.ensureEngine();
-    const [allUtxos, mempool] = await Promise.all([engine.getUTXOs(), engine.getMempool()]);
-    // Mirror the engine's `loadSpendableFunds`: drop UTXOs already being spent
-    // by a mempool tx so a send-max issued right after another send can't
-    // double-spend them.
-    const spentInMempool = new Set(mempool.map(m => `${m.prevtxid}:${m.prevout}`));
-    const utxos = allUtxos.filter(
-      u => u.assetName === 'XNA' && rawToSats(u.satoshis) > 0 && !spentInMempool.has(`${u.txid}:${u.outputIndex}`),
-    );
-    if (utxos.length === 0) throw new Error('No spendable XNA funds to send');
-    const totalIn = utxos.reduce((sum, u) => sum + rawToSats(u.satoshis), 0n);
-
-    const feeRateXnaPerKb = await this.estimateFeeRate();
-    const feeSats = estimateNeuraiFeeSats(
-      utxos.map(u => u.script),
-      [toAddress],
-      feeRateXnaPerKb,
-    );
-    const recipientSats = totalIn - feeSats;
-    if (recipientSats <= 0) throw new Error('Balance too low to cover the network fee');
-
-    const { rawTx } = createPaymentTransaction({
-      inputs: utxos.map(u => ({ txid: u.txid, vout: u.outputIndex })),
-      payments: [{ address: toAddress, valueSats: BigInt(recipientSats) }],
-    });
-
-    const privateKeys: Record<string, unknown> = {};
-    for (const u of utxos) {
-      const material = engine.getPrivateKeyByAddress(u.address);
-      if (material) privateKeys[u.address] = material;
-    }
-
-    const signedHex = signNeuraiTransaction(
-      this.network as Parameters<typeof signNeuraiTransaction>[0],
-      rawTx,
-      utxos as unknown as Parameters<typeof signNeuraiTransaction>[2],
-      privateKeys as Parameters<typeof signNeuraiTransaction>[3],
-    );
-    if (!signedHex) throw new Error('Failed to sign the send-all transaction');
-
+    const result = await engine.createTransaction({ toAddress, sendMax: true });
+    if (!result.debug.signedTransaction) throw new Error('Failed to sign the send-all transaction');
     return {
-      signedHex,
-      unsignedHex: rawTx,
-      feeSats,
-      sentAmountSats: recipientSats,
-      // Everything leaves the wallet: recipient gets totalIn − fee, the fee is
-      // paid, no change returns — so the net debit is the whole balance.
-      netDebitSats: totalIn,
-      debug: { sendMax: true, totalIn, feeSats, recipientSats },
+      signedHex: result.debug.signedTransaction,
+      unsignedHex: result.debug.rawUnsignedTransaction ?? '',
+      feeSats: decimalToSats(result.debug.fee),
+      sentAmountSats: decimalToSats(result.debug.amount),
+      netDebitSats: decimalToSats(result.debug.xnaAmount),
+      debug: result.debug,
     };
   }
 
@@ -1339,7 +1293,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * address. `utxos` are the address's base-currency UTXOs (fetched by the
    * caller from the DePIN node); broadcasting is also left to the caller.
    *
-   * Mirrors {@link buildSendMaxTransaction} (manual assembly + backend-priced
+   * Mirrors {@link buildSendMaxTransaction} (manual assembly + locally priced
    * fee) rather than `engine.createTransaction`, which can't sign for a foreign
    * address without per-UTXO key material.
    */
@@ -1455,12 +1409,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     }
   }
 
-  /** Smart fee estimate in XNA/kB for the given confirmation depth. */
-  async estimateFeeRate(targetBlocks: number = FEE_TARGET_BLOCKS): Promise<number> {
-    const estimate = await this.getBackend().estimateFee(targetBlocks);
-    const rate = estimate.feeRateXnaPerKb;
-    if (!Number.isFinite(rate) || rate < 0) throw new Error('Invalid fee rate');
-    return Math.max(0.05, rate);
+  /** Local XNA/1,000-vbyte policy, including the 20% margin. */
+  async estimateFeeRate(_targetBlocks: number = FEE_TARGET_BLOCKS): Promise<number> {
+    return LOCAL_FEE_RATE_XNA_PER_KB;
   }
 
   // ---------- helpers --------------------------------------------------------------

@@ -20,7 +20,7 @@ const NEURAI_ADAPTATION_NOTES: string[] = [
   'WSS wallet-service backend for balances, history, transaction preparation, broadcast and DePIN chat.',
   'BIP21 deeplinks moved to the xna: scheme; sender/receiver QR flows updated accordingly.',
   'Amounts and fees expressed in XNA / sats with Neurai-native unit conversion (1 XNA = 1e8 sats).',
-  'Default fee estimate keyed to the node\'s estimatesmartfee (6 blocks), with the library\'s 0.05 XNA/kB fallback honored.',
+  'Fees calculated locally from transaction size by Neurai libraries, using 0.012 XNA/kB including a 20% margin.',
   'Block-explorer selection (Rebel XNA / Testnet Rebel) wired into the Settings; testnet wallets always route to the testnet explorer regardless of preference.',
   'Send screen rewritten around @neuraiproject/neurai-create-transaction + @neuraiproject/neurai-sign-transaction; PQ signing path verified end-to-end.',
   'Receive screen polls the Neurai backend every 5 seconds for incoming payments and switches to a success view as soon as funds land.',
@@ -36,11 +36,7 @@ const ReleaseNotes: React.FC = () => {
   const { colors } = useTheme();
 
   return (
-    <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      automaticallyAdjustContentInsets
-      style={{ backgroundColor: colors.elevated }}
-    >
+    <ScrollView contentInsetAdjustmentBehavior="automatic" automaticallyAdjustContentInsets style={{ backgroundColor: colors.elevated }}>
       <BlueCard>
         <Text style={[styles.heading, { color: colors.foregroundColor }]}>What's new in NeuraiWallet</Text>
         <View style={styles.list}>

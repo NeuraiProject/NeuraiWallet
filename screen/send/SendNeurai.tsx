@@ -6,10 +6,9 @@ import { amountFromInput, xnaToSats, satsToXna } from '../../blue_modules/neurai
  * coin selection, PSBTs, payjoin, multisig and fee-rate controls expressed in
  * sat/vByte. None of that maps cleanly onto Neurai: the engine in
  * `@neuraiproject/neurai-jswallet` selects coins, builds and signs the
- * transaction, and asks the node for a fee via `estimatesmartfee` (target = 20
- * blocks; falls back to 0.05 XNA/kB if the node has no estimate). Per Neurai
- * `wallet/wallet.h:54` the node's own `DEFAULT_FALLBACK_FEE` is 1,025,000
- * sats/kB, and the lib stays above that.
+ * transaction. The wallet supplies a local rate of 0.012 XNA per 1,000 vbytes
+ * (the default min-relay rate plus 20%); libraries calculate the fee from the
+ * selected inputs and serialized outputs, without asking for a node estimate.
  *
  * The user types an address and an amount in XNA, we build the transaction,
  * show the engine-computed fee and the amount to be sent, and broadcast on

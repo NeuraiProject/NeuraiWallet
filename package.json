@@ -99,7 +99,7 @@
     "@neuraiproject/neurai-create-transaction": "0.8.1",
     "@neuraiproject/neurai-depin-msg": "^3.1.1",
     "@neuraiproject/neurai-history-list": "1.2.7",
-    "@neuraiproject/neurai-jswallet": "0.15.4",
+    "@neuraiproject/neurai-jswallet": "0.15.5",
     "@neuraiproject/neurai-key": "4.0.1",
     "@neuraiproject/neurai-message": "0.10.2",
     "@neuraiproject/neurai-rpc": "^0.6.1",

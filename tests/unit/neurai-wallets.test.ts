@@ -1,4 +1,5 @@
 import assert from 'assert';
+import fixtures from './fixtures/neurai-key4-addresses.json';
 import { RpcBackend } from '../../blue_modules/neurai/RpcBackend';
 
 import { CHAIN_PARAMS, createDefaultBackend } from '../../blue_modules/neurai';
@@ -214,27 +215,40 @@ describe('Neurai wallets', () => {
     });
   });
 
-  describe('fee estimate (send-max parity with the engine)', () => {
+  describe('library transaction sizing and exact fees', () => {
     const legacyScript = '76a914' + '00'.repeat(20) + '88ac';
     // Witness v1: OP_1 (0x51) + push-32 (0x20) + a 32-byte program. The old
     // fixture used '5114' (push-20), which `isPQScript` does not match, so this
     // suite measured the LEGACY branch and never covered PQ sizing at all.
     const pqScript = '5120' + '00'.repeat(32);
 
-    it('uses legacy input/output sizes (148 / 34) and base 10', () => {
-      assert.strictEqual(estimateNeuraiTxSizeKb([legacyScript], ['NfooLegacyAddress']), 192 / 1024);
-      // ceil((192/1024) * 0.05 XNA/kB * 1e8) = ceil(937500)
-      assert.strictEqual(estimateNeuraiFeeSats([legacyScript], ['NfooLegacyAddress'], 0.05), 937_500n);
+    it('uses conservative serialized legacy signatures and decimal kilobytes', () => {
+      assert.strictEqual(estimateNeuraiTxSizeKb([legacyScript], [fixtures.fixtures[0].addresses[0]]), 193 / 1000);
+      assert.strictEqual(estimateNeuraiFeeSats([legacyScript], [fixtures.fixtures[0].addresses[0]], 0.05), 965_000n);
     });
 
-    it('uses PQ input/output sizes (977 / 43) and base 12 for AuthScript', () => {
-      // 12 + 977 + 43 = 1032. The sizes mirror `VBYTES` in
-      // @neuraiproject/neurai-sign-transaction, which is the source of truth:
-      // under-counting a PQ input is what gets a transaction rejected with
-      // "min relay fee not met".
-      assert.strictEqual(estimateNeuraiTxSizeKb([pqScript], ['nq1footestaddress']), 1032 / 1024);
-      // ceil((1032/1024) * 0.05 XNA/kB * 1e8) = ceil(5039062.5)
-      assert.strictEqual(estimateNeuraiFeeSats([pqScript], ['nq1footestaddress'], 0.05), 5_039_063n);
+    it('counts asset payloads, mixed destinations, and CompactSize boundaries', () => {
+      const address = fixtures.fixtures[0].addresses[0];
+      const pqAddress = fixtures.fixtures[2].addresses[0];
+      const plain = estimateNeuraiFeeSats([legacyScript], [address], 0.012);
+      expect(plain).toBe(231_600n);
+      expect(estimateNeuraiFeeSats([legacyScript], [pqAddress], 0.012)).toBe(plain + 9n * 1200n);
+      expect(estimateNeuraiFeeSats([legacyScript], [{ address, assetName: 'FEE_TEST' }], 0.012)).toBeGreaterThan(plain);
+      const before = estimateNeuraiFeeSats(Array(252).fill(legacyScript), [address], 0.012);
+      const after = estimateNeuraiFeeSats(Array(253).fill(legacyScript), [address], 0.012);
+      expect(after - before).toBe((149n + 2n) * 1200n);
+    });
+
+    it('rounds fractional satoshi fees up and rejects invalid rates', () => {
+      const outputs = [fixtures.fixtures[0].addresses[0]];
+      expect(estimateNeuraiFeeSats([legacyScript], outputs, 0.00000001)).toBe(1n);
+      expect(() => estimateNeuraiFeeSats([legacyScript], outputs, NaN)).toThrow('Invalid fee');
+      expect(() => estimateNeuraiFeeSats([legacyScript], outputs, -1)).toThrow('Invalid fee');
+    });
+
+    it('accounts for the PQ witness discount', () => {
+      assert.strictEqual(estimateNeuraiTxSizeKb([pqScript], [fixtures.fixtures[2].addresses[0]]), 1031 / 1000);
+      assert.strictEqual(estimateNeuraiFeeSats([pqScript], [fixtures.fixtures[2].addresses[0]], 0.05), 5_155_000n);
     });
   });
 });
