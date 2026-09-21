@@ -1,12 +1,4 @@
-import {
-  parseRawSats,
-  parseMoneySats,
-  satsToXna,
-  xnaToSats,
-  satsToSafeNumber,
-  compareSats,
-  amountFromInput,
-} from '../../blue_modules/neurai/amounts';
+import { parseRawSats, parseMoneySats, satsToXna, xnaToSats, compareSats, amountFromInput } from '../../blue_modules/neurai/amounts';
 /**
  * External-signing Neurai hardware wallet (NeuraiHW / ESP32 over USB).
  *
@@ -455,9 +447,9 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     const payments = [{ address: toAddress, valueSats: outputValue }];
     if (change > 0n) payments.push({ address: this.address, valueSats: change });
     const { rawTx } = createPaymentTransaction({ inputs: selected.map(u => ({ txid: u.txid, vout: u.outputIndex })), payments });
-    // The current device library encodes this field as a JSON number. Reject,
-    // rather than round, an unsupported prevout; unsigned outputs remain exact.
-    const inputs: IPQSignInput[] = selected.map((u, index) => ({ index, amount: satsToSafeNumber(u.satoshis), script_pub_key: u.script }));
+    // SDK 0.6.1 preserves integer strings and encodes safe amounts as numbers
+    // at the device boundary, without rounding large prevouts.
+    const inputs: IPQSignInput[] = selected.map((u, index) => ({ index, amount: u.satoshis.toString(), script_pub_key: u.script }));
     return { keyType: 'pq', rawTxHex: rawTx, inputs, feeSats, amountSats: outputValue };
   }
 
@@ -640,7 +632,7 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     // inputs use their real value.
     const inputs: IPQSignInput[] = allInputs.map((u, index) => ({
       index,
-      amount: u.assetName && u.assetName !== 'XNA' ? 0 : satsToSafeNumber(u.satoshis),
+      amount: u.assetName && u.assetName !== 'XNA' ? 0 : u.satoshis.toString(),
       script_pub_key: u.script,
     }));
 

@@ -7,7 +7,7 @@
 declare module '@neuraiproject/neurai-history-list' {
   export interface IDelta {
     assetName: string;
-    satoshis: number;
+    satoshis: number | string | bigint;
     txid: string;
     index: number;
     blockindex: number;
@@ -17,8 +17,8 @@ declare module '@neuraiproject/neurai-history-list' {
 
   export interface IHistoryAssetEntry {
     assetName: string;
-    value: number;
-    satoshis: number;
+    value: number | string;
+    satoshis: number | string;
   }
 
   export interface IHistoryItem {

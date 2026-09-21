@@ -51,6 +51,9 @@ type WssResponse<T> = {
 };
 
 type WssHello = {
+  service_id?: string;
+  genesis_hash?: string;
+  network?: string;
   protocol?: string;
   exact_amounts?: boolean;
   amounts?: string;
@@ -144,6 +147,35 @@ export class WssBackend implements NeuraiBackend {
   private readonly url: string;
   private readonly rpcBackend?: RpcBackend;
   private exactAmounts = false;
+  private readonly rpcUrl?: string;
+  private readonly expectedNetwork: string;
+  private readonly expectedGenesisHash?: string;
+  private hello?: WssHello;
+  private validatedRpc?: Promise<void>;
+  private staleAddresses = new Set<string>();
+  private syncListeners = new Set<() => void>();
+
+  getServiceStatus(): 'stale' | 'legacy' | 'exact' {
+    if (!isOpen(this.ws) || this.staleAddresses.size) return 'stale';
+    return this.exactAmounts ? 'exact' : 'legacy';
+  }
+
+  onSyncStatus(listener: () => void): () => void {
+    this.syncListeners.add(listener);
+    return () => this.syncListeners.delete(listener);
+  }
+
+  private syncChanged(): void {
+    for (const listener of this.syncListeners) listener();
+  }
+
+  private setStale(address: string, stale: boolean): void {
+    if (this.staleAddresses.has(address) === stale) return;
+    if (stale) this.staleAddresses.add(address);
+    else this.staleAddresses.delete(address);
+    this.syncChanged();
+  }
+
   private readonly authToken?: string;
   private ws: WebSocketLike | null = null;
   private connectPromise: Promise<void> | null = null;
@@ -165,6 +197,10 @@ export class WssBackend implements NeuraiBackend {
 
   constructor(config: Omit<BackendConfig, 'kind'>) {
     this.chain = config.chain;
+    this.rpcUrl = config.rpcUrl;
+    this.expectedNetwork = config.expectedNetwork ?? CHAIN_PARAMS[this.chain].network;
+    this.expectedGenesisHash = config.expectedGenesisHash;
+    if (this.expectedNetwork === 'regtest' && !this.expectedGenesisHash) throw new Error('Regtest requires an explicit genesis hash');
     if (config.rpcUrl) this.rpcBackend = new RpcBackend({ ...config, url: config.rpcUrl });
     this.url = config.url;
     this.authToken = config.authToken || config.password;
@@ -190,6 +226,8 @@ export class WssBackend implements NeuraiBackend {
     for (const a of next) if (!this.subscribedAddresses.has(a)) toAdd.push(a);
     for (const a of this.subscribedAddresses) if (!next.has(a)) toRemove.push(a);
     this.subscribedAddresses = next;
+    for (const address of toRemove) this.staleAddresses.delete(address);
+    for (const address of toAdd) this.staleAddresses.add(address);
     // Establish the WS if needed. ensureConnected runs the full subscribe.bulk
     // for all currently-subscribed addresses on first connect, so we only
     // need to handle the diff path when the socket is already open.
@@ -259,6 +297,11 @@ export class WssBackend implements NeuraiBackend {
     let diffs = 0;
     for (const r of results) {
       if (!r || typeof r.address !== 'string' || typeof r.status !== 'string') continue;
+      if (r.balance) {
+        this.rawAmount(r.balance.confirmed);
+        this.rawAmount(r.balance.unconfirmed);
+      }
+      this.setStale(r.address, false);
       const prev = this.knownStatuses.get(r.address);
       if (prev === r.status) continue;
       diffs++;
@@ -285,7 +328,65 @@ export class WssBackend implements NeuraiBackend {
 
   async rpc<T = unknown>(method: string, params: unknown[]): Promise<T> {
     if (!this.rpcBackend) throw new Error('Configure the RPC endpoint paired with this wallet service before sending');
+    await this.ensureConnected();
+    if (!this.validatedRpc) {
+      const socket = this.ws;
+      const validation = this.validateCompanion().then(() => {
+        if (this.ws !== socket || !isOpen(socket)) throw new Error('Wallet service connection changed during validation');
+      });
+      this.validatedRpc = validation;
+      validation.catch(() => {
+        if (this.validatedRpc === validation) this.validatedRpc = undefined;
+      });
+    }
+    await this.validatedRpc;
     return this.rpcBackend.rpc<T>(method, params);
+  }
+
+  private async validateCompanion(): Promise<void> {
+    if (!this.rpcUrl || !this.rpcBackend) throw new Error('Missing companion RPC');
+    const settingsUrl = new URL(this.rpcUrl);
+    if (!/\/rpc\/?$/.test(settingsUrl.pathname)) throw new Error('Companion endpoint must end in /rpc');
+    const settingsEndpoint = settingsUrl.origin + settingsUrl.pathname.replace(/\/rpc\/?$/, '/settings');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(settingsEndpoint, { signal: controller.signal });
+      if (!response.ok) throw new Error('Wallet service capabilities unavailable');
+      const parsed = parseRpcJson(await response.text());
+      if (!parsed || typeof parsed !== 'object') throw new Error('Invalid wallet service capabilities');
+      const settings = parsed as Record<string, unknown>;
+      if (
+        settings.exact_amounts !== true ||
+        settings.amounts !== 'rpc-native-units' ||
+        settings.numeric_encoding !== 'safe-number-or-string'
+      ) {
+        throw new Error('Companion RPC does not guarantee exact amounts');
+      }
+      if (
+        settings.network !== this.expectedNetwork ||
+        typeof settings.genesis_hash !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(settings.genesis_hash)
+      ) {
+        throw new Error('Companion RPC chain mismatch');
+      }
+      if (this.expectedGenesisHash && settings.genesis_hash !== this.expectedGenesisHash) throw new Error('Companion RPC genesis mismatch');
+      const genesis = await this.rpcBackend.rpc<string>('getblockhash', [0]);
+      if (genesis !== settings.genesis_hash) throw new Error('Companion RPC identity mismatch');
+      const hello = this.hello;
+      if (hello?.protocol === 'wss/2' || hello?.service_id || hello?.genesis_hash) {
+        if (
+          !settings.service_id ||
+          hello?.service_id !== settings.service_id ||
+          hello?.genesis_hash !== genesis ||
+          hello?.network !== settings.network
+        ) {
+          throw new Error('WSS and HTTP wallet services do not match');
+        }
+      }
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private rawAmount(value: unknown): bigint {
@@ -397,18 +498,30 @@ export class WssBackend implements NeuraiBackend {
     return assets.filter(u => u.assetName === assetName);
   }
 
-  private fetchAddressState(
+  private async fetchAddressState(
     address: string,
     includeHistory: boolean,
     includeUtxos: boolean,
     extra?: Record<string, unknown>,
   ): Promise<WssAddressState> {
-    return this.serviceRequest<WssAddressState>('address.get_state', {
-      address,
-      include_history: includeHistory,
-      include_utxos: includeUtxos,
-      ...extra,
-    });
+    try {
+      const state = await this.serviceRequest<WssAddressState>('address.get_state', {
+        address,
+        include_history: includeHistory,
+        include_utxos: includeUtxos,
+        ...extra,
+      });
+      parseMoneySats(this.rawAmount(state.balance?.confirmed));
+      this.rawAmount(state.balance?.unconfirmed);
+      for (const rows of [state.history, state.mempool, state.utxos, state.asset_utxos]) {
+        for (const row of rows || []) this.rawAmount(row.satoshis);
+      }
+      this.setStale(address, false);
+      return state;
+    } catch (error) {
+      this.setStale(address, true);
+      throw error;
+    }
   }
 
   private toAddressDelta(address: string, item: WssHistory): AddressDelta {
@@ -472,6 +585,8 @@ export class WssBackend implements NeuraiBackend {
     const protocols = this.authToken ? [WIRE_PROTOCOL, `auth.${this.authToken}`] : [WIRE_PROTOCOL];
     const ws = new (getWebSocketCtor())(this.url, protocols);
     this.ws = ws;
+    this.validatedRpc = undefined;
+    for (const address of this.subscribedAddresses) this.staleAddresses.add(address);
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -489,15 +604,21 @@ export class WssBackend implements NeuraiBackend {
         this.rejectPending(new Error('WSS connection closed'));
         this.ws = null;
         this.exactAmounts = false;
+        this.validatedRpc = undefined;
+        this.syncChanged();
         reject(new Error('WSS connection closed'));
       };
       ws.onopen = () => {
         this.sendRequest<WssHello>('hello', {
           client: CLIENT_NAME,
-          network: CHAIN_PARAMS[this.chain].network,
+          network: this.expectedNetwork,
           protocol,
         })
           .then(async hello => {
+            this.hello = hello;
+            if (hello.network && hello.network !== this.expectedNetwork) throw new Error('Wallet service network mismatch');
+            if (this.expectedGenesisHash && hello.genesis_hash && hello.genesis_hash !== this.expectedGenesisHash)
+              throw new Error('Wallet service genesis mismatch');
             this.exactAmounts = hello.protocol === 'wss/2' && hello.exact_amounts === true && hello.amounts === 'string-sats';
             if (hello.protocol === 'wss/2' && !this.exactAmounts) throw new Error('Wallet service did not confirm exact amounts');
             clearTimeout(timer);
@@ -521,6 +642,7 @@ export class WssBackend implements NeuraiBackend {
                 console.debug('[WssBackend] subscribe.bulk failed', err);
               }
             }
+            this.syncChanged();
             resolve();
           })
           .catch(err => {
@@ -578,6 +700,11 @@ export class WssBackend implements NeuraiBackend {
   }
 
   private handleEvent(method: string, params: unknown): void {
+    if (method === 'address.sync_status') {
+      const event = params as { address?: unknown; stale?: unknown };
+      if (event && typeof event.address === 'string' && typeof event.stale === 'boolean') this.setStale(event.address, event.stale);
+      return;
+    }
     if (method === 'chain.tip') {
       const tip = params as { height?: unknown };
       if (typeof tip.height === 'number') this.tipHeight = tip.height;
@@ -594,6 +721,7 @@ export class WssBackend implements NeuraiBackend {
           return;
         }
       }
+      this.setStale(event.address, false);
       if (typeof event.status === 'string') {
         const prev = this.knownStatuses.get(event.address);
         this.knownStatuses.set(event.address, event.status);
@@ -627,5 +755,8 @@ export class WssBackend implements NeuraiBackend {
     }
     this.ws = null;
     this.exactAmounts = false;
+    this.validatedRpc = undefined;
+    this.rejectPending(new Error('WSS connection closed'));
+    this.syncChanged();
   }
 }

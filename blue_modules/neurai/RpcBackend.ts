@@ -54,7 +54,10 @@ export class RpcBackend implements NeuraiBackend {
 
   async getAddressHistory(addresses: string[]): Promise<AddressDelta[]> {
     if (addresses.length === 0) return [];
-    const rows = await this.rpcCaller<AddressDelta[]>(methods.getaddressdeltas, [{ addresses }]);
+    // Request assets as well as XNA so the exact history library sees token deltas.
+    let rows = await this.rpcCaller<AddressDelta[]>(methods.getaddressdeltas, [{ addresses, assetName: '*' }]);
+    // Some older indexes return an empty wildcard result; preserve native history.
+    if (rows.length === 0) rows = await this.rpcCaller<AddressDelta[]>(methods.getaddressdeltas, [{ addresses }]);
     return rows.map(row => ({ ...row, satoshis: parseRawSats(row.satoshis) }));
   }
 

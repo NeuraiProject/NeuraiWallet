@@ -30,6 +30,9 @@ export interface BackendConfig {
   authToken?: string;
   /** Explicit companion RPC endpoint for a WSS service. */
   rpcUrl?: string;
+  /** Explicit chain identity for isolated regtest and pinned deployments. */
+  expectedNetwork?: 'mainnet' | 'testnet' | 'regtest';
+  expectedGenesisHash?: string;
 }
 
 /** Address-level activity item. Mirrors `IAddressDelta` from neurai-jswallet. */

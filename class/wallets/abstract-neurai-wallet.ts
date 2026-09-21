@@ -15,6 +15,7 @@
 import { InteractionManager } from 'react-native';
 import NeuraiJsWallet from '@neuraiproject/neurai-jswallet';
 import NeuraiKey from '@neuraiproject/neurai-key';
+import { getHistory } from '@neuraiproject/neurai-history-list';
 import { parseRawSats, parseMoneySats, satsToXna, absSats, minSats, amountFromInput } from '../../blue_modules/neurai/amounts';
 import type { AddressDelta } from '../../blue_modules/neurai/NeuraiBackend';
 import {
@@ -166,51 +167,16 @@ export function describeBackendError(e: unknown): string {
   return explained ? `${explained} (${detail})` : detail;
 }
 
-type HistoryAsset = IHistoryItem['assets'][number];
-
+/** Normalize the library's JSON-safe amounts at the wallet boundary. */
 const getHistoryItem = (deltas: IDelta[], baseCurrency: string): IHistoryItem => {
-  if (deltas.length === 1) {
-    const delta = deltas[0];
-    return {
-      isSent: delta.satoshis < 0,
-      fee: '0',
-      assets: [
-        {
-          assetName: delta.assetName,
-          satoshis: delta.satoshis,
-          value: satsToXna(delta.satoshis),
-        },
-      ],
-      blockHeight: delta.height,
-      transactionId: delta.txid,
-    };
-  }
-
-  const balanceByAsset: Record<string, bigint> = {};
-  for (const delta of deltas) {
-    balanceByAsset[delta.assetName] = (balanceByAsset[delta.assetName] ?? 0n) + delta.satoshis;
-  }
-
-  let isSent = false;
-  let assets: HistoryAsset[] = Object.keys(balanceByAsset).map(assetName => {
-    if (balanceByAsset[assetName] < 0) isSent = true;
-    return {
-      assetName,
-      satoshis: balanceByAsset[assetName],
-      value: satsToXna(balanceByAsset[assetName]),
-    };
-  });
-
-  if (isSent && assets.some(asset => asset.assetName !== baseCurrency)) {
-    assets = assets.filter(asset => asset.assetName !== baseCurrency || asset.satoshis >= 500000000n);
-  }
-
+  const [item] = getHistory(deltas, baseCurrency);
   return {
-    assets,
-    blockHeight: deltas[0].height,
-    transactionId: deltas[0].txid,
-    isSent,
-    fee: '0',
+    ...item,
+    fee: satsToXna(decimalToSats(item.fee)),
+    assets: item.assets.map(asset => {
+      const satoshis = parseRawSats(asset.satoshis);
+      return { ...asset, satoshis, value: satsToXna(satoshis) };
+    }),
   };
 };
 
@@ -532,6 +498,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * tells us a subscribed address moved. Coalesces bursts so a block with
    * many touched outputs collapses into a single refetch.
    */
+  getServiceStatus(): 'stale' | 'legacy' | 'exact' | undefined {
+    return (this._backend as { getServiceStatus?: () => 'stale' | 'legacy' | 'exact' } | undefined)?.getServiceStatus?.();
+  }
+
   private _wireBackendPushHandler(): void {
     if (!this._backend) return;
     if (this._unsubscribeBackendPush) {
@@ -541,7 +511,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     const onAddressChanged = (this._backend as { onAddressChanged?: (cb: (event: AddressChangedEvent) => void) => () => void })
       .onAddressChanged;
     if (typeof onAddressChanged !== 'function') return;
-    this._unsubscribeBackendPush = onAddressChanged.call(this._backend, (event: AddressChangedEvent) => {
+    const unsubscribeChanged = onAddressChanged.call(this._backend, (event: AddressChangedEvent) => {
       // Apply whatever the server gave us synchronously and cheaply: balance
       // is in the payload for PQ-with-reuse (single subscribed address ==
       // wallet total). Doing this before yielding means the UI shows fresh
@@ -597,6 +567,13 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
         }
       });
     });
+    const unsubscribeSync = (this._backend as { onSyncStatus?: (cb: () => void) => () => void }).onSyncStatus?.(() =>
+      emitWalletChanged(this.getID()),
+    );
+    this._unsubscribeBackendPush = () => {
+      unsubscribeChanged();
+      unsubscribeSync?.();
+    };
   }
 
   /**

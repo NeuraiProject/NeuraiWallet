@@ -613,6 +613,16 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   return (
     <View style={[styles.flex, stylesHook.backgroundContainer]}>
       <View style={[styles.refreshIndicatorBackground, stylesHook.gradientBackground]} testID="TransactionsListView" />
+      {isNeuraiWallet(wallet) && wallet.getServiceStatus?.() === 'stale' && (
+        <Text accessibilityRole="alert" style={{ color: colors.foregroundColor }}>
+          {loc.wallets.neurai_service_stale}
+        </Text>
+      )}
+      {isNeuraiWallet(wallet) && wallet.getServiceStatus?.() === 'legacy' && (
+        <Text accessibilityRole="alert" style={{ color: colors.foregroundColor }}>
+          {loc.wallets.neurai_service_legacy}
+        </Text>
+      )}
       {showDepinTab && activeTab === 'depin' ? (
         <View style={[styles.flex, stylesHook.backgroundContainer]}>
           <ListHeaderComponent />

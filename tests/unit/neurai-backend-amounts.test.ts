@@ -73,7 +73,13 @@ function service(version: 1 | 2, amount: string, confirmExact = true) {
       let error: unknown;
       if (request.method === 'hello') {
         if (version === 1 && request.params.protocol === 'wss/2') error = { code: 1001, message: 'Unsupported protocol' };
-        else result = { protocol: `wss/${version}`, exact_amounts: confirmExact, amounts: 'string-sats' };
+        else
+          result = {
+            protocol: `wss/${version}`,
+            exact_amounts: confirmExact,
+            amounts: 'string-sats',
+            ...(version === 2 ? { service_id: 'test', network: 'testnet', genesis_hash: 'a'.repeat(64) } : {}),
+          };
       } else if (request.method === 'address.get_state') {
         result = {
           balance: { confirmed: amount, unconfirmed: '-1' },
@@ -96,6 +102,8 @@ function service(version: 1 | 2, amount: string, confirmExact = true) {
   return {
     methods,
     push: (params: unknown) => socket.onmessage({ data: JSON.stringify({ method: 'address.changed', params }) }),
+    sync: (stale: boolean) =>
+      socket.onmessage({ data: JSON.stringify({ method: 'address.sync_status', params: { address: 'a', stale } }) }),
     close: () => socket?.close(),
   };
 }
@@ -146,6 +154,90 @@ it('rejects v2 without exactness capability', async () => {
   const server = service(2, '1', false);
   try {
     await expect(new WssBackend({ chain: 'xna-test', url: 'ws://local/push' }).getBalance(['a'])).rejects.toThrow('confirm exact');
+  } finally {
+    server.close();
+  }
+});
+
+it('requests asset history and falls back to native history when an older index returns an empty wildcard', async () => {
+  const paramsSeen: unknown[] = [];
+  global.fetch = jest.fn(async (_url, options) => {
+    const { params } = JSON.parse(String(options?.body));
+    paramsSeen.push(params);
+    const result = params[0].assetName === '*' ? '[]' : '[{"assetName":"XNA","satoshis":-10000000000000001}]';
+    return new Response('{"result":' + result + ',"error":null,"id":1}', { status: 200 });
+  });
+  const backend = new RpcBackend({ chain: 'xna-test', url: 'http://127.0.0.1:19211' });
+  expect((await backend.getAddressHistory(['a']))[0].satoshis).toBe(-10000000000000001n);
+  expect(paramsSeen).toEqual([[{ addresses: ['a'], assetName: '*' }], [{ addresses: ['a'] }]]);
+});
+
+function exactHttp(overrides: Record<string, unknown> = {}) {
+  const calls: string[] = [];
+  global.fetch = jest.fn(async (url, options) => {
+    if (String(url) === 'http://local/settings')
+      return new Response(
+        JSON.stringify({
+          exact_amounts: true,
+          amounts: 'rpc-native-units',
+          numeric_encoding: 'safe-number-or-string',
+          service_id: 'test',
+          network: 'testnet',
+          genesis_hash: 'a'.repeat(64),
+          ...overrides,
+        }),
+      );
+    if (String(url) !== 'http://local/rpc') throw new Error('Unexpected endpoint');
+    const { method } = JSON.parse(String(options?.body));
+    calls.push(method);
+    return new Response(JSON.stringify({ result: method === 'getblockhash' ? 'a'.repeat(64) : [] }));
+  });
+  return calls;
+}
+
+test.each([1, 2] as const)('version %s constructs from validated HTTP and revalidates after reconnect', async version => {
+  const server = service(version, '1');
+  const calls = exactHttp();
+  const backend = new WssBackend({ chain: 'xna-test', url: 'ws://local/push', rpcUrl: 'http://local/rpc' });
+  try {
+    await backend.rpc('getaddressutxos', []);
+    expect(calls).toEqual(['getblockhash', 'getaddressutxos']);
+    server.close();
+    await backend.rpc('getaddressutxos', []);
+    expect(calls.filter(m => m === 'getblockhash')).toHaveLength(2);
+  } finally {
+    server.close();
+  }
+});
+test.each([{ exact_amounts: false }, { service_id: 'other' }, { network: 'mainnet' }, { genesis_hash: 'b'.repeat(64) }])(
+  'blocks incompatible companion %s',
+  async mismatch => {
+    const server = service(2, '1');
+    const calls = exactHttp(mismatch);
+    try {
+      const backend = new WssBackend({ chain: 'xna-test', url: 'ws://local/push', rpcUrl: 'http://local/rpc' });
+      await expect(backend.rpc('createrawtransaction', [])).rejects.toThrow();
+      expect(calls).not.toContain('createrawtransaction');
+    } finally {
+      server.close();
+    }
+  },
+);
+it('reports stale and recovery at unchanged monetary status', async () => {
+  const server = service(2, '1');
+  const backend = new WssBackend({ chain: 'xna-test', url: 'ws://local/push' });
+  const changed = jest.fn();
+  backend.onSyncStatus(changed);
+  try {
+    await backend.setSubscribedAddresses(['a']);
+    expect(backend.getServiceStatus()).toBe('exact');
+    server.sync(true);
+    expect(backend.getServiceStatus()).toBe('stale');
+    server.sync(false);
+    expect(backend.getServiceStatus()).toBe('exact');
+    server.close();
+    expect(backend.getServiceStatus()).toBe('stale');
+    expect(changed).toHaveBeenCalled();
   } finally {
     server.close();
   }
