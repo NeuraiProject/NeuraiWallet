@@ -432,7 +432,8 @@
     "watchOnlyWarningDescription": "Be cautious of scammers who often use “watch-only” wallets to deceive users. These wallets do not allow you to control or send funds; they only let you view the balance."
   },
   "wallets": {
-    "neurai_service_stale": "Updating wallet data. The previous balance is shown until the service recovers.",
+    "neurai_service_updating": "Updating…",
+    "neurai_service_stale": "Unable to update. Showing the last available data.",
     "neurai_service_legacy": "Legacy service: displayed amounts are not verified as exact.",
     "add_neurai_legacy": "Neurai Legacy",
     "add_neurai_legacy_explain": "Standard ECDSA addresses (BIP44)",

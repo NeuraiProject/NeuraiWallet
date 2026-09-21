@@ -167,6 +167,7 @@ export class WssBackend implements NeuraiBackend {
   private readonly expectedGenesisHash?: string;
   private hello?: WssHello;
   private staleAddresses = new Set<string>();
+  private pendingSubscriptions = new Set<string>();
   private syncListeners = new Set<() => void>();
 
   getServiceStatus(): 'stale' | 'legacy' | 'exact' {
@@ -193,6 +194,7 @@ export class WssBackend implements NeuraiBackend {
   private readonly authToken?: string;
   private ws: WebSocketLike | null = null;
   private connectPromise: Promise<void> | null = null;
+  private resumePromise: Promise<void> | null = null;
   private nextId = 1;
   private pending = new Map<number | string, PendingRequest>();
   private tipHeight = 0;
@@ -235,11 +237,16 @@ export class WssBackend implements NeuraiBackend {
     const next = new Set(addresses.filter(a => typeof a === 'string' && a.length > 0));
     const toAdd: string[] = [];
     const toRemove: string[] = [];
-    for (const a of next) if (!this.subscribedAddresses.has(a)) toAdd.push(a);
+    // A requested subscription can have failed (including a per-address
+    // error in an otherwise successful batch). Retry those on screen focus.
+    for (const a of next) {
+      if ((!this.subscribedAddresses.has(a) || this.staleAddresses.has(a)) && !this.pendingSubscriptions.has(a)) toAdd.push(a);
+    }
     for (const a of this.subscribedAddresses) if (!next.has(a)) toRemove.push(a);
     this.subscribedAddresses = next;
     for (const address of toRemove) this.staleAddresses.delete(address);
     for (const address of toAdd) this.staleAddresses.add(address);
+    if (toAdd.length || toRemove.length) this.syncChanged();
     // Establish the WS if needed. ensureConnected runs the full subscribe.bulk
     // for all currently-subscribed addresses on first connect, so we only
     // need to handle the diff path when the socket is already open.
@@ -258,13 +265,22 @@ export class WssBackend implements NeuraiBackend {
         await this.sendRequest('address.unsubscribe.bulk', { addresses: toRemove });
       }
       if (toAdd.length > 0) {
-        const result = await this.sendRequest<{
-          results?: Array<{ address: string; status?: string; balance?: WssBalance; height?: number }>;
-        }>('address.subscribe.bulk', { addresses: toAdd });
-        this._processSubscribeResults(result?.results);
+        await this.subscribeAddresses(toAdd);
       }
     } catch (err) {
       console.debug('WssBackend.setSubscribedAddresses: subscribe diff failed', err);
+    }
+  }
+
+  private async subscribeAddresses(addresses: string[]): Promise<void> {
+    for (const address of addresses) this.pendingSubscriptions.add(address);
+    try {
+      const result = await this.sendRequest<{
+        results?: Array<{ address: string; status?: string; balance?: WssBalance; height?: number }>;
+      }>('address.subscribe.bulk', { addresses });
+      this._processSubscribeResults(result?.results);
+    } finally {
+      for (const address of addresses) this.pendingSubscriptions.delete(address);
     }
   }
 
@@ -470,8 +486,10 @@ export class WssBackend implements NeuraiBackend {
     includeUtxos: boolean,
     extra?: Record<string, unknown>,
   ): Promise<WssAddressState> {
+    await this.ensureConnected();
+    const connection = this.ws;
     try {
-      const state = await this.serviceRequest<WssAddressState>('address.get_state', {
+      const state = await this.sendRequest<WssAddressState>('address.get_state', {
         address,
         include_history: includeHistory,
         include_utxos: includeUtxos,
@@ -482,10 +500,11 @@ export class WssBackend implements NeuraiBackend {
       for (const rows of [state.history, state.mempool, state.utxos, state.asset_utxos]) {
         for (const row of rows || []) this.rawAmount(row.satoshis);
       }
-      this.setStale(address, false);
+      if (this.ws === connection) this.setStale(address, false);
       return state;
     } catch (error) {
-      this.setStale(address, true);
+      // An interrupted background request must not mark the new session stale.
+      if (this.ws === connection) this.setStale(address, true);
       throw error;
     }
   }
@@ -556,23 +575,27 @@ export class WssBackend implements NeuraiBackend {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error(`WSS connection timeout: ${this.url}`));
-        this.close();
+        if (this.ws === ws) this.close();
       }, REQUEST_TIMEOUT_MS);
 
-      ws.onmessage = event => this.handleMessage(event.data);
+      ws.onmessage = event => {
+        if (this.ws === ws) this.handleMessage(event.data);
+      };
       ws.onerror = event => {
         reject(new Error(`WSS connection failed: ${String(event)}`));
       };
       ws.onclose = () => {
         clearTimeout(timer);
+        // Settle an interrupted handshake even after close() detached this socket.
+        reject(new Error('WSS connection closed'));
         if (this.ws !== ws) return;
         this.rejectPending(new Error('WSS connection closed'));
         this.ws = null;
         this.exactAmounts = false;
         this.syncChanged();
-        reject(new Error('WSS connection closed'));
       };
       ws.onopen = () => {
+        if (this.ws !== ws) return;
         this.sendRequest<WssHello>('hello', {
           client: CLIENT_NAME,
           network: this.expectedNetwork,
@@ -596,12 +619,7 @@ export class WssBackend implements NeuraiBackend {
             // closed, so opening the wallet is cheap when nothing happened.
             if (this.subscribedAddresses.size > 0) {
               try {
-                const result = await this.sendRequest<{
-                  results?: Array<{ address: string; status?: string; balance?: WssBalance; height?: number }>;
-                }>('address.subscribe.bulk', {
-                  addresses: Array.from(this.subscribedAddresses),
-                });
-                this._processSubscribeResults(result?.results);
+                await this.subscribeAddresses(Array.from(this.subscribedAddresses));
               } catch (err) {
                 console.debug('[WssBackend] subscribe.bulk failed', err);
               }
@@ -612,7 +630,7 @@ export class WssBackend implements NeuraiBackend {
           .catch(err => {
             clearTimeout(timer);
             reject(err);
-            this.close();
+            if (this.ws === ws) this.close();
           });
       };
     });
@@ -709,6 +727,25 @@ export class WssBackend implements NeuraiBackend {
       pending.reject(error);
     }
     this.pending.clear();
+  }
+
+  /** Android may leave a suspended socket reporting OPEN. Start a fresh
+   * session on foreground entry, including entry through a notification.
+   */
+  async resumeConnection(): Promise<void> {
+    if (this.resumePromise) return this.resumePromise;
+    const previous = this.connectPromise;
+    this.close();
+    const attempt = (async () => {
+      await previous?.catch(() => undefined);
+      await this.ensureConnected();
+    })();
+    this.resumePromise = attempt;
+    try {
+      await attempt;
+    } finally {
+      if (this.resumePromise === attempt) this.resumePromise = null;
+    }
   }
 
   disconnect(): void {

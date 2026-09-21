@@ -15,7 +15,6 @@ import {
 import NeuraiUriMatch, { type NeuraiPaymentUri, type NeuraiUriRoute } from '../class/neurai-uri-match';
 import { openNeuraiPaymentUri } from '../helpers/open-neurai-payment';
 import loc from '../loc';
-import { Chain } from '../models/xnaUnits';
 import { navigationRef } from '../NavigationService';
 import ActionSheet from '../screen/ActionSheet';
 import { useStorage } from './context/useStorage';
@@ -45,15 +44,7 @@ const ClipboardContentType = Object.freeze({
  * Hook that initializes all companion listeners and functionality without rendering a component
  */
 const useCompanionListeners = (skipIfNotInitialized = true) => {
-  const {
-    wallets,
-    addWallet,
-    saveToDisk,
-    fetchAndSaveWalletTransactions,
-    refreshAllWalletTransactions,
-    setSharedCosigner,
-    walletsInitialized,
-  } = useStorage();
+  const { wallets, addWallet, saveToDisk, fetchAndSaveWalletTransactions, setSharedCosigner, walletsInitialized } = useStorage();
   const { setSelectedNetworkStorage } = useSettings();
   const appState = useRef<AppStateStatus>(AppState.currentState);
   const clipboardContent = useRef<undefined | string>(undefined);
@@ -308,9 +299,15 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
 
   const handleAppStateChange = useCallback(
     async (nextAppState: AppStateStatus | undefined) => {
+      const previousState = appState.current;
+      // Record the transition before notification/clipboard early returns.
+      if (nextAppState) appState.current = nextAppState;
       if (!shouldActivateListeners || wallets.length === 0) return;
 
-      if ((appState.current.match(/inactive|background/) && nextAppState === 'active') || nextAppState === undefined) {
+      if ((previousState.match(/inactive|background/) && nextAppState === 'active') || nextAppState === undefined) {
+        // Notification navigation may reuse the focused screen, so its focus
+        // effect is not a reliable place to revive a background WSS session.
+        await Promise.allSettled(wallets.filter(isNeuraiWallet).map(wallet => wallet.ensureBackendConnected({ reconnect: true })));
         updateExchangeRate();
         const processed = await processPushNotifications();
         if (processed) return;
@@ -328,9 +325,6 @@ const useCompanionListeners = (skipIfNotInitialized = true) => {
           showClipboardAlert({ contentType: ClipboardContentType.NEURAI_CONNECT });
         }
         clipboardContent.current = clipboard;
-      }
-      if (nextAppState) {
-        appState.current = nextAppState;
       }
     },
     [processPushNotifications, showClipboardAlert, wallets, shouldActivateListeners],

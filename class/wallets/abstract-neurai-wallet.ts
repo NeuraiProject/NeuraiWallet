@@ -478,8 +478,11 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * non-starter. The engine bootstraps lazily on the first Send/Receive
    * action or the first push-triggered refetch.
    */
-  async ensureBackendConnected(): Promise<void> {
+  async ensureBackendConnected(options?: { reconnect?: boolean }): Promise<void> {
     const backend = this.getBackend();
+    if (options?.reconnect) {
+      await (backend as { resumeConnection?: () => Promise<void> }).resumeConnection?.();
+    }
     // Skip entirely if the active backend has no push protocol (the
     // DisabledBackend mainnet stub, RpcBackend fallback, ElectrumX stub):
     // there's nothing to subscribe to, and creating the engine just to learn
@@ -489,12 +492,12 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
     const cachedAddresses = Object.keys(this._addressStatus || {});
     if (cachedAddresses.length > 0) {
-      this._notifyBackendAddresses(backend, cachedAddresses);
+      await this._notifyBackendAddresses(backend, cachedAddresses);
       return;
     }
     // First-ever run for this wallet: pay the engine bootstrap cost here.
     const engine = await this.ensureEngine();
-    this._notifyBackendAddresses(backend, engine.getAddresses());
+    await this._notifyBackendAddresses(backend, engine.getAddresses());
   }
 
   /**
@@ -863,7 +866,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   /** If the active backend supports server pushes, tell it which addresses
    * to subscribe to so address.changed events flow back here. Best-effort —
    * a missing or failing subscribe path must never break the fetch flow. */
-  private _notifyBackendAddresses(backend: NeuraiBackend, addresses: string[]): void {
+  private async _notifyBackendAddresses(backend: NeuraiBackend, addresses: string[]): Promise<void> {
     const setSubscribed = (backend as { setSubscribedAddresses?: (addrs: string[]) => Promise<void> }).setSubscribedAddresses;
     if (typeof setSubscribed !== 'function') return;
     // PQ wallets currently always reuse the receive address (no change
@@ -872,7 +875,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     // wallets need every external/change address so a tx to any index
     // triggers a refresh.
     const target = this.walletKind === 'pq' && addresses.length > 0 ? [addresses[0]] : addresses;
-    setSubscribed.call(backend, target).catch(err => {
+    await setSubscribed.call(backend, target).catch(err => {
       console.debug('AbstractNeuraiWallet: setSubscribedAddresses failed', err);
     });
   }

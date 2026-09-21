@@ -56,6 +56,8 @@ it('routes every engine RPC call through the current selected backend', async ()
 });
 
 function service(version: 1 | 2, amount: string, confirmExact = true, network = 'testnet') {
+  let failSubscription = false;
+  let holdReads = false;
   const methods: string[] = [];
   let socket: any;
   class FakeSocket {
@@ -91,6 +93,8 @@ function service(version: 1 | 2, amount: string, confirmExact = true, network = 
                 : undefined,
             ...(version === 2 ? { service_id: 'test', network, genesis_hash: 'a'.repeat(64) } : {}),
           };
+      } else if (request.method === 'ping') {
+        result = 'pong';
       } else if (request.method === 'depin.msg_info') {
         result = { body: 'signed-body', poolsig: 'signature' };
       } else if (request.method === 'rpc.call') {
@@ -98,6 +102,7 @@ function service(version: 1 | 2, amount: string, confirmExact = true, network = 
       } else if (request.method === 'tx.broadcast') {
         result = { txid: 'signed-tx' };
       } else if (request.method === 'address.get_state') {
+        if (holdReads) return;
         result = {
           balance: { confirmed: amount, unconfirmed: '-1' },
           history: [{ txid: 'tx', height: 1, satoshis: '-' + amount }],
@@ -105,19 +110,32 @@ function service(version: 1 | 2, amount: string, confirmExact = true, network = 
           mempool: [{ txid: 'pending', satoshis: '-1' }],
         };
       } else if (request.method === 'address.subscribe.bulk') {
-        result = { results: [{ address: 'a', status: 'initial', balance: { confirmed: amount, unconfirmed: '-1' } }] };
+        result = {
+          results: request.params.addresses.map((address: string) =>
+            failSubscription
+              ? { address, error: { code: -1, message: 'Temporary failure' } }
+              : { address, status: 'initial', balance: { confirmed: amount, unconfirmed: '-1' } },
+          ),
+        };
       }
       queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id: request.id, result, error }) }));
     }
 
     close() {
       this.readyState = 3;
-      this.onclose?.();
+      queueMicrotask(() => this.onclose?.());
     }
   }
   global.WebSocket = FakeSocket as any;
   return {
     methods,
+    socket: () => socket,
+    holdReads: (hold: boolean) => {
+      holdReads = hold;
+    },
+    failSubscription: (fail: boolean) => {
+      failSubscription = fail;
+    },
     push: (params: unknown) => socket.onmessage({ data: JSON.stringify({ method: 'address.changed', params }) }),
     sync: (stale: boolean) =>
       socket.onmessage({ data: JSON.stringify({ method: 'address.sync_status', params: { address: 'a', stale } }) }),
@@ -268,5 +286,68 @@ test.each(['mainnet', 'testnet'] as const)('default and custom %s wallet/DePIN b
     await setWssUrlOverride(network, null);
     await setDepinRpcConfig(network, null);
     server.close();
+  }
+});
+
+it('retries failed subscriptions on re-entry, even when addresses and monetary status are unchanged', async () => {
+  const server = service(2, '1');
+  const backend = new WssBackend({ chain: 'xna-test', url: 'ws://local/push' });
+  try {
+    backend.seedKnownStatuses({ a: 'initial' });
+    server.failSubscription(true);
+    await backend.setSubscribedAddresses(['a']);
+    expect(backend.getServiceStatus()).toBe('stale');
+    server.failSubscription(false);
+    await backend.setSubscribedAddresses(['a']);
+    expect(backend.getServiceStatus()).toBe('exact');
+    expect(server.methods.filter(m => m === 'address.subscribe.bulk:')).toHaveLength(2);
+    await backend.setSubscribedAddresses(['a']);
+    expect(server.methods.filter(m => m === 'address.subscribe.bulk:')).toHaveLength(2);
+  } finally {
+    backend.disconnect();
+  }
+});
+
+it('recovers a suspended OPEN socket on notification resume and ignores old-session failures/events', async () => {
+  const server = service(2, '1');
+  const backend = new WssBackend({ chain: 'xna-test', url: 'ws://local/push' });
+  const wallet = NeuraiHDWallet.forNetwork('testnet', mnemonic);
+  (wallet as any)._addressStatus = { a: 'initial' };
+  wallet.setBackend(backend);
+  try {
+    await wallet.ensureBackendConnected();
+    const oldSocket = server.socket();
+    expect(oldSocket.readyState).toBe(1);
+    server.holdReads(true);
+    const interrupted = backend.getBalance(['a']).catch(error => error);
+    await Promise.resolve();
+    await Promise.resolve();
+    server.holdReads(false);
+    await Promise.all([wallet.ensureBackendConnected({ reconnect: true }), wallet.ensureBackendConnected({ reconnect: true })]);
+    expect(await interrupted).toBeInstanceOf(Error);
+    expect(server.socket()).not.toBe(oldSocket);
+    expect(backend.getServiceStatus()).toBe('exact');
+    // A delayed background callback must not corrupt the resumed session.
+    oldSocket.onmessage({ data: JSON.stringify({ method: 'address.sync_status', params: { address: 'a', stale: true } }) });
+    expect(backend.getServiceStatus()).toBe('exact');
+    expect(await backend.getBalance(['a'])).toBe(1n);
+    expect(server.methods.filter(m => m === 'hello:wss/2')).toHaveLength(2);
+    expect(server.methods.filter(m => m === 'address.subscribe.bulk:')).toHaveLength(2);
+  } finally {
+    backend.disconnect();
+  }
+});
+
+it('can resume while an asynchronous connection handshake is still pending', async () => {
+  service(2, '1');
+  const backend = new WssBackend({ chain: 'xna-test', url: 'ws://local/push' });
+  try {
+    const interrupted = backend.ping();
+    await backend.resumeConnection();
+    expect(await interrupted).toBe(false);
+    expect(await backend.ping()).toBe(true);
+    expect(backend.getServiceStatus()).toBe('exact');
+  } finally {
+    backend.disconnect();
   }
 });

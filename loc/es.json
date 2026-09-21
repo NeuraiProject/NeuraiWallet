@@ -371,6 +371,8 @@
     "updating": "Actualizando... "
   },
   "wallets": {
+    "neurai_service_updating": "Actualizando…",
+    "neurai_service_stale": "No se puede actualizar. Mostrando los últimos datos.",
     "add_create": "Crear",
     "total_balance": "Balance total",
     "add_entropy": "Entropía ",

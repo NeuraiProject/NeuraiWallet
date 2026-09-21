@@ -67,6 +67,20 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const { params } = useRoute<RouteProps>();
   const { walletID } = params;
   const wallet = useWalletSubscribe(walletID);
+  const serviceStale = isNeuraiWallet(wallet) && wallet.getServiceStatus?.() === 'stale';
+  const [syncNotice, setSyncNotice] = useState<'updating' | 'delayed' | null>(null);
+  useEffect(() => {
+    setSyncNotice(null);
+    if (!serviceStale) return;
+    // Avoid flashing a banner for a normal, brief reconnect.
+    const updatingTimer = setTimeout(() => setSyncNotice('updating'), 800);
+    const delayedTimer = setTimeout(() => setSyncNotice('delayed'), 10_000);
+    return () => {
+      clearTimeout(updatingTimer);
+      clearTimeout(delayedTimer);
+    };
+  }, [serviceStale, walletID]);
+
   const [limit, setLimit] = useState(15);
   const [pageSize] = useState(20);
   const navigation = useExtendedNavigation();
@@ -127,6 +141,8 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const refreshInProgressRef = useRef(false);
 
   const stylesHook = StyleSheet.create({
+    syncBar: { backgroundColor: colors.inputBackgroundColor, borderBottomColor: colors.formBorder },
+    syncText: { color: colors.alternativeTextColor },
     listHeaderText: {
       color: colors.foregroundColor,
     },
@@ -613,10 +629,13 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   return (
     <View style={[styles.flex, stylesHook.backgroundContainer]}>
       <View style={[styles.refreshIndicatorBackground, stylesHook.gradientBackground]} testID="TransactionsListView" />
-      {isNeuraiWallet(wallet) && wallet.getServiceStatus?.() === 'stale' && (
-        <Text accessibilityRole="alert" style={{ color: colors.foregroundColor }}>
-          {loc.wallets.neurai_service_stale}
-        </Text>
+      {serviceStale && syncNotice && (
+        <View style={[styles.syncBar, stylesHook.syncBar]} accessibilityLiveRegion="polite">
+          <ActivityIndicator size="small" color={colors.alternativeTextColor} />
+          <Text style={[styles.syncText, stylesHook.syncText]}>
+            {syncNotice === 'delayed' ? loc.wallets.neurai_service_stale : loc.wallets.neurai_service_updating}
+          </Text>
+        </View>
       )}
       {isNeuraiWallet(wallet) && wallet.getServiceStatus?.() === 'legacy' && (
         <Text accessibilityRole="alert" style={{ color: colors.foregroundColor }}>
@@ -729,6 +748,16 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
 export default WalletTransactions;
 
 const styles = StyleSheet.create({
+  syncBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    columnGap: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  syncText: { fontSize: 13, flexShrink: 1 },
   flex: { flex: 1 },
   headerBottomBarSpacer: { position: 'relative', height: 12 },
   scrollViewContent: { flex: 1, justifyContent: 'center', paddingHorizontal: 16, paddingBottom: 500 },
