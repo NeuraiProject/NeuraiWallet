@@ -22,6 +22,7 @@ import {
   createPaymentTransaction,
   createStandardAssetTransferTransaction,
   decimalToSatoshis,
+  decodeAddress,
   type DecimalAmount,
 } from '@neuraiproject/neurai-create-transaction';
 
@@ -39,13 +40,16 @@ import {
   WalletKind,
   chainFor,
   createDefaultBackend,
-  isPQChain,
+  isTestnetChain,
+  kindOfChain,
   type NeuraiBackend,
 } from '../../blue_modules/neurai';
 import type { AddressChangedEvent } from '../../blue_modules/neurai/WssBackend';
 import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
 import { LOCAL_FEE_RATE_RPC, LOCAL_FEE_RATE_XNA_PER_KB } from '../../blue_modules/neurai/feePolicy';
 import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
+import { dustThresholdSats } from '../../blue_modules/neurai/dust';
+import { engineNetworkFor, signerNetworkFor, type EngineNetwork } from '../../blue_modules/neurai/keyNetwork';
 import { getAssetType, type NeuraiHeldAsset } from '../../blue_modules/neurai/assetUtils';
 import { AbstractWallet } from './abstract-wallet';
 import { Transaction, Utxo } from './types';
@@ -70,7 +74,9 @@ const PENDING_TX_TTL_MS = 24 * 60 * 60 * 1000;
 const HISTORY_DELTA_BATCH_SIZE = 250;
 const HISTORY_ITEM_BATCH_SIZE = 100;
 const TX_CACHE_BATCH_SIZE = 100;
-/** Outputs below this many sats are dust; a sub-dust change is folded into the fee. */
+/** Genesis of the current testnet (reset): cached state from another one is discarded. */
+const CURRENT_TESTNET_GENESIS = CHAIN_PARAMS['xna-test'].expectedGenesisHash ?? '';
+/** Legacy P2PKH dust; other change types use {@link dustThresholdSats}. */
 const SEND_DUST_SATS = 546n;
 
 /** Minimal UTXO shape we need for selection / signing (matches engine `IUTXO`). */
@@ -258,6 +264,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   passphrase: string;
   /** Highest derivation index ever seen. Persisted; used to skip RPC scan. */
   addressPosition: number;
+  /** Testnet genesis the cached chain state belongs to. Persisted; see {@link AbstractNeuraiWallet.fromJson}. */
+  testnetGenesis: string;
   /** Highest chain tip height covered by the last successful transaction scan. Persisted. */
   _lastTxBlockHeight: number;
   /** Cached `IHistoryItem[]` for the wallet list view. Persisted to disk so
@@ -303,6 +311,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this.network = chainFor(DEFAULT_NETWORK, 'legacy');
     this.passphrase = '';
     this.addressPosition = 0;
+    this.testnetGenesis = CURRENT_TESTNET_GENESIS;
     this._lastTxBlockHeight = 0;
     this._historyItems = [];
     this._txCache = [];
@@ -325,6 +334,35 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     Object.defineProperty(this, '_unsubscribeBackendPush', { writable: true, enumerable: false, value: null });
     Object.defineProperty(this, '_pushFetchInFlight', { writable: true, enumerable: false, value: false });
     Object.defineProperty(this, '_pushFetchPending', { writable: true, enumerable: false, value: false });
+  }
+
+  /**
+   * Testnet was reset with a new genesis. A testnet wallet saved for another
+   * genesis keeps only its words, passphrase and label: balances, history,
+   * assets, pending sends, address statuses and the scanned position all
+   * describe a chain that no longer exists, so they are dropped, not migrated.
+   */
+  static fromJson(obj: string): AbstractWallet {
+    const wallet = super.fromJson(obj) as AbstractNeuraiWallet;
+    const persisted = (JSON.parse(obj) as { testnetGenesis?: unknown }).testnetGenesis;
+    if (isTestnetChain(wallet.network) && persisted !== CURRENT_TESTNET_GENESIS) wallet.discardTestnetChainState();
+    return wallet;
+  }
+
+  protected discardTestnetChainState(): void {
+    this.balance = 0n;
+    this.unconfirmed_balance = 0n;
+    this.addressPosition = 0;
+    this._lastTxBlockHeight = 0;
+    this._lastTxFetch = 0;
+    this._lastBalanceFetch = 0;
+    this._utxo = [];
+    this._historyItems = [];
+    this._txCache = [];
+    this._heldAssets = [];
+    this._pendingTxs = [];
+    this._addressStatus = {};
+    this.testnetGenesis = CURRENT_TESTNET_GENESIS;
   }
 
   // ---------- network / passphrase ------------------------------------------------
@@ -357,6 +395,11 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     return CHAIN_PARAMS[this.network].network;
   }
 
+  /** jswallet network of this wallet's addresses (see `engineNetworkFor`). */
+  getEngineNetwork(): EngineNetwork {
+    return engineNetworkFor(this.network);
+  }
+
   setPassphrase(passphrase: string): void {
     this.passphrase = passphrase || '';
     this._engine = null;
@@ -379,7 +422,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   protected _enforceChainKind(network: NeuraiChainType): void {
     const want = this.walletKind;
-    const got = isPQChain(network) ? 'pq' : 'legacy';
+    const got = kindOfChain(network);
     if (want !== got) {
       throw new Error(`Wallet kind mismatch: ${this.type} expects ${want}, got network ${network}`);
     }
@@ -396,7 +439,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     const engine = await NeuraiJsWallet.createInstance({
       mnemonic: this.secret,
       passphrase: this.passphrase || undefined,
-      network: this.network,
+      network: this.getEngineNetwork(),
       offlineMode: true,
       minAmountOfAddresses: Math.max(1, this.addressPosition),
       // NIP-040. Without an override jswallet asks the node per build
@@ -741,18 +784,23 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   }
 
   /**
-   * Validates that `address` is a syntactically correct Neurai address. Both
-   * Base58Check (legacy `N…`/`t…`) and Bech32m (PQ `nq1…`/`tnq1…`) are
-   * accepted regardless of the wallet's own kind so callers (clipboard
-   * detection, deeplinks, send screen) can pre-validate without knowing
-   * which wallet they'll route through.
+   * Validates that `address` is a syntactically correct Neurai address:
+   * Base58Check Legacy (`N…`/`t…`) or any Bech32m witness family the node
+   * encodes (AuthScript v1 `nc1p…`, PQ v2 `pq1z…`, ECDSA v3 `nq1r…`, and their
+   * testnet forms). Accepted regardless of the wallet's own kind so callers
+   * (clipboard detection, deeplinks, send screen) can pre-validate without
+   * knowing which wallet they'll route through. The old `nq1p…` / `tnq1p…`
+   * encoding is rejected, as the node does.
    */
   isAddressValid(address: string): boolean {
     if (typeof address !== 'string' || address.length === 0) return false;
-    if (address.startsWith('nq1') || address.startsWith('tnq1') || address.startsWith('NQ1') || address.startsWith('TNQ1')) {
-      return /^[a-z0-9]+$/i.test(address.slice(address.toLowerCase().indexOf('1') + 1));
+    try {
+      decodeAddress(address);
+      return true;
+    } catch {
+      // P2SH (`R…`/`r…`) is not a decodeAddress destination but stays a valid recipient.
+      return /^[Rr][1-9A-HJ-NP-Za-km-z]{25,42}$/.test(address);
     }
-    return /^[NtRr][1-9A-HJ-NP-Za-km-z]{25,42}$/.test(address);
   }
 
   // ---------- UTXO surface (compat shim) -------------------------------------------
@@ -776,6 +824,51 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     return this._utxo as Utxo[];
   }
 
+  // ---------- privacy pool surface ------------------------------------------------
+
+  /** Own addresses the engine derived (receive and change). */
+  async listOwnAddresses(): Promise<string[]> {
+    const engine = await this.ensureEngine();
+    return engine.getAddresses();
+  }
+
+  /** Base-currency ticker the engine reports for native UTXOs. */
+  async getBaseCurrencyName(): Promise<string> {
+    const engine = await this.ensureEngine();
+    return engine.getBaseCurrency();
+  }
+
+  /** Own UTXOs of the base currency, or of `assetName`, with their prevout scripts and exact raw amounts. */
+  async listOwnUtxos(
+    assetName?: string,
+  ): Promise<Array<{ address: string; assetName: string; txid: string; outputIndex: number; script: string; satoshis: string }>> {
+    const engine = await this.ensureEngine();
+    const rows = assetName ? await engine.getAssetUTXOs(assetName) : await engine.getUTXOs();
+    return rows.map(u => ({
+      address: u.address,
+      assetName: u.assetName,
+      txid: u.txid,
+      outputIndex: u.outputIndex,
+      script: u.script,
+      satoshis: String(rawToSats(u.satoshis)),
+    }));
+  }
+
+  /**
+   * Raw key of an own address for local transaction signing: a WIF, or the PQ
+   * seed and public key. False when the address is not this wallet's. Callers
+   * must not keep it beyond the signing call.
+   */
+  async getSigningKey(address: string): Promise<unknown> {
+    if (!this.secret) return false;
+    try {
+      const engine = await this.ensureEngine();
+      return engine.getPrivateKeyByAddress(address) || false;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Returns the WIF private key for an address owned by this wallet, or
    * `false` if the address is unknown or this is a PQ wallet (PQ keys do not
@@ -785,7 +878,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * Signing material for an address owned by this wallet, used by Neurai Connect
    * to sign messages locally (`blue_modules/neurai/connect/signer.ts`).
    *
-   * Legacy wallets return their WIF; post-quantum wallets return the ML-DSA-44
+   * Legacy and ECDSA wallets return their WIF (`kind: 'legacy'` means any
+   * secp256k1 WIF); post-quantum wallets return the ML-DSA-44
    * seed plus public key, from which the signing key pair is expanded. Hardware
    * wallets return `false`: their key never leaves the device, so message
    * signing has to be routed through the device instead.
@@ -1209,7 +1303,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       outputAddresses(true),
       feeRate,
     );
-    selectedXna = selectUtxosForSats(xnaUtxos, feeSats + SEND_DUST_SATS);
+    const xnaChangeDust = dustThresholdSats(xnaChangeAddress);
+    selectedXna = selectUtxosForSats(xnaUtxos, feeSats + xnaChangeDust);
     feeSats = estimateNeuraiFeeSats(
       [...selectedAsset, ...selectedXna].map(u => u.script),
       outputAddresses(true),
@@ -1220,7 +1315,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     let xnaChangeSats = xnaIn - feeSats;
     if (xnaChangeSats < 0) throw new Error('Balance too low to cover the network fee');
     // Fold a sub-dust change into the fee rather than emitting an unspendable output.
-    if (xnaChangeSats > 0 && xnaChangeSats < SEND_DUST_SATS) {
+    if (xnaChangeSats > 0 && xnaChangeSats < xnaChangeDust) {
       feeSats += xnaChangeSats;
       xnaChangeSats = 0n;
     }
@@ -1249,7 +1344,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       if (material) privateKeys[u.address] = material;
     }
     const signedHex = signNeuraiTransaction(
-      this.network as Parameters<typeof signNeuraiTransaction>[0],
+      signerNetworkFor(this.getEngineNetwork()),
       built.rawTx,
       inputs as unknown as Parameters<typeof signNeuraiTransaction>[2],
       privateKeys as Parameters<typeof signNeuraiTransaction>[3],
@@ -1346,7 +1441,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       // The DePIN address is foreign to the engine, so supply its WIF directly.
       const privateKeys: Record<string, unknown> = { [depinAddress]: depinWif };
       signedHex = signNeuraiTransaction(
-        this.network as Parameters<typeof signNeuraiTransaction>[0],
+        signerNetworkFor(this.getEngineNetwork()),
         rawTx,
         utxos as unknown as Parameters<typeof signNeuraiTransaction>[2],
         privateKeys as Parameters<typeof signNeuraiTransaction>[3],

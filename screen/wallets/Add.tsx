@@ -6,7 +6,8 @@ import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/h
 import { BlueButtonLink, BlueFormLabel } from '../../BlueComponents';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
-import { chainFor, NeuraiNetwork } from '../../blue_modules/neurai';
+import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
+import { chainFor, isKindAvailable, NeuraiNetwork, WalletKind } from '../../blue_modules/neurai';
 import presentAlert from '../../components/Alert';
 import Button from '../../components/Button';
 import SegmentedControl from '../../components/SegmentedControl';
@@ -20,7 +21,6 @@ import { AddWalletStackParamList } from '../../navigation/AddWalletStack';
 import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import { BlueSpacing20, BlueSpacing40 } from '../../components/BlueSpacing';
 
-type WalletKind = 'legacy' | 'pq';
 type NavigationProps = NativeStackNavigationProp<AddWalletStackParamList, 'AddWallet'>;
 
 const NETWORK_OPTIONS: NeuraiNetwork[] = ['mainnet', 'testnet'];
@@ -53,7 +53,7 @@ const WalletsAdd: React.FC = () => {
     Keyboard.dismiss();
     setIsLoading(true);
     try {
-      const wallet = walletKind === 'pq' ? new NeuraiPQWallet() : new NeuraiHDWallet();
+      const wallet = walletKind === 'pq' ? new NeuraiPQWallet() : walletKind === 'ecdsa' ? new NeuraiECDSAWallet() : new NeuraiHDWallet();
       wallet.setNetwork(chainFor(network, walletKind));
       wallet.setLabel(label.trim() || loc.wallets.details_title);
       wallet.generate();
@@ -80,9 +80,9 @@ const WalletsAdd: React.FC = () => {
   const onNetworkChange = useCallback((idx: number) => {
     const next = NETWORK_OPTIONS[idx];
     setNetwork(next);
-    // PQ is not available on mainnet yet — bounce the kind back to legacy
-    // if the user had it selected.
-    if (next === 'mainnet') setWalletKind('legacy');
+    // ECDSA and PQ are not available on mainnet yet — bounce the kind back
+    // to legacy if the user had one of them selected.
+    setWalletKind(kind => (isKindAvailable(next, kind) ? kind : 'legacy'));
   }, []);
 
   return (
@@ -113,10 +113,18 @@ const WalletsAdd: React.FC = () => {
             size={styles.button}
           />
           <WalletButton
+            buttonType="NeuraiECDSA"
+            testID="ActivateNeuraiECDSAButton"
+            active={walletKind === 'ecdsa'}
+            disabled={!isKindAvailable(network, 'ecdsa')}
+            onPress={() => setWalletKind('ecdsa')}
+            size={styles.button}
+          />
+          <WalletButton
             buttonType="NeuraiPQ"
             testID="ActivateNeuraiPQButton"
             active={walletKind === 'pq'}
-            disabled={network === 'mainnet'}
+            disabled={!isKindAvailable(network, 'pq')}
             onPress={() => setWalletKind('pq')}
             size={styles.button}
           />

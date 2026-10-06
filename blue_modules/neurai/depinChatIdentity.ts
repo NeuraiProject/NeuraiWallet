@@ -15,6 +15,7 @@
 
 import { getAddressByPath, getCoinType, getHDKey } from '@neuraiproject/neurai-key';
 
+import { requireLegacyKeyNetwork } from './keyNetwork';
 import type { NeuraiChainType } from './networkConfig';
 
 /** Neurai networks that support the BIP44-derived DePIN chat identity. */
@@ -93,11 +94,13 @@ export function deriveDepinChatIdentity(params: {
 
   const passphrase = params.passphrase ?? '';
 
-  const hdKey = getHDKey(params.network, mnemonic, passphrase);
-  const coinType = getCoinType(params.network);
+  // neurai-key 5 names the 4.x Legacy derivation `xna-legacy[-test]`.
+  const keyNetwork = requireLegacyKeyNetwork(params.network);
+  const hdKey = getHDKey(keyNetwork, mnemonic, passphrase);
+  const coinType = getCoinType(keyNetwork);
 
   const path = `m/44'/${coinType}'/${account}'/0/${index}`;
-  const addrObj = getAddressByPath(params.network, hdKey, path);
+  const addrObj = getAddressByPath(keyNetwork, hdKey, path);
 
   const wif = String(addrObj?.WIF ?? '').trim();
   const address = String(addrObj?.address ?? '').trim();
@@ -125,7 +128,7 @@ export function deviceDepinChatIdentity(params: {
   const address = (params.address ?? '').trim();
   const publicKey = compressPubKeyHex(params.publicKey ?? '');
   const path = (params.path ?? '').trim();
-  const coinType = getCoinType(params.network);
+  const coinType = getCoinType(requireLegacyKeyNetwork(params.network));
 
   if (!address) throw new Error('Device returned no DePIN chat address');
   if (publicKey.length !== 66) throw new Error('Device returned an invalid DePIN chat public key');

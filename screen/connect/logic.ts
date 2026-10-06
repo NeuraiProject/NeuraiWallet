@@ -24,10 +24,11 @@ import type { SettledNamespaces } from '@neuraiproject/neurai-connect-wallet';
 import type { AbstractNeuraiWallet } from '../../class/wallets/abstract-neurai-wallet';
 import type { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import type { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
+import type { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
 import type { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
 
 /** The concrete wallets `isNeuraiWallet` narrows to. */
-export type ConnectWallet = NeuraiHDWallet | NeuraiPQWallet | NeuraiHardwareWallet;
+export type ConnectWallet = NeuraiHDWallet | NeuraiECDSAWallet | NeuraiPQWallet | NeuraiHardwareWallet;
 
 /**
  * The Connect integration layer (`signer.ts`, `identity.ts`) takes an

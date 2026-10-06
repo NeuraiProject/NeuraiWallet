@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "lib": ["es2020", "dom"],
+    "target": "es2020",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "types": []
+  },
+  "include": ["*.ts", "../blue_modules/neurai/privacy/codec.ts", "../blue_modules/neurai/privacy/protocol.ts"]
+}

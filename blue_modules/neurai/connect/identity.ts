@@ -16,6 +16,7 @@
 import { getAddressByPath, getCoinType, getHDKey } from '@neuraiproject/neurai-key';
 import { IdentityRegistry, canonicalDomain, identityIndexForDomain, identityPathForDomain } from '@neuraiproject/neurai-connect-wallet';
 import type { AbstractNeuraiWallet } from '../../../class/wallets/abstract-neurai-wallet';
+import { requireLegacyKeyNetwork } from '../keyNetwork';
 import type { NeuraiChainType } from '../networkConfig';
 import { SecureConnectStorage } from './storage';
 
@@ -57,10 +58,11 @@ export async function deriveDomainIdentity(wallet: AbstractNeuraiWallet, domain:
   if (!mnemonic) return undefined;
 
   const canonical = canonicalDomain(domain);
-  const coinType = getCoinType(chain);
+  const keyNetwork = requireLegacyKeyNetwork(chain);
+  const coinType = getCoinType(keyNetwork);
   const path = identityPathForDomain(canonical, coinType);
-  const hdKey = getHDKey(chain, mnemonic, wallet.passphrase || undefined);
-  const derived = getAddressByPath(chain, hdKey, path);
+  const hdKey = getHDKey(keyNetwork, mnemonic, wallet.passphrase || undefined);
+  const derived = getAddressByPath(keyNetwork, hdKey, path);
   return { address: derived.address, path, publicKey: derived.publicKey, domain: canonical, index: identityIndexForDomain(canonical) };
 }
 

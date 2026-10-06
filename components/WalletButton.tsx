@@ -31,6 +31,12 @@ const buttonDetails: Record<string, ButtonDetails> = {
     explain: loc.wallets.add_neurai_legacy_explain,
     borderColorActive: 'newBlue',
   },
+  NeuraiECDSA: {
+    image: require('../img/addWallet/neurai.png'),
+    title: loc.wallets.add_neurai_ecdsa,
+    explain: loc.wallets.add_neurai_ecdsa_explain,
+    borderColorActive: 'newBlue',
+  },
   NeuraiPQ: {
     image: require('../img/addWallet/neurai.png'),
     title: loc.wallets.add_neurai_pq,

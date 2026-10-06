@@ -11,9 +11,12 @@ import presentAlert from '../components/Alert';
 import { randomBytes } from './rng';
 import { NeuraiHDWallet } from './wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from './wallets/neurai-pq-wallet';
+import { NeuraiECDSAWallet } from './wallets/neurai-ecdsa-wallet';
 import { NeuraiHardwareWallet } from './wallets/neurai-hardware-wallet';
 import { ExtendedTransaction, Transaction, TWallet } from './wallets/types';
 import { hexToUint8Array, uint8ArrayToHex } from '../blue_modules/uint8array-extras';
+import { isTestnetChain, type NeuraiChainType } from '../blue_modules/neurai/networkConfig';
+import { purgeStaleTestnetStorage } from '../blue_modules/neurai/testnetReset';
 
 let usedBucketNum: boolean | number = false;
 
@@ -368,6 +371,9 @@ export class BlueApp {
           case NeuraiHDWallet.type:
             unserializedWallet = NeuraiHDWallet.fromJson(key) as unknown as NeuraiHDWallet;
             break;
+          case NeuraiECDSAWallet.type:
+            unserializedWallet = NeuraiECDSAWallet.fromJson(key) as unknown as NeuraiECDSAWallet;
+            break;
           case NeuraiPQWallet.type:
             unserializedWallet = NeuraiPQWallet.fromJson(key) as unknown as NeuraiPQWallet;
             break;
@@ -397,6 +403,12 @@ export class BlueApp {
         }
       }
       if (realm) realm.close();
+      // Testnet reset: drop the DePIN caches of the old chain once (wallet
+      // JSON is handled in AbstractNeuraiWallet.fromJson). Never blocks loading.
+      const testnetIds = this.wallets
+        .filter(w => 'network' in w && typeof w.network === 'string' && isTestnetChain(w.network as NeuraiChainType))
+        .map(w => w.getID());
+      purgeStaleTestnetStorage(testnetIds).catch(error => console.warn('[Neurai] testnet cache cleanup failed:', error));
       return true;
     } else {
       return false; // failed loading data or loading/decryptin data

@@ -1,5 +1,6 @@
 // blockExplorer.ts
 import DefaultPreference from 'react-native-default-preference';
+import { isTestnetChain, type NeuraiChainType } from '../blue_modules/neurai/networkConfig';
 
 export interface BlockExplorer {
   key: string;
@@ -121,7 +122,7 @@ export const getBlockExplorerUrlForWallet = (
 ): string => {
   if (!wallet) return mainnetUrl;
   const network = (wallet as { network?: string }).network;
-  if (network === 'xna-test' || network === 'xna-pq-test') {
+  if (network && isTestnetChain(network as NeuraiChainType)) {
     return testnetUrl;
   }
   return mainnetUrl;

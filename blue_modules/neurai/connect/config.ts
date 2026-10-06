@@ -11,7 +11,7 @@
 import DefaultPreference from 'react-native-default-preference';
 import { NEURAI_CHAIN_MAINNET, NEURAI_CHAIN_TESTNET } from '@neuraiproject/neurai-connect-core';
 import { GROUP_IO_BLUEWALLET } from '../../currency';
-import type { NeuraiChainType, NeuraiNetwork } from '../networkConfig';
+import { isTestnetChain, type NeuraiChainType, type NeuraiNetwork } from '../networkConfig';
 
 export const DEFAULT_RELAY_URL = 'wss://relay.neurai.org/v1';
 const OVERRIDE_KEY = 'NEURAI_CONNECT_RELAY_URL';
@@ -57,7 +57,7 @@ export async function setRelayUrlOverride(url: string | null): Promise<void> {
  * network would stop recognising the others.
  */
 export function caip2ForChain(chain: NeuraiChainType): string {
-  return chain === 'xna' || chain === 'xna-pq' ? NEURAI_CHAIN_MAINNET : NEURAI_CHAIN_TESTNET;
+  return isTestnetChain(chain) ? NEURAI_CHAIN_TESTNET : NEURAI_CHAIN_MAINNET;
 }
 
 /** The network a CAIP-2 identifier belongs to, or undefined when it is not Neurai. */

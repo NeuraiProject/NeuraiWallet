@@ -9,16 +9,18 @@ import type { NeuraiChainType } from '../../blue_modules/neurai/networkConfig';
 describe('markerForChain', () => {
   it('mainnet chains use the legacy marker', () => {
     expect(markerForChain('xna')).toBe('rvn');
+    expect(markerForChain('xna-ecdsa')).toBe('rvn');
     expect(markerForChain('xna-pq')).toBe('rvn');
   });
 
   it('testnet chains use the migrated marker', () => {
     expect(markerForChain('xna-test')).toBe('xna');
+    expect(markerForChain('xna-ecdsa-test')).toBe('xna');
     expect(markerForChain('xna-pq-test')).toBe('xna');
   });
 
   it('covers every supported chain', () => {
-    const all: NeuraiChainType[] = ['xna', 'xna-pq', 'xna-test', 'xna-pq-test'];
+    const all: NeuraiChainType[] = ['xna', 'xna-ecdsa', 'xna-pq', 'xna-test', 'xna-ecdsa-test', 'xna-pq-test'];
     for (const chain of all) expect(['rvn', 'xna']).toContain(markerForChain(chain));
   });
 
@@ -31,7 +33,7 @@ describe('markerForChain', () => {
 
   it('no mainnet chain ever returns xna', () => {
     // Guards against a careless edit to the table.
-    for (const chain of ['xna', 'xna-pq'] as NeuraiChainType[]) {
+    for (const chain of ['xna', 'xna-ecdsa', 'xna-pq'] as NeuraiChainType[]) {
       expect(markerForChain(chain)).not.toBe('xna');
     }
   });

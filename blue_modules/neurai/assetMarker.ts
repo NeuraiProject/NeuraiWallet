@@ -52,8 +52,10 @@ export type AssetMarker = 'rvn' | 'xna';
  */
 const MARKER_BY_CHAIN: Record<NeuraiChainType, AssetMarker> = {
   xna: 'rvn',
+  'xna-ecdsa': 'rvn',
   'xna-pq': 'rvn',
   'xna-test': 'xna',
+  'xna-ecdsa-test': 'xna',
   'xna-pq-test': 'xna',
 };
 

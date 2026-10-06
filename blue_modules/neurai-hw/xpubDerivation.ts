@@ -19,8 +19,8 @@ import { publicKeyToAddress } from '@neuraiproject/neurai-key';
 
 import type { NeuraiChainType } from '../neurai';
 
-/** neurai-key Network for legacy P2PKH derivation. */
-type LegacyNetwork = 'xna' | 'xna-test';
+/** neurai-key 5 network for Legacy P2PKH encoding (`xna` / `xna-test` are ECDSA witness v3 there). */
+type LegacyNetwork = 'xna-legacy' | 'xna-legacy-test';
 
 const b58c = base58check(sha256);
 
@@ -67,7 +67,7 @@ function ckdPub(node: Bip32Node, index: number): Bip32Node {
 
 /** Map our internal chain id to the neurai-key legacy network. */
 function legacyNetworkFor(chain: NeuraiChainType): LegacyNetwork {
-  return chain.includes('test') ? 'xna-test' : 'xna';
+  return chain.includes('test') ? 'xna-legacy-test' : 'xna-legacy';
 }
 
 export interface DerivedLegacyAddress {

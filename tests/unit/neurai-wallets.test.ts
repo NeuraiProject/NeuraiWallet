@@ -1,12 +1,17 @@
 import assert from 'assert';
+import { bech32m } from 'bech32';
 import fixtures from './fixtures/neurai-key4-addresses.json';
 import { RpcBackend } from '../../blue_modules/neurai/RpcBackend';
 
-import { CHAIN_PARAMS, createDefaultBackend } from '../../blue_modules/neurai';
+import { getAddressPair } from '@neuraiproject/neurai-key';
+import * as bitcoin from 'bitcoinjs-lib';
+import { CHAIN_PARAMS, chainFor, createDefaultBackend, isKindAvailable, isTestnetChain, kindOfChain } from '../../blue_modules/neurai';
+import { signerNetworkFor } from '../../blue_modules/neurai/keyNetwork';
 import { estimateNeuraiFeeSats, estimateNeuraiTxSizeKb } from '../../blue_modules/neurai/feeEstimate';
 import { AbstractNeuraiWallet } from '../../class/wallets/abstract-neurai-wallet';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
+import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
 
 const KNOWN_MNEMONIC = 'result pact model attract result puzzle final boss private educate luggage era';
 
@@ -80,17 +85,116 @@ describe('Neurai wallets', () => {
       assert.throws(() => w.setNetwork('xna-test'), /Wallet kind mismatch/);
     });
 
-    it('derives a testnet PQ bech32m address with tnq1 prefix', async () => {
+    it('derives a testnet strict PQ bech32m address with tpq1 prefix', async () => {
       const w = NeuraiPQWallet.forNetwork('testnet', KNOWN_MNEMONIC);
       const address = await w.getReceiveAddressAsync();
       const hrp = CHAIN_PARAMS['xna-pq-test'].hrp ?? '';
       assert.ok(address.startsWith(`${hrp}1`), `expected ${hrp}1 prefix, got ${address}`);
     }, 30_000);
 
-    it('derives a mainnet PQ bech32m address with nq1 prefix', async () => {
+    it('derives a mainnet AuthScript PQ bech32m address with nc1p prefix', async () => {
       const w = NeuraiPQWallet.forNetwork('mainnet', KNOWN_MNEMONIC);
       const address = await w.getReceiveAddressAsync();
-      assert.ok(address.startsWith('nq1'), `expected nq1 prefix, got ${address}`);
+      assert.ok(address.startsWith('nc1p'), `expected nc1p prefix, got ${address}`);
+    }, 30_000);
+  });
+
+  describe('NeuraiECDSAWallet', () => {
+    const ecdsaPair = (network: 'xna' | 'xna-test', index: number) =>
+      getAddressPair(network, KNOWN_MNEMONIC, 0, index) as unknown as {
+        external: { address: string; path: string; commitment: string; publicKey: string };
+        internal: { address: string; path: string };
+      };
+
+    it('defaults to xna-ecdsa-test on testnet', () => {
+      const w = new NeuraiECDSAWallet();
+      assert.strictEqual(w.network, 'xna-ecdsa-test');
+      assert.strictEqual(w.walletKind, 'ecdsa');
+      assert.strictEqual(w.type, 'NeuraiECDSA');
+      assert.strictEqual(w.allowSweepFromWif(), true);
+      assert.strictEqual(w.getEngineNetwork(), 'xna-ecdsa-test');
+    });
+
+    it('maps the ECDSA chains', () => {
+      assert.strictEqual(chainFor('testnet', 'ecdsa'), 'xna-ecdsa-test');
+      assert.strictEqual(chainFor('mainnet', 'ecdsa'), 'xna-ecdsa');
+      assert.strictEqual(kindOfChain('xna-ecdsa-test'), 'ecdsa');
+      assert.strictEqual(isTestnetChain('xna-ecdsa-test'), true);
+      assert.strictEqual(isTestnetChain('xna-ecdsa'), false);
+      assert.strictEqual(signerNetworkFor('xna-ecdsa-test'), 'xna-test');
+      // Witness families are testnet-only until they activate on mainnet.
+      assert.strictEqual(isKindAvailable('mainnet', 'ecdsa'), false);
+      assert.strictEqual(isKindAvailable('mainnet', 'pq'), false);
+      assert.strictEqual(isKindAvailable('mainnet', 'legacy'), true);
+      assert.strictEqual(isKindAvailable('testnet', 'ecdsa'), true);
+    });
+
+    it('rejects Legacy and PQ networks', () => {
+      const w = new NeuraiECDSAWallet();
+      assert.throws(() => w.setNetwork('xna-test'), /Wallet kind mismatch/);
+      assert.throws(() => w.setNetwork('xna-pq-test'), /Wallet kind mismatch/);
+      assert.throws(() => new NeuraiHDWallet().setNetwork('xna-ecdsa-test'), /Wallet kind mismatch/);
+    });
+
+    it("derives the node's witness v3 addresses under m/84'", async () => {
+      const w = NeuraiECDSAWallet.forNetwork('testnet', KNOWN_MNEMONIC);
+      const address = await w.getReceiveAddressAsync();
+      const expected = ecdsaPair('xna-test', 0);
+      assert.strictEqual(address, expected.external.address);
+      assert.strictEqual(expected.external.path, "m/84'/1'/0'/0/0");
+      assert.ok(address.startsWith('tnq1r'), `expected tnq1r prefix, got ${address}`);
+      assert.ok(w.weOwnAddress(expected.internal.address), 'the change branch belongs to the wallet');
+      const legacy = await NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC).getReceiveAddressAsync();
+      assert.notStrictEqual(address, legacy);
+    }, 30_000);
+
+    it('derives mainnet nq1r addresses', async () => {
+      const w = NeuraiECDSAWallet.forNetwork('mainnet', KNOWN_MNEMONIC);
+      const address = await w.getReceiveAddressAsync();
+      assert.strictEqual(address, ecdsaPair('xna', 0).external.address);
+      assert.ok(address.startsWith('nq1r'), `expected nq1r prefix, got ${address}`);
+    }, 30_000);
+
+    it('round-trips via fromJson as an ECDSA wallet', () => {
+      const w = NeuraiECDSAWallet.forNetwork('testnet', KNOWN_MNEMONIC);
+      const restored = NeuraiECDSAWallet.fromJson(JSON.stringify(w)) as unknown as NeuraiECDSAWallet;
+      assert.strictEqual(restored.type, 'NeuraiECDSA');
+      assert.strictEqual(restored.network, 'xna-ecdsa-test');
+      assert.strictEqual(restored.getSecret(), KNOWN_MNEMONIC);
+    });
+
+    it('signs a spend of its witness v3 coin with the [0x02, sig, pubkey, OP_TRUE] witness', async () => {
+      const w = NeuraiECDSAWallet.forNetwork('testnet', KNOWN_MNEMONIC);
+      const own = ecdsaPair('xna-test', 0).external;
+      const txid = 'ab'.repeat(32);
+      const rpc = jest.fn(async (method: string) => {
+        if (method === 'getaddressutxos') {
+          return [
+            {
+              address: own.address,
+              assetName: 'XNA',
+              txid,
+              outputIndex: 1,
+              script: `5320${own.commitment}`,
+              satoshis: 500_000_000,
+              height: 100,
+            },
+          ];
+        }
+        if (method === 'getaddressmempool') return [];
+        if (method === 'gettxout') return { value: 5, scriptPubKey: { hex: `5320${own.commitment}` } };
+        throw new Error(`unexpected rpc ${method}`);
+      });
+      jest.spyOn(w, 'getBackend').mockReturnValue({ chain: 'xna-ecdsa-test', rpc } as never);
+      const built = await w.buildSendTransaction([{ address: ecdsaPair('xna-test', 1).external.address, amount: '1' }]);
+      const tx = bitcoin.Transaction.fromHex(built.signedHex);
+      assert.strictEqual(tx.ins.length, 1);
+      assert.strictEqual(Buffer.from(tx.ins[0].hash).reverse().toString('hex'), txid);
+      const witness = tx.ins[0].witness.map(item => Buffer.from(item).toString('hex'));
+      assert.strictEqual(witness.length, 4);
+      assert.strictEqual(witness[0], '02');
+      assert.strictEqual(witness[2], own.publicKey);
+      assert.strictEqual(witness[3], '51');
     }, 30_000);
   });
 
@@ -221,6 +325,8 @@ describe('Neurai wallets', () => {
     // fixture used '5114' (push-20), which `isPQScript` does not match, so this
     // suite measured the LEGACY branch and never covered PQ sizing at all.
     const pqScript = '5120' + '00'.repeat(32);
+    // The fixture keeps the 4.x `nq1p…` string; libraries only accept its `nc1p…` encoding.
+    const pqFixtureAddress = bech32m.encode('nc', bech32m.decode(fixtures.fixtures[2].addresses[0], 120).words, 120);
 
     it('uses conservative serialized legacy signatures and decimal kilobytes', () => {
       assert.strictEqual(estimateNeuraiTxSizeKb([legacyScript], [fixtures.fixtures[0].addresses[0]]), 193 / 1000);
@@ -229,7 +335,7 @@ describe('Neurai wallets', () => {
 
     it('counts asset payloads, mixed destinations, and CompactSize boundaries', () => {
       const address = fixtures.fixtures[0].addresses[0];
-      const pqAddress = fixtures.fixtures[2].addresses[0];
+      const pqAddress = pqFixtureAddress;
       const plain = estimateNeuraiFeeSats([legacyScript], [address], 0.012);
       expect(plain).toBe(231_600n);
       expect(estimateNeuraiFeeSats([legacyScript], [pqAddress], 0.012)).toBe(plain + 9n * 1200n);
@@ -247,8 +353,8 @@ describe('Neurai wallets', () => {
     });
 
     it('accounts for the PQ witness discount', () => {
-      assert.strictEqual(estimateNeuraiTxSizeKb([pqScript], [fixtures.fixtures[2].addresses[0]]), 1031 / 1000);
-      assert.strictEqual(estimateNeuraiFeeSats([pqScript], [fixtures.fixtures[2].addresses[0]], 0.05), 5_155_000n);
+      assert.strictEqual(estimateNeuraiTxSizeKb([pqScript], [pqFixtureAddress]), 1031 / 1000);
+      assert.strictEqual(estimateNeuraiFeeSats([pqScript], [pqFixtureAddress], 0.05), 5_155_000n);
     });
   });
 });

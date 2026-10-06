@@ -1,9 +1,15 @@
 import { Transaction, Psbt } from 'bitcoinjs-lib';
 import { NeuraiESP32, INeuraiTransport, encodeDestinationScript } from '@neuraiproject/neurai-sign-esp32/react-native';
 import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
-import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
+import { getPQAuthScriptAddress } from '@neuraiproject/neurai-key';
 import { deriveLegacyAddress } from '../../blue_modules/neurai-hw/xpubDerivation';
 import { RpcBackend } from '../../blue_modules/neurai/RpcBackend';
+
+// The device signs generic AuthScript witness v1 (`tnc1p…`) inputs, not the
+// strict PQ v2 addresses software testnet wallets now use.
+const deviceAuthScriptAddress = () =>
+  getPQAuthScriptAddress('xna-authscript-test', 'result pact model attract result puzzle final boss private educate luggage era', 0, 0)
+    .address;
 
 const xpub = 'xpub661MyMwAqRbcGmUDQVKxmhEESB5xTk8hbsdTSV3Pmhm3HE9Fj3s45R9Y8LwyaQWjXXPytZjuhTKSyCBPeNrB1VVWQq1HCvjbEZ27k44oNmg';
 const recipient = deriveLegacyAddress(xpub, 'xna-test', 0, 9).address;
@@ -75,8 +81,7 @@ test.each([false, true])('builds a legacy PSBT with exact odd large prevout and 
 });
 
 test.each([false, true])('builds and transports exact large PQ amounts (sendMax=%s)', async sendMax => {
-  const software = NeuraiPQWallet.forNetwork('testnet', 'result pact model attract result puzzle final boss private educate luggage era');
-  const address = await software.getReceiveAddressAsync();
+  const address = deviceAuthScriptAddress();
   const total = 10000000000000001n;
   const { wallet, utxo } = fixture(total, 'pq', address);
   const result = await wallet.buildUnsignedSend(recipient, 100000001n, {
@@ -97,8 +102,7 @@ test.each([false, true])('builds and transports exact large PQ amounts (sendMax=
 });
 
 it('builds safe PQ signing metadata and conserves every satoshi', async () => {
-  const software = NeuraiPQWallet.forNetwork('testnet', 'result pact model attract result puzzle final boss private educate luggage era');
-  const address = await software.getReceiveAddressAsync();
+  const address = deviceAuthScriptAddress();
   const total = 9007199254740991n;
   const { wallet, utxo } = fixture(total, 'pq', address);
   const result = await wallet.buildUnsignedSend(recipient, 100000001n, {
@@ -139,8 +143,7 @@ it('accounts for a one-satoshi dust change in the exact fee', async () => {
 });
 
 it('keeps asset sighash amounts zero and large XNA fees inputs exact through the SDK', async () => {
-  const software = NeuraiPQWallet.forNetwork('testnet', 'result pact model attract result puzzle final boss private educate luggage era');
-  const address = await software.getReceiveAddressAsync();
+  const address = deviceAuthScriptAddress();
   const total = 10000000000000001n;
   const { wallet, rpc, utxo } = fixture(total, 'pq', address);
   jest.spyOn(wallet, 'estimateFeeRate').mockResolvedValue(0.01);

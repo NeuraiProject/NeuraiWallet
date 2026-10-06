@@ -28,6 +28,7 @@ import {
   buildPSBTFromRawTransaction,
   encodeDestinationScript,
   finalizeSignedPSBT,
+  normalizeDeviceAuthScriptAddress,
 } from '@neuraiproject/neurai-sign-esp32/react-native';
 import type {
   IAddressResponse,
@@ -47,6 +48,7 @@ import { chainFor, NeuraiChainType, WalletKind } from '../../blue_modules/neurai
 import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
 import { getAssetType } from '../../blue_modules/neurai/assetUtils';
 import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
+import { dustThresholdSats } from '../../blue_modules/neurai/dust';
 import { AbstractNeuraiWallet } from './abstract-neurai-wallet';
 import { deriveLegacyAddress } from '../../blue_modules/neurai-hw/xpubDerivation';
 
@@ -77,8 +79,12 @@ function pickUtxos<T extends { satoshis: bigint }>(utxos: T[], needed: bigint): 
 const GAP_LIMIT = 20;
 /** Reuse a discovery result for this long to coalesce the balance/history/utxo burst. */
 const DISCOVERY_TTL_MS = 8000;
-/** Drop change below this many satoshis into the fee. */
+/** Drop change below this many satoshis into the fee (at least the node's dust for the change type). */
 const CHANGE_DUST_SATS = 1000n;
+const changeDustSats = (address: string): bigint => {
+  const dust = dustThresholdSats(address);
+  return dust > CHANGE_DUST_SATS ? dust : CHANGE_DUST_SATS;
+};
 
 interface AddrMeta {
   change: 0 | 1;
@@ -170,6 +176,13 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     Object.defineProperty(this, '_receiveAddr', { writable: true, enumerable: false, value: '' });
     Object.defineProperty(this, '_changeAddr', { writable: true, enumerable: false, value: '' });
     Object.defineProperty(this, '_discoveredAt', { writable: true, enumerable: false, value: 0 });
+  }
+
+  /** A PQ device address saved as `nq1p…` / `tnq1p…` is re-encoded; the script is unchanged. */
+  static fromJson(obj: string): NeuraiHardwareWallet {
+    const wallet = super.fromJson(obj) as unknown as NeuraiHardwareWallet;
+    if (wallet.keyType === 'pq' && wallet.address) wallet.address = normalizeDeviceAuthScriptAddress(wallet.address);
+    return wallet;
   }
 
   get walletKind(): WalletKind {
@@ -381,7 +394,10 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
   setFromDeviceInfo(info: IDeviceInfo, addr: IAddressResponse, bip32?: IBip32PubkeyResponse): void {
     this.keyType = (addr.type ?? info.key_type ?? 'legacy') === 'pq' ? 'pq' : 'legacy';
     this.network = chainForDevice(info.network, this.keyType);
-    this.address = addr.address || info.address;
+    // Old firmware reports the generic AuthScript v1 address as `nq1p…` /
+    // `tnq1p…`; nodes and libraries only accept the `nc1p…` / `tnc1p…` form.
+    const deviceAddress = addr.address || info.address;
+    this.address = this.keyType === 'pq' && deviceAddress ? normalizeDeviceAuthScriptAddress(deviceAddress) : deviceAddress;
     this.pubkey = addr.pubkey || info.pubkey;
     this.commitment = addr.commitment ?? '';
     this.witnessScript = addr.witnessScript ?? (this.keyType === 'pq' ? '51' : '');
@@ -441,7 +457,7 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     if (outputValue <= 0n) throw new Error('Balance too low to cover the network fee');
     let change = totalIn - outputValue - feeSats;
     if (change < 0n) throw new Error('Insufficient funds including fee');
-    if (change < CHANGE_DUST_SATS) {
+    if (change < changeDustSats(this.address)) {
       feeSats += change;
       change = 0n;
     }
@@ -501,7 +517,7 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     tx.version = 2;
     for (const u of selected) tx.addInput(Buffer.from(u.txid, 'hex').reverse(), u.outputIndex);
     tx.addOutput(encodeDestinationScript(toAddress), BigInt(amountToSend));
-    if (!sendMax && changeSats > CHANGE_DUST_SATS) {
+    if (!sendMax && changeSats >= changeDustSats(changeAddr)) {
       tx.addOutput(encodeDestinationScript(changeAddr), BigInt(changeSats));
     } else {
       changeSats = 0n; // dust or send-max → fold into fee
@@ -597,12 +613,12 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     const pqScripts = (n: number) => Array.from({ length: n }, () => '5120');
     let selectedXna = [xnaUtxos[0]];
     let feeSats = estimateNeuraiFeeSats(pqScripts(selectedAsset.length + selectedXna.length), outAddrs(true), feeRateXnaPerKb);
-    selectedXna = pickUtxos(xnaUtxos, feeSats + CHANGE_DUST_SATS);
+    selectedXna = pickUtxos(xnaUtxos, feeSats + changeDustSats(this.address));
     feeSats = estimateNeuraiFeeSats(pqScripts(selectedAsset.length + selectedXna.length), outAddrs(true), feeRateXnaPerKb);
     const xnaIn = selectedXna.reduce((s, u) => s + u.satoshis, 0n);
     let xnaChangeSats = xnaIn - feeSats;
     if (xnaChangeSats < 0) throw new Error('Balance too low to cover the network fee');
-    if (xnaChangeSats > 0 && xnaChangeSats < CHANGE_DUST_SATS) {
+    if (xnaChangeSats > 0 && xnaChangeSats < changeDustSats(this.address)) {
       feeSats += xnaChangeSats;
       xnaChangeSats = 0n;
     }
@@ -674,12 +690,12 @@ export class NeuraiHardwareWallet extends AbstractNeuraiWallet {
     const legacyScripts = (n: number) => Array.from({ length: n }, () => '76a914');
     let selectedXna = [ownedXna[0]];
     let feeSats = estimateNeuraiFeeSats(legacyScripts(selectedAsset.length + selectedXna.length), outAddrs(true), feeRateXnaPerKb);
-    selectedXna = pickUtxos(ownedXna, feeSats + CHANGE_DUST_SATS);
+    selectedXna = pickUtxos(ownedXna, feeSats + changeDustSats(changeAddr));
     feeSats = estimateNeuraiFeeSats(legacyScripts(selectedAsset.length + selectedXna.length), outAddrs(true), feeRateXnaPerKb);
     const xnaIn = selectedXna.reduce((s, u) => s + u.satoshis, 0n);
     let xnaChangeSats = xnaIn - feeSats;
     if (xnaChangeSats < 0) throw new Error('Balance too low to cover the network fee');
-    if (xnaChangeSats > 0 && xnaChangeSats < CHANGE_DUST_SATS) {
+    if (xnaChangeSats > 0 && xnaChangeSats < changeDustSats(changeAddr)) {
       feeSats += xnaChangeSats;
       xnaChangeSats = 0n;
     }

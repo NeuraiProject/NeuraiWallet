@@ -1,3 +1,4 @@
+import { TESTNET_GENESIS_HASH } from '@neuraiproject/neurai-rpc';
 import { RpcBackend } from '../../blue_modules/neurai/RpcBackend';
 import { createDefaultBackend, getDepinRpcBackend } from '../../blue_modules/neurai';
 import { getDepinRpcConfig, setDepinRpcConfig } from '../../blue_modules/neurai/depinRpcOverrides';
@@ -91,7 +92,9 @@ function service(version: 1 | 2, amount: string, confirmExact = true, network = 
               version === 2
                 ? { methods: ['getaddressutxos'], amounts: 'rpc-native-units', numeric_encoding: 'safe-number-or-string' }
                 : undefined,
-            ...(version === 2 ? { service_id: 'test', network, genesis_hash: 'a'.repeat(64) } : {}),
+            ...(version === 2
+              ? { service_id: 'test', network, genesis_hash: network === 'testnet' ? TESTNET_GENESIS_HASH : 'a'.repeat(64) }
+              : {}),
           };
       } else if (request.method === 'ping') {
         result = 'pong';

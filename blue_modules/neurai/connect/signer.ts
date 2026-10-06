@@ -22,16 +22,18 @@
  */
 
 import { ml_dsa44 } from '@noble/post-quantum/ml-dsa.js';
-import { sign as signLegacy, signPQMessage, verifyMessage } from '@neuraiproject/neurai-message';
+import { sign as signLegacy, signECDSAWitnessMessage, signPQMessage, verifyMessage } from '@neuraiproject/neurai-message';
 import { getAddressByWIF } from '@neuraiproject/neurai-key';
 import {
   SIGNATURE_TYPE_LEGACY,
   SIGNATURE_TYPE_PQ,
+  addressKind,
   isPostQuantumAddress,
   signatureTypeForAddress,
 } from '@neuraiproject/neurai-connect-core';
 import type { NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native';
 import type { AbstractNeuraiWallet } from '../../../class/wallets/abstract-neurai-wallet';
+import { ecdsaKeyNetworkFor, legacyKeyNetworkFor } from '../keyNetwork';
 import type { NeuraiChainType } from '../networkConfig';
 import { withDevice } from '../../neurai-hw/deviceQueue';
 
@@ -131,11 +133,20 @@ export async function signConnectMessage(
   let signature: string;
   if (material.kind === 'legacy') {
     if (isPostQuantumAddress(address)) throw new ConnectSignerError('a post-quantum address cannot be signed with a legacy key');
-    // Narrowed to the two legacy networks: only those have WIF keys.
+    // Only the Legacy and ECDSA networks have WIF keys.
     const network = wallet.network as NeuraiChainType;
-    if (network !== 'xna' && network !== 'xna-test') throw new ConnectSignerError(`network ${network} has no WIF keys`);
-    const privateKeyHex = getAddressByWIF(network, material.wif).privateKey;
-    signature = signLegacy(message, hexToBytes(privateKeyHex), true);
+    const ecdsaNetwork = ecdsaKeyNetworkFor(network);
+    if (ecdsaNetwork) {
+      // Strict ECDSA (`nq1r…` / `tnq1r…`) messages commit to the address.
+      if (addressKind(address) !== 'ecdsa') throw new ConnectSignerError('an ECDSA wallet only signs with its witness v3 addresses');
+      const privateKeyHex = getAddressByWIF(ecdsaNetwork, material.wif).privateKey;
+      signature = signECDSAWitnessMessage(message, hexToBytes(privateKeyHex), address);
+    } else {
+      const legacyNetwork = legacyKeyNetworkFor(network);
+      if (!legacyNetwork) throw new ConnectSignerError(`network ${network} has no WIF keys`);
+      const privateKeyHex = getAddressByWIF(legacyNetwork, material.wif).privateKey;
+      signature = signLegacy(message, hexToBytes(privateKeyHex), true);
+    }
   } else {
     if (!isPostQuantumAddress(address)) throw new ConnectSignerError('a legacy address cannot be signed with a post-quantum key');
     const seed = hexToBytes(material.seedKey);
@@ -144,7 +155,8 @@ export async function signConnectMessage(
     if (bytesToHex(keyPair.publicKey) !== material.publicKey.trim().toLowerCase()) {
       throw new ConnectSignerError('the post-quantum key expanded from the seed does not match the stored public key');
     }
-    signature = signPQMessage(message, keyPair.secretKey, keyPair.publicKey);
+    // Strict PQ (`pq1z…` / `tpq1z…`) messages commit to the address.
+    signature = signPQMessage(message, keyPair.secretKey, keyPair.publicKey, address);
   }
 
   if (!verifyMessage(message, address, signature)) {

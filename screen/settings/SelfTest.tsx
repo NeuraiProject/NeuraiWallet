@@ -17,6 +17,7 @@ import { SettingsCard, SettingsScrollView } from '../../components/platform';
 import loc from '../../loc';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
+import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
 import { createDefaultWssBackend } from '../../blue_modules/neurai';
 
 const KNOWN_MNEMONIC = 'result pact model attract result puzzle final boss private educate luggage era';
@@ -34,6 +35,7 @@ const initialSteps: Step[] = [
   { label: 'WSS reachability (testnet, legacy)', status: 'pending' },
   { label: 'WSS reachability (testnet, pq)', status: 'pending' },
   { label: 'WSS tip height (testnet, legacy)', status: 'pending' },
+  { label: 'ECDSA testnet address derivation', status: 'pending' },
 ];
 
 function symbolFor(status: StepStatus): string {
@@ -83,7 +85,7 @@ const SelfTest: React.FC = () => {
     await runStep(1, async () => {
       const pq = NeuraiPQWallet.forNetwork('testnet', KNOWN_MNEMONIC);
       const addr = await pq.getReceiveAddressAsync();
-      if (!addr.startsWith('tnq1')) throw new Error(`expected 'tnq1' prefix, got '${addr}'`);
+      if (!addr.startsWith('tpq1z')) throw new Error(`expected 'tpq1z' prefix, got '${addr}'`);
       return addr;
     });
 
@@ -106,6 +108,13 @@ const SelfTest: React.FC = () => {
       const height = await backend.getTipHeight();
       if (!Number.isFinite(height) || height <= 0) throw new Error(`bad tip height: ${height}`);
       return `height ${height}`;
+    });
+
+    await runStep(5, async () => {
+      const ecdsa = NeuraiECDSAWallet.forNetwork('testnet', KNOWN_MNEMONIC);
+      const addr = await ecdsa.getReceiveAddressAsync();
+      if (!addr.startsWith('tnq1r')) throw new Error(`expected 'tnq1r' prefix, got '${addr}'`);
+      return addr;
     });
 
     setRunning(false);
@@ -132,7 +141,6 @@ const SelfTest: React.FC = () => {
     </SettingsScrollView>
   );
 };
-
 
 const styles = StyleSheet.create({
   card: { padding: 16 },

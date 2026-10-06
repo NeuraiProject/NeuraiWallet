@@ -7,6 +7,8 @@ import TransactionIncomingIcon from '../components/icons/TransactionIncomingIcon
 import TransactionOutgoingIcon from '../components/icons/TransactionOutgoingIcon';
 import TransactionPendingIcon from '../components/icons/TransactionPendingIcon';
 import TransactionAssetIcon from '../components/icons/TransactionAssetIcon';
+import TransactionPrivacyIcon from '../components/icons/TransactionPrivacyIcon';
+import { usePrivacyTxKind } from '../blue_modules/neurai/privacy/txTags';
 import { formatAssetAmount } from '../blue_modules/neurai/assetUtils';
 import loc, { formatBalanceWithoutSuffix, formatTransactionListDate, transactionTimeToReadable } from '../loc';
 import { XnaUnit } from '../models/xnaUnits';
@@ -145,6 +147,7 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
     const combinedStyle = useMemo(() => [containerStyle, style], [containerStyle, style]);
 
     const txMemo = txMetadata[item.hash]?.memo ?? '';
+    const privacyKind = usePrivacyTxKind(walletID, item.hash);
     const noteForCopy = txMemo.trim() || undefined;
 
     // A Neurai asset (token) transaction: direction and amount come from the
@@ -201,7 +204,14 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
     }, [colors.successColor, colors.foregroundColor, item.value, insets.right, insets.left, isAsset, assetSent]);
 
     const determineTransactionTypeAndAvatar = () => {
-      if (!item.confirmations) {
+      // Privacy pool transactions keep their icon while pending; the title says "Pending".
+      if (privacyKind) {
+        const labels = { deposit: loc.privacy.tx_deposit, withdraw: loc.privacy.tx_withdraw, other: loc.privacy.tx_other };
+        return {
+          label: labels[privacyKind],
+          icon: <TransactionPrivacyIcon kind={privacyKind} />,
+        };
+      } else if (!item.confirmations) {
         return {
           label: loc.transactions.pending_transaction,
           icon: <TransactionPendingIcon />,

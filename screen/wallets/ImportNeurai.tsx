@@ -1,9 +1,9 @@
 /**
  * Simple Import flow for Neurai wallets.
  *
- * Asks for a 12-word mnemonic, the wallet kind (legacy ECDSA or post-quantum
- * ML-DSA-44) and the network (mainnet by default, testnet second; PQ forces
- * testnet). Skips the BIP39 multi-format heuristics that
+ * Asks for a 12-word mnemonic, the wallet kind (Legacy Base58, ECDSA witness
+ * v3 or post-quantum ML-DSA-44) and the network (mainnet by default, testnet
+ * second; ECDSA and PQ force testnet). Skips the BIP39 multi-format heuristics that
  * `class/wallet-import.ts` runs against Bitcoin paths — for Neurai there is
  * exactly one derivation path per kind, defined in `neurai-key`.
  */
@@ -19,16 +19,16 @@ import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import SegmentedControl from '../../components/SegmentedControl';
 import { useTheme } from '../../components/themes';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
-import { chainFor, NeuraiNetwork } from '../../blue_modules/neurai';
+import { chainFor, isKindAvailable, NeuraiNetwork, WalletKind } from '../../blue_modules/neurai';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
+import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
 import { useStorage } from '../../hooks/context/useStorage';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc from '../../loc';
 
-type WalletKind = 'legacy' | 'pq';
-
-const KIND_OPTIONS: WalletKind[] = ['legacy', 'pq'];
+const KIND_OPTIONS: WalletKind[] = ['legacy', 'ecdsa', 'pq'];
+const KIND_LABELS: Record<WalletKind, string> = { legacy: 'Legacy', ecdsa: 'ECDSA', pq: 'PQ' };
 const NETWORK_OPTIONS: NeuraiNetwork[] = ['mainnet', 'testnet'];
 
 const ImportNeurai: React.FC = () => {
@@ -64,7 +64,7 @@ const ImportNeurai: React.FC = () => {
     // otherwise the screen looks frozen with no feedback.
     await new Promise<void>(resolve => setTimeout(resolve, 50));
     try {
-      const wallet = kind === 'pq' ? new NeuraiPQWallet() : new NeuraiHDWallet();
+      const wallet = kind === 'pq' ? new NeuraiPQWallet() : kind === 'ecdsa' ? new NeuraiECDSAWallet() : new NeuraiHDWallet();
       wallet.setNetwork(chainFor(network, kind));
       wallet.setSecret(mnemonicTrimmed);
       if (passphrase) wallet.setPassphrase(passphrase);
@@ -107,15 +107,15 @@ const ImportNeurai: React.FC = () => {
     }
   }, [mnemonic, passphrase, kind, network, wallets, addWallet, saveToDisk, navigation]);
 
-  // PQ wallets exist on testnet only for now: selecting PQ forces Testnet and
-  // greys out the (mainnet-capable) network selector.
+  // ECDSA and PQ wallets exist on testnet only for now: selecting one forces
+  // Testnet and greys out the (mainnet-capable) network selector.
   const onKindChange = useCallback((idx: number) => {
     const next = KIND_OPTIONS[idx];
     setKind(next);
-    if (next === 'pq') setNetwork('testnet');
+    if (!isKindAvailable('mainnet', next)) setNetwork('testnet');
   }, []);
 
-  const kindValues = KIND_OPTIONS.map(k => (k === 'pq' ? 'PQ' : 'Legacy'));
+  const kindValues = KIND_OPTIONS.map(k => KIND_LABELS[k]);
   const networkValues = NETWORK_OPTIONS.map(n =>
     n === 'mainnet' ? loc.wallets.neurai_network_mainnet : loc.wallets.neurai_network_testnet,
   );
@@ -168,7 +168,7 @@ const ImportNeurai: React.FC = () => {
           values={networkValues}
           selectedIndex={NETWORK_OPTIONS.indexOf(network)}
           onChange={idx => setNetwork(NETWORK_OPTIONS[idx])}
-          disabled={kind === 'pq'}
+          disabled={!isKindAvailable('mainnet', kind)}
         />
       </View>
 

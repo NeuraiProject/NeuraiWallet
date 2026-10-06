@@ -116,6 +116,9 @@ export function createDefaultBackend(network: NeuraiNetwork, kind: WalletKind): 
     chain,
     url: getWssUrlOverride(network) ?? params.defaultWssUrl,
     authToken: params.defaultWssAuthToken,
+    // Testnet was reset: a service still on the old chain must be refused,
+    // not read with addresses and assets that no longer exist there.
+    expectedGenesisHash: params.expectedGenesisHash,
   });
 }
 

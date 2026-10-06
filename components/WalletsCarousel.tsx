@@ -538,7 +538,9 @@ export const WalletCarouselItem: React.FC<WalletCarouselItemProps> = React.memo(
               <ImageBackground source={image} style={[iStyles.image, isCompact && iStyles.imageCompact]} />
               {isNeuraiWallet(item) && !isPlaceHolder && (
                 <View style={[iStyles.kindBadge, iStyles.kindBadgeColor, isCompact && iStyles.kindBadgeCompact]}>
-                  <Text style={iStyles.kindBadgeText}>{item.walletKind === 'pq' ? 'PQ' : 'HD'}</Text>
+                  <Text style={iStyles.kindBadgeText}>
+                    {item.walletKind === 'pq' ? 'PQ' : item.walletKind === 'ecdsa' ? 'ECDSA' : 'HD'}
+                  </Text>
                 </View>
               )}
               {isNeuraiWallet(item) && !isPlaceHolder && item.use_with_hardware_wallet && (

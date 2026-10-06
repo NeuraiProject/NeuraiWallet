@@ -1,0 +1,125 @@
+/**
+ * What the C6 pool needs from a transparent wallet: whether it can be used,
+ * a read/admission RPC through the wallet's own service, and local signing of
+ * the transparent inputs the pool transaction spends.
+ */
+
+import { sign, type SignHashType } from '@neuraiproject/neurai-sign-transaction';
+import type { NzkFamily } from '@neuraiproject/neurai-privacy';
+
+import type { AbstractNeuraiWallet } from '../../../class/wallets/abstract-neurai-wallet';
+import { signerNetworkFor } from '../keyNetwork';
+import { isTestnetChain } from '../networkConfig';
+
+export type PoolRpc = (method: string, params?: unknown[]) => Promise<any>;
+
+/**
+ * The wallet surface the pool uses. Structural on purpose: the concrete wallet
+ * classes narrow `type` to their own literal, so they are not assignable to
+ * `AbstractNeuraiWallet` itself.
+ */
+export type PrivacyWallet = Pick<
+  AbstractNeuraiWallet,
+  | 'getID'
+  | 'secret'
+  | 'passphrase'
+  | 'network'
+  | 'getEngineNetwork'
+  | 'getBackend'
+  | 'getSigningKey'
+  | 'listOwnAddresses'
+  | 'listOwnUtxos'
+  | 'getBaseCurrencyName'
+  | 'buildSendTransaction'
+>;
+
+/** C6 needs an RPC reply within this time; pending reservations survive a timeout. */
+const RPC_TIMEOUT_MS = 45_000;
+
+/**
+ * Private-wallet family of a supported wallet: Legacy P2PKH, strict ECDSA v3
+ * or strict PQ v2, the address types C6 accepts for funding and withdrawals
+ * (as in the web wallet, generic AuthScript v1 addresses are for contracts,
+ * not wallets).
+ */
+export function c6Family(wallet: PrivacyWallet): NzkFamily | null {
+  if (!wallet.secret || !isTestnetChain(wallet.network)) return null;
+  const engine = wallet.getEngineNetwork();
+  if (engine === 'xna-test') return 'legacy';
+  if (engine === 'xna-ecdsa-test') return 'ecdsa';
+  if (engine === 'xna-pq-strict-test') return 'pq';
+  return null;
+}
+
+/** Why C6 cannot be opened for this wallet, or null when it can. */
+export function c6BlockedReason(wallet: PrivacyWallet | undefined): string | null {
+  if (!wallet) return 'Open a testnet wallet first.';
+  if (!isTestnetChain(wallet.network)) return 'C6 is a testnet pool. Switch to a testnet wallet to use it.';
+  if (!wallet.secret)
+    return 'This wallet has no recovery words on this device (hardware or watch-only), so it cannot open a private wallet.';
+  if (!c6Family(wallet)) return 'This wallet type cannot use C6.';
+  return null;
+}
+
+/**
+ * Node RPC through the wallet's WSS service (`rpc.call` / `tx.broadcast`).
+ * As in the library's wallet-service adapter, a negative node error code is
+ * exposed as `Error.code` so publication recovery can tell a node rejection
+ * from a transport failure.
+ */
+export function createPrivacyRpc(wallet: PrivacyWallet): PoolRpc {
+  return async (method, params = []) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        wallet.getBackend().rpc(method, params),
+        new Promise((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error(`RPC timeout (${method}); pending operations remain reserved`)), RPC_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (error) {
+      const details = (error as { details?: { node_code?: unknown } })?.details;
+      const nodeCode = details?.node_code;
+      if (error instanceof Error && Number.isInteger(nodeCode) && (nodeCode as number) < 0) {
+        (error as Error & { code?: number }).code = nodeCode as number;
+      }
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+}
+
+export interface PoolInputCoin {
+  address: string;
+  assetName: string;
+  txid: string;
+  outputIndex: number;
+  script: string;
+  satoshis: string;
+  value: string;
+}
+
+/**
+ * Sign only the given inputs of a pool transaction with the wallet's keys
+ * (`inputHashTypes`: index → SIGHASH_ALL (1) or SINGLE|ANYONECANPAY (131)).
+ * The key never leaves this call.
+ */
+export async function signPoolInputs(
+  wallet: PrivacyWallet,
+  raw: string,
+  coins: PoolInputCoin[],
+  inputHashTypes: Record<number, SignHashType>,
+): Promise<string> {
+  const keys: Record<string, Parameters<typeof sign>[3][string]> = {};
+  try {
+    for (const coin of coins) {
+      const key = await wallet.getSigningKey(coin.address);
+      if (!key) throw new Error('This wallet does not own ' + coin.address);
+      keys[coin.address] = key as Parameters<typeof sign>[3][string];
+    }
+    return sign(signerNetworkFor(wallet.getEngineNetwork()), raw, coins, keys, { debug: false, inputHashTypes });
+  } finally {
+    for (const address of Object.keys(keys)) delete keys[address];
+  }
+}

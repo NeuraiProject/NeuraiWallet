@@ -1,10 +1,12 @@
 /**
- * PostQuantum Neurai wallet (ML-DSA-44 AuthScript).
+ * PostQuantum Neurai wallet (ML-DSA-44).
  *
- * Networks: `xna-pq` (mainnet) and `xna-pq-test` (testnet). Addresses are
- * Bech32m AuthScript witness v1, prefix `nq1...` (mainnet) / `tnq1...`
- * (testnet). Derivation is the native PQ HD tree
- * (`m_pq/100'/1900'/0'/0'/index'`), all levels hardened.
+ * Networks: `xna-pq` (mainnet) and `xna-pq-test` (testnet). Mainnet addresses
+ * are generic AuthScript witness v1 (`nc1p…`, the 4.x derivation). Testnet
+ * addresses are the node's strict PQ witness v2 (`tpq1z…`), the type the C6
+ * privacy pool accepts. Derivation is the native PQ HD tree
+ * (`m_pq/100'/coin'/0'/0'/index'`), all levels hardened; both encodings share
+ * the same key per index.
  *
  * PQ keys are not WIF-compatible; sweep from external private key is
  * disallowed (the engine throws if attempted).

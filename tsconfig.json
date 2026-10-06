@@ -24,6 +24,7 @@
     "jest.config.js",
     "components/react-native-draggable-flatlist",
     "scripts/maccatalystpatches",
-    "**/Pods"
+    "**/Pods",
+    "privacy-host"
   ]
 }

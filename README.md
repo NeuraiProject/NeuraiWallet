@@ -20,23 +20,39 @@ the wallet, transaction, asset and messaging layers are Neurai's own and are bui
   qualifier and DePIN assets) are listed per wallet and can be sent from the Send screen.
 * **DePIN messaging** — a token-gated chat tab (see below).
 * **Neurai Connect** — QR login and dApp sessions (see below).
+* **Privacy pool (C6, testnet)** — private XNA and asset notes with zero-knowledge proofs built on
+  the phone (see below).
 * Inherited from BlueWallet and still in use: encrypted storage with plausible deniability,
   biometric unlock on the sensitive screens, "is it my address?" verification, raw transaction
   broadcast, fiat rates and 50+ UI languages.
 
 ## Networks
 
-Four chain identifiers are wired in parallel, two for legacy ECDSA wallets and two for
-post-quantum ones. Switching the active network changes the backend URL, the address prefixes,
-the BIP44 coin type and the bech32m HRP in one step. They are defined in
+Six chain identifiers are wired in parallel, one per network for each wallet kind: Legacy
+P2PKH, ECDSA witness v3 and post-quantum. Switching the active network changes the backend URL,
+the address prefixes, the BIP44 coin type and the bech32m HRP in one step. They are defined in
 `blue_modules/neurai/networkConfig.ts`:
 
 | Chain | Network | Keys | Addresses | BIP44 coin type |
 | --- | --- | --- | --- | --- |
 | `xna` | mainnet | legacy ECDSA (secp256k1) | base58, P2PKH version 53 (`N…`) | 1900 |
 | `xna-test` | testnet | legacy ECDSA (secp256k1) | base58, P2PKH version 127 | 1 |
-| `xna-pq` | mainnet | post-quantum ML-DSA-44 | bech32m, HRP `nq` | 1900 |
-| `xna-pq-test` | testnet | post-quantum ML-DSA-44 | bech32m, HRP `tnq` | 1 |
+| `xna-ecdsa` | mainnet | ECDSA (secp256k1), `m/84'` | bech32m strict ECDSA v3, HRP `nq` (`nq1r…`) | 1900 |
+| `xna-ecdsa-test` | testnet | ECDSA (secp256k1), `m/84'` | bech32m strict ECDSA v3, HRP `tnq` (`tnq1r…`) | 1 |
+| `xna-pq` | mainnet | post-quantum ML-DSA-44 | bech32m AuthScript v1, HRP `nc` (`nc1p…`) | 1900 |
+| `xna-pq-test` | testnet | post-quantum ML-DSA-44 | bech32m strict PQ v2, HRP `tpq` (`tpq1z…`) | 1 |
+
+These are the app's own names. `neurai-key` 5 reuses `xna` / `xna-pq` for other address types,
+so every direct call goes through `blue_modules/neurai/keyNetwork.ts`; the Legacy and mainnet PQ
+derivations are unchanged (mainnet PQ addresses keep their commitment, re-encoded from the old
+`nq1p…`). Testnet was reset with a new genesis: testnet PQ wallets moved to the node's strict PQ
+type, and cached testnet state (balances, history, DePIN pins and sessions) from the old chain is
+discarded on load (`AbstractNeuraiWallet.fromJson`, `blue_modules/neurai/testnetReset.ts`).
+
+ECDSA and PQ wallets can only be created on testnet for now: the node accepts witness v3 and v2
+outputs only where those families are active, so the mainnet options stay disabled until then.
+ECDSA wallets use ordinary compressed secp256k1 keys, like Legacy, but the node's DePIN service
+only knows Legacy P2PKH addresses, so DePIN messaging stays a Legacy-wallet feature.
 
 Balances, history, UTXOs and broadcast go through `neurai-wallet-services` over WSS by default
 (`blue_modules/neurai/WssBackend.ts`), with a JSON-RPC backend as an explicit fallback
@@ -67,6 +83,37 @@ The wallet side lives in `blue_modules/neurai/connect/` (relay client, session s
 per-domain identities) with the approval screens in `screen/connect/`, and pairings arrive as
 `nc:` URIs from the scanner or as `neuraiwallet://connect?uri=…` deep links, recognised by
 `class/neurai-uri-match.ts`.
+
+## Privacy pool (C6, testnet)
+
+Testnet Legacy and PQ wallets with their words get a **Privacy** button next to the wallet tabs.
+It opens the C6 TEST pools pinned in `blue_modules/neurai/privacy/c6-*.json` (the same instances
+as the web wallet): one for XNA and one for an ordinary asset, each with its own private balance.
+Deposit, assign to `tnzk1…` addresses, withdraw and join two notes; asset operations pay the
+miner fee with a separate XNA sponsor coin.
+
+Hermes has no WebAssembly, so the proving side of `@neuraiproject/neurai-privacy` (snarkjs,
+Argon2id, pool scanning) runs in a hidden WebView (`components/privacy/PrivacyHost.tsx`). Its
+page is bundled from `privacy-host/` by `npm run privacy:host` (run by `postinstall`) into the
+git-ignored `blue_modules/neurai/privacy/hostHtml.generated.ts`. The app keeps the library's
+worker client, the encrypted journals (`privacy/store.ts`), RPC through the wallet's WSS service
+and signing (`privacy/wallet.ts`); `privacy/bridge.ts` relays the worker's messages.
+
+The proving files (~88 MB per instance) are downloaded on first use and kept only if their size
+and SHA-256 match the pins in the app, so any HTTPS host will do. By default they come from the
+testnet web wallet, which deploys the same pinned files (`https://webwallet-testnet.neurai.org`
+plus the manifest's `artifactBaseUrl`, e.g. `/privacy-c6/`); the URL can be changed per pool in
+the privacy screen. To mirror them to a GitHub release (`c6-test-<commitment[0:12]>`) instead:
+
+```bash
+node scripts/privacy-artifacts-release.mjs xna   ../neurai-webwallet/public/privacy-c6
+node scripts/privacy-artifacts-release.mjs asset ../neurai-webwallet/public/privacy-c6-assets/C6ASSET261004A
+# verified? add --publish (needs an authenticated GitHub CLI)
+```
+
+`privacy-host/e2e/run.sh <artifacts-dir>` checks the WebView page end to end in headless
+Chromium (Docker): private wallet derivation, a real pool scan on testnet and a real Groth16
+deposit proof whose files cross the bridge.
 
 ## Build and run
 

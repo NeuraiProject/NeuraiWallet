@@ -19,7 +19,7 @@ const walletStub = (network: string, material: NeuraiSigningMaterial | false): A
   ({ network, secret: MNEMONIC, getMessageSigningMaterial: async () => material }) as unknown as AbstractNeuraiWallet;
 
 describe('legacy addresses', () => {
-  const pair = getAddressPair('xna-test', MNEMONIC, 0, 0);
+  const pair = getAddressPair('xna-legacy-test', MNEMONIC, 0, 0);
   const external =
     (pair as unknown as { external?: { address: string; WIF: string } }).external ?? (pair as unknown as { address: string; WIF: string });
 
@@ -38,6 +38,24 @@ describe('legacy addresses', () => {
     const wallet = walletStub('xna-test', { kind: 'legacy', wif: external.WIF });
     const signed = await signConnectMessage(wallet, external.address, MESSAGE);
     expect(verifyMessage(MESSAGE + '!', external.address, signed.signature)).toBe(false);
+  });
+});
+
+describe('ECDSA witness v3 addresses', () => {
+  const ecdsa = (getAddressPair('xna-test', MNEMONIC, 0, 0) as unknown as { external: { address: string; WIF: string } }).external;
+
+  it('signs with the address-bound v3 format and verifies the result', async () => {
+    expect(ecdsa.address.startsWith('tnq1r')).toBe(true);
+    const wallet = walletStub('xna-ecdsa-test', { kind: 'legacy', wif: ecdsa.WIF });
+    const signed = await signConnectMessage(wallet, ecdsa.address, MESSAGE);
+    expect(signed.type).toBe(SIGNATURE_TYPE_LEGACY);
+    expect(verifyMessage(MESSAGE, ecdsa.address, signed.signature)).toBe(true);
+  });
+
+  it('refuses a non-witness address in an ECDSA wallet', async () => {
+    const legacy = (getAddressPair('xna-legacy-test', MNEMONIC, 0, 0) as unknown as { external: { address: string } }).external;
+    const wallet = walletStub('xna-ecdsa-test', { kind: 'legacy', wif: ecdsa.WIF });
+    await expect(signConnectMessage(wallet, legacy.address, MESSAGE)).rejects.toThrow(/only signs with its witness v3 addresses/);
   });
 });
 
@@ -61,7 +79,7 @@ describe('post-quantum addresses', () => {
 describe('hardware wallets', () => {
   // The device signs with its one fixed key; the app only checks the result.
   // A fake device backed by a real key gives signatures that verify.
-  const pair = getAddressPair('xna-test', MNEMONIC, 0, 0);
+  const pair = getAddressPair('xna-legacy-test', MNEMONIC, 0, 0);
   const leaf =
     (pair as unknown as { external?: { address: string; WIF: string } }).external ?? (pair as unknown as { address: string; WIF: string });
   const hardwareWallet = () =>
@@ -71,7 +89,7 @@ describe('hardware wallets', () => {
     ({
       ping: async () => ({ device: name }),
       signMessage: async (message: string) => {
-        const key = getAddressByWIF('xna-test', leaf.WIF).privateKey;
+        const key = getAddressByWIF('xna-legacy-test', leaf.WIF).privateKey;
         const bytes = Uint8Array.from(Buffer.from(key, 'hex'));
         return { status: 'success', signature: signLegacy(message, bytes, true), address: signsAs, message };
       },
@@ -119,7 +137,7 @@ describe('refusals', () => {
 
   it('refuses to cross key kinds', async () => {
     const pq = getPQAddress('xna-pq-test', MNEMONIC, 0, 0) as unknown as { address: string; seedKey: string; publicKey: string };
-    const pair = getAddressPair('xna-test', MNEMONIC, 0, 0);
+    const pair = getAddressPair('xna-legacy-test', MNEMONIC, 0, 0);
     const external =
       (pair as unknown as { external?: { address: string; WIF: string } }).external ??
       (pair as unknown as { address: string; WIF: string });

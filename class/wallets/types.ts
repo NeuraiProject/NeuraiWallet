@@ -1,6 +1,7 @@
 import { XnaUnit } from '../../models/xnaUnits';
 import { NeuraiHDWallet } from './neurai-hd-wallet';
 import { NeuraiPQWallet } from './neurai-pq-wallet';
+import { NeuraiECDSAWallet } from './neurai-ecdsa-wallet';
 import { NeuraiHardwareWallet } from './neurai-hardware-wallet';
 
 /**
@@ -81,4 +82,4 @@ export type ExtendedTransaction = Transaction & {
  * see [class/wallets/abstract-neurai-wallet.ts](abstract-neurai-wallet.ts) for
  * the shared base.
  */
-export type TWallet = NeuraiHDWallet | NeuraiPQWallet | NeuraiHardwareWallet;
+export type TWallet = NeuraiHDWallet | NeuraiECDSAWallet | NeuraiPQWallet | NeuraiHardwareWallet;

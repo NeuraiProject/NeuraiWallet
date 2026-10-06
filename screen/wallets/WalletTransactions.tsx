@@ -43,6 +43,8 @@ import getWalletTransactionsOptions, { WalletTransactionsRouteProps } from '../.
 import useMenuElements from '../../hooks/useMenuElements';
 import useWalletSubscribe from '../../hooks/useWalletSubscribe';
 import useDepinPoolWatch from '../../hooks/useDepinPoolWatch';
+import { c6Family } from '../../blue_modules/neurai/privacy/wallet';
+import PrivacySection from '../../components/privacy/PrivacySection';
 import { getClipboardContent } from '../../blue_modules/clipboard';
 import HandOffComponent from '../../components/HandOffComponent';
 import { HandOffActivityType } from '../../components/types';
@@ -54,6 +56,7 @@ const buttonFontSize =
     : PixelRatio.roundToNearestPixel(Dimensions.get('window').width / 26);
 
 type RouteProps = RouteProp<DetailViewStackParamList, 'WalletTransactions'>;
+type WalletTab = 'transactions' | 'assets' | 'depin' | 'privacy';
 
 type WalletTransactionsProps = NativeStackScreenProps<DetailViewStackParamList, 'WalletTransactions'>;
 
@@ -97,7 +100,10 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const showAssetsTab = isNeuraiWallet(wallet);
   // DePIN chat is Legacy-only (PQ networks have no BIP44 chat identity).
   const showDepinTab = isNeuraiWallet(wallet) && isDepinChatSupportedNetwork(wallet.network);
-  const [activeTab, setActiveTab] = useState<'transactions' | 'assets' | 'depin'>('transactions');
+  // The C6 privacy pool is a testnet section for Legacy and PQ wallets with
+  // their words (hardware wallets have none).
+  const showPrivacyTab = isNeuraiWallet(wallet) && c6Family(wallet) !== null;
+  const [activeTab, setActiveTab] = useState<WalletTab>('transactions');
   const MAX_FAILURES = 3;
   const flatListRef = useRef<FlatList<Transaction>>(null);
   const depinChatRef = useRef<DePINChatHandle>(null);
@@ -111,16 +117,17 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
     walletID,
   });
 
-  // On the DePIN tab, back (hardware button or header arrow) walks one level
-  // at a time instead of leaving the screen: open token chat → token picker
-  // (handled by DePINChat.goBack()) → the wallet's Transactions tab → and only
-  // from there does the screen actually pop.
-  const isDepinTabActive = showDepinTab && activeTab === 'depin';
+  // On the DePIN and Privacy sections, back (hardware button or header arrow)
+  // walks one level at a time instead of leaving the screen: open token chat →
+  // token picker (handled by DePINChat.goBack()) → the wallet's Transactions
+  // tab → and only from there does the screen actually pop.
+  const isPrivacyTabActive = showPrivacyTab && activeTab === 'privacy';
+  const isDepinTabActive = (showDepinTab && activeTab === 'depin') || isPrivacyTabActive;
   const handleDepinBack = useCallback((): boolean => {
     if (!isDepinTabActive) return false;
-    if (!depinChatRef.current?.goBack()) setActiveTab('transactions');
+    if (isPrivacyTabActive || !depinChatRef.current?.goBack()) setActiveTab('transactions');
     return true;
-  }, [isDepinTabActive]);
+  }, [isDepinTabActive, isPrivacyTabActive]);
   useFocusEffect(
     useCallback(() => {
       if (!isDepinTabActive) return;
@@ -558,15 +565,22 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
           {showAssetsTab ? (
             <View style={styles.tabsBar}>
               {(
-                (showDepinTab ? (['transactions', 'assets', 'depin'] as const) : (['transactions', 'assets'] as const)) as readonly (
-                  | 'transactions'
-                  | 'assets'
-                  | 'depin'
-                )[]
+                [
+                  'transactions',
+                  'assets',
+                  ...(showDepinTab ? (['depin'] as const) : []),
+                  ...(showPrivacyTab ? (['privacy'] as const) : []),
+                ] as WalletTab[]
               ).map(tab => {
                 const active = activeTab === tab;
                 const label =
-                  tab === 'transactions' ? loc.assets.tab_transactions : tab === 'assets' ? loc.assets.tab_assets : loc.assets.tab_depin;
+                  tab === 'transactions'
+                    ? loc.assets.tab_transactions
+                    : tab === 'assets'
+                      ? loc.assets.tab_assets
+                      : tab === 'depin'
+                        ? loc.assets.tab_depin
+                        : loc.privacy.tab;
                 return (
                   <Pressable
                     key={tab}
@@ -584,7 +598,14 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
                         pointerEvents="none"
                       />
                     )}
-                    <Text style={[styles.tabLabel, active ? stylesHook.tabLabelActive : stylesHook.tabLabelInactive]}>{label}</Text>
+                    <Text
+                      style={[styles.tabLabel, active ? stylesHook.tabLabelActive : stylesHook.tabLabelInactive]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.75}
+                    >
+                      {label}
+                    </Text>
                     {tab === 'depin' && hasNewDepinMessages && <View style={styles.depinUnreadDot} testID="DepinTabUnreadDot" />}
                   </Pressable>
                 );
@@ -615,6 +636,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       isBiometricUseCapableAndEnabled,
       showAssetsTab,
       showDepinTab,
+      showPrivacyTab,
       activeTab,
       hasNewDepinMessages,
     ],
@@ -646,6 +668,11 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
         <View style={[styles.flex, stylesHook.backgroundContainer]}>
           <ListHeaderComponent />
           <DePINChat ref={depinChatRef} walletID={walletID} />
+        </View>
+      ) : isPrivacyTabActive && isNeuraiWallet(wallet) ? (
+        <View style={[styles.flex, stylesHook.backgroundContainer]}>
+          <ListHeaderComponent />
+          <PrivacySection walletID={walletID} />
         </View>
       ) : showAssetsTab && activeTab === 'assets' ? (
         <AssetsList walletID={walletID} ListHeaderComponent={ListHeaderComponent} />
@@ -688,7 +715,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       {/* The DePIN chat owns the bottom of the screen (message input toolbar), so
           hide the floating Send/Receive actions there — they'd overlap the input
           and the latest messages. They remain on the Transactions/Assets tabs. */}
-      {!(showDepinTab && activeTab === 'depin') && (
+      {!isDepinTabActive && (
         <>
           <FloatButtonsBottomFade />
           <FContainer ref={walletActionButtonsRef}>
@@ -770,6 +797,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     paddingVertical: 12,
+    paddingHorizontal: 4,
     borderTopLeftRadius: 10,
     borderTopRightRadius: 10,
   },
@@ -779,7 +807,7 @@ const styles = StyleSheet.create({
   tabActive: { overflow: 'hidden' },
   // Unselected tab: outlined, muted background (set via stylesHook).
   tabInactive: { borderWidth: 1 },
-  tabLabel: { fontSize: 15, fontWeight: '700' },
+  tabLabel: { fontSize: 14, fontWeight: '700' },
   listHeaderText: { marginTop: 0, marginBottom: 16, fontWeight: 'bold', fontSize: 24 },
   refreshIndicatorBackground: {
     position: 'absolute',
