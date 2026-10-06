@@ -489,7 +489,6 @@
     "wallet_type_this": "Ten typ portfela to {type}.",
     "share_number": "Udostępnij {number}",
     "copy_ln_url": "Skopiuj i bezpiecznie przechowaj ten URL, aby odtworzyć swój portfel w późniejszym czasie.",
-    "copy_ln_public": "Skopiuj i bezpiecznie przechowaj te informacje, aby odtworzyć swój portfel w późniejszym czasie.",
     "add_ln_wallet_first": "Najpierw musisz dodać portfel Lightning.",
     "identity_pubkey": "Klucz publiczny tożsamości",
     "xpub_title": "XPUB portfela",

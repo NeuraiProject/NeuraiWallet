@@ -1,16 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import Clipboard from '@react-native-clipboard/clipboard';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import Icon from '../../components/Icon';
-import { LayoutChangeEvent, ScrollView, StyleSheet, Pressable, View } from 'react-native';
+import { ActivityIndicator, LayoutChangeEvent, ScrollView, StyleSheet, View } from 'react-native';
 import { useScreenProtect } from '../../hooks/useScreenProtect';
 import { validateMnemonic } from '../../blue_modules/bip39';
-import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { BlueText } from '../../BlueComponents';
 import QRCode from '../../components/QRCode';
 import SeedWords from '../../components/SeedWords';
 import { useTheme } from '../../components/themes';
-import { useSettings } from '../../hooks/context/useSettings';
 import { useStorage } from '../../hooks/context/useStorage';
 import useAppState from '../../hooks/useAppState';
 import loc from '../../loc';
@@ -19,26 +16,6 @@ import { WalletExportStackParamList } from '../../navigation/WalletExportStack';
 type RouteProps = RouteProp<WalletExportStackParamList, 'WalletExport'>;
 
 const HORIZONTAL_PADDING = 20;
-
-const CopyBox: React.FC<{ text: string; onPress: () => void }> = ({ text, onPress }) => {
-  const { colors } = useTheme();
-  const stylesHook = StyleSheet.create({
-    copyRoot: { backgroundColor: colors.lightBorder },
-  });
-
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [pressed && styles.pressed, styles.copyRoot, stylesHook.copyRoot]}>
-      <View style={styles.copyLeft}>
-        <BlueText textBreakStrategy="balanced" style={styles.copyText}>
-          {text}
-        </BlueText>
-      </View>
-      <View style={styles.copyRight}>
-        <Icon name="copy" type="font-awesome-6" color={colors.foregroundColor} />
-      </View>
-    </Pressable>
-  );
-};
 
 const DoNotDisclose: React.FC = () => {
   const { colors } = useTheme();
@@ -55,14 +32,14 @@ const WalletExport: React.FC = () => {
   const { wallets } = useStorage();
   const { walletID } = useRoute<RouteProps>().params;
   const navigation = useNavigation();
-  const { isPrivacyBlurEnabled } = useSettings();
   const { colors } = useTheme();
   const wallet = wallets.find(w => w.getID() === walletID)!;
   const [qrCodeSize, setQRCodeSize] = useState(90);
-  const { enableScreenProtect, disableScreenProtect } = useScreenProtect();
+  const { enableScreenProtect, disableScreenProtect, isProtectionReady } = useScreenProtect();
   const { currentAppState, previousAppState } = useAppState();
   const stylesHook = StyleSheet.create({
     root: { backgroundColor: colors.elevated },
+    secretBox: { backgroundColor: colors.lightBorder },
   });
 
   const secrets: string[] = useMemo(() => {
@@ -79,9 +56,10 @@ const WalletExport: React.FC = () => {
     return validateMnemonic(wallet.getSecret());
   }, [wallet]);
 
+  // Leave on backgrounding. Protection stays on until the screen is gone, so neither the recents
+  // thumbnail nor the closing frames show the secret.
   useEffect(() => {
     if (previousAppState === 'active' && currentAppState !== 'active') {
-      disableScreenProtect();
       const timer = setTimeout(() => {
         navigation.goBack();
       }, 500);
@@ -90,15 +68,13 @@ const WalletExport: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentAppState, previousAppState]);
 
+  // Recovery material is always protected, whatever the "Allow Screen Capture" setting says.
   useEffect(() => {
-    if (isPrivacyBlurEnabled) {
-      enableScreenProtect();
-    }
+    enableScreenProtect();
     return () => {
       disableScreenProtect();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPrivacyBlurEnabled]);
+  }, [enableScreenProtect, disableScreenProtect]);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const { height, width } = e.nativeEvent.layout;
@@ -117,11 +93,6 @@ const WalletExport: React.FC = () => {
     }
   }, []);
 
-  const handleCopy = useCallback(() => {
-    Clipboard.setString(secrets[0]);
-    triggerHapticFeedback(HapticFeedbackTypes.Selection);
-  }, [secrets]);
-
   const Scroll = useCallback(
     // eslint-disable-next-line react/no-unused-prop-types
     ({ children }: { children: React.ReactNode | React.ReactNode[] }) => (
@@ -138,6 +109,16 @@ const WalletExport: React.FC = () => {
     ),
     [onLayout, stylesHook.root],
   );
+
+  // Nothing secret is drawn until the window is protected.
+  if (!isProtectionReady) {
+    return (
+      <Scroll>
+        <DoNotDisclose />
+        <ActivityIndicator />
+      </Scroll>
+    );
+  }
 
   // for SLIP39
   if (secrets.length !== 1) {
@@ -181,20 +162,17 @@ const WalletExport: React.FC = () => {
         <QRCode isMenuAvailable={false} value={secret} size={qrCodeSize} logoSize={70} />
       </View>
 
-      {/* Do not allow to copy mnemonic */}
+      {/* Never offer to copy a secret: the clipboard is readable by keyboards and kept in their history */}
+      <View>
+        <BlueText style={styles.manualText}>{loc.wallets.write_down_header}</BlueText>
+        <BlueText style={styles.writeText}>{loc.wallets.write_down}</BlueText>
+      </View>
       {secretIsMnemonic ? (
-        <>
-          <View>
-            <BlueText style={styles.manualText}>{loc.wallets.write_down_header}</BlueText>
-            <BlueText style={styles.writeText}>{loc.wallets.write_down}</BlueText>
-          </View>
-          <SeedWords seed={secret} />
-        </>
+        <SeedWords seed={secret} />
       ) : (
-        <>
-          <BlueText style={styles.writeText}>{loc.wallets.copy_ln_public}</BlueText>
-          <CopyBox text={secret} onPress={handleCopy} />
-        </>
+        <View style={[styles.secretBox, stylesHook.secretBox]}>
+          <BlueText style={styles.secretText}>{secret}</BlueText>
+        </View>
       )}
 
       <BlueText style={styles.typeText}>{loc.formatString(loc.wallets.wallet_type_this, { type: wallet.typeReadable })}</BlueText>
@@ -241,28 +219,17 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: 'grey',
   },
-  copyRoot: {
+  secretBox: {
     padding: 10,
     borderRadius: 8,
-    flexDirection: 'row',
   },
-  copyLeft: {
-    flexShrink: 1,
-  },
-  copyRight: {
-    justifyContent: 'center',
-    marginHorizontal: 8,
-  },
-  copyText: {
+  secretText: {
     fontSize: 17,
   },
   qrCodeContainer: {
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-  },
-  pressed: {
-    opacity: 0.6,
   },
 });
 

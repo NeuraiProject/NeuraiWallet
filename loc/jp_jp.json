@@ -489,7 +489,6 @@
     "wallet_type_this": "ウォレットの種類は{type}。",
     "share_number": "{number}を共有",
     "copy_ln_url": "あとでウォレットを復元するために、このURLをコピーして安全に保管してください。",
-    "copy_ln_public": "あとでウォレットを復元するために、この情報を安全に保管してください。",
     "add_ln_wallet_first": "先にライトニングウォレットを追加する必要があります。",
     "identity_pubkey": "識別用公開鍵",
     "xpub_title": "ウォレット XPUB",

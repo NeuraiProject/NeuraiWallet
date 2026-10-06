@@ -13,6 +13,7 @@
  * the last word.
  */
 import React, { useCallback, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { Keyboard, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import bip39 from 'bip39';
@@ -21,7 +22,9 @@ import { BlueFormLabel, BlueText } from '../../BlueComponents';
 import presentAlert from '../../components/Alert';
 import Button from '../../components/Button';
 import { BlueSpacing20, BlueSpacing40 } from '../../components/BlueSpacing';
+import { secretTextInputProps } from '../../components/secretInputProps';
 import { useTheme } from '../../components/themes';
+import { useScreenProtect } from '../../hooks/useScreenProtect';
 import loc from '../../loc';
 
 const VALID_PARTIAL_LENGTHS = new Set([11, 14, 17, 20, 23]);
@@ -31,6 +34,18 @@ const GenerateWord: React.FC = () => {
   const [partial, setPartial] = useState('');
   const [candidates, setCandidates] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { enableScreenProtect, disableScreenProtect } = useScreenProtect();
+
+  // The partial mnemonic is recovery material: keep it out of screenshots, recordings and the
+  // recents thumbnail, whatever the "Allow Screen Capture" setting says.
+  useFocusEffect(
+    useCallback(() => {
+      enableScreenProtect();
+      return () => {
+        disableScreenProtect();
+      };
+    }, [enableScreenProtect, disableScreenProtect]),
+  );
 
   const stylesHook = {
     root: { backgroundColor: colors.elevated, flex: 1 },
@@ -69,7 +84,11 @@ const GenerateWord: React.FC = () => {
 
   const pasteFromClipboard = useCallback(async () => {
     const text = (await Clipboard.getString()) ?? '';
-    if (text) setPartial(text.trim());
+    if (text) {
+      setPartial(text.trim());
+      // Do not leave the words sitting in the clipboard, where keyboards and their history can read them.
+      Clipboard.setString('');
+    }
   }, []);
 
   const copyWord = useCallback((word: string) => {
@@ -93,8 +112,7 @@ const GenerateWord: React.FC = () => {
           multiline
           numberOfLines={4}
           onChangeText={setPartial}
-          autoCapitalize="none"
-          autoCorrect={false}
+          {...secretTextInputProps}
           style={[styles.input, stylesHook.input]}
           underlineColorAndroid="transparent"
         />

@@ -483,7 +483,6 @@
     "wallet_type_this": "Тип этого кошелька — {type}.",
     "share_number": "Поделиться {number}",
     "copy_ln_url": "Скопируйте и сохраните этот URL, чтобы восстановить кошелёк позже.",
-    "copy_ln_public": "Скопируйте и сохраните эти данные для восстановления кошелька позже.",
     "add_ln_wallet_first": "Сначала добавьте Лайтнинг-кошелёк.",
     "identity_pubkey": "Identity Pubkey",
     "xpub_title": "XPUB кошелька",

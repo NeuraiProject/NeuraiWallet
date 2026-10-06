@@ -489,7 +489,6 @@
     "wallet_type_this": "이 지갑의 유형은 {type} 입니다.",
     "share_number": "{number} 공유",
     "copy_ln_url": "이 URL을 복사해 안전하게 보관하세요. 나중에 지갑을 복원할 때 사용됩니다.",
-    "copy_ln_public": "이 정보를 복사해 안전하게 보관하세요. 나중에 지갑을 복원할 때 사용됩니다.",
     "add_ln_wallet_first": "먼저 라이트닝 월렛을 추가해야합니다.",
     "identity_pubkey": "아이덴티티 퍼브키",
     "xpub_title": "지갑 XPUB",

@@ -483,7 +483,6 @@
     "wallet_type_this": "Wallet vom Typ {type}.",
     "share_number": "Teil {number}",
     "copy_ln_url": "Diese URL kopieren und sicher speichern. Sie ist um nötig die Wallet später wiederherzustellen.",
-    "copy_ln_public": "Diese Information kopieren und sicher speichern. Sie ist nötig um die Wallet später wiederherzustellen.",
     "add_ln_wallet_first": "Bitte zuerst ein Lightning-Wallet hinzufügen.",
     "identity_pubkey": "Pubkey-Identität",
     "xpub_title": "Wallet xPub",

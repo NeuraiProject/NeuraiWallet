@@ -3,6 +3,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { StyleSheet, Text, View } from 'react-native';
 import Share from 'react-native-share';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
+import { setSensitiveClipboardString } from '../../blue_modules/clipboard';
 import confirm from '../../helpers/confirm';
 import { unlockWithBiometrics, useBiometrics } from '../../hooks/useBiometrics';
 import loc, { formatBalance } from '../../loc';
@@ -113,7 +114,7 @@ const AddressItem = ({
     Share.open({ message: item.address }).catch(error => console.log(error));
   }, [item.address]);
 
-  const handleCopyPrivkeyPress = useCallback(() => {
+  const handleCopyPrivkeyPress = useCallback(async () => {
     const wallet = wallets.find(w => w.getID() === walletID);
     if (!wallet) {
       presentAlert({ message: 'Internal error: cant find wallet' });
@@ -127,7 +128,7 @@ const AddressItem = ({
         return;
       }
       triggerHapticFeedback(HapticFeedbackTypes.Selection);
-      Clipboard.setString(wif);
+      await setSensitiveClipboardString(wif);
     } catch (error: any) {
       presentAlert({ message: error.message });
     }
@@ -146,7 +147,7 @@ const AddressItem = ({
               return;
             }
           }
-          handleCopyPrivkeyPress();
+          await handleCopyPrivkeyPress();
         }
       }
     },

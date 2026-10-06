@@ -489,7 +489,6 @@
     "wallet_type_this": "此钱包类型为 {type}。",
     "share_number": "分片 {number}",
     "copy_ln_url": "请复制并妥善保存此网址，以便在日后恢复您的钱包。",
-    "copy_ln_public": "请复制并妥善保存此信息，以便在日后恢复您的钱包。",
     "add_ln_wallet_first": "您必须先添加一个闪电网络钱包。",
     "identity_pubkey": "身份公钥",
     "xpub_title": "钱包扩展公钥（XPUB）",

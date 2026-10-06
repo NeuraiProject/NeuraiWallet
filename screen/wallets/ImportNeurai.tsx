@@ -9,6 +9,7 @@
  */
 
 import React, { useCallback, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { ActivityIndicator, Keyboard, StyleSheet, TextInput, View } from 'react-native';
 
 import { BlueFormLabel } from '../../BlueComponents';
@@ -17,6 +18,7 @@ import Button from '../../components/Button';
 import { BlueSpacing20, BlueSpacing40 } from '../../components/BlueSpacing';
 import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import SegmentedControl from '../../components/SegmentedControl';
+import { secretTextInputProps } from '../../components/secretInputProps';
 import { useTheme } from '../../components/themes';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { chainFor, isKindAvailable, NeuraiNetwork, WalletKind } from '../../blue_modules/neurai';
@@ -25,6 +27,7 @@ import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
 import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
 import { useStorage } from '../../hooks/context/useStorage';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
+import { useScreenProtect } from '../../hooks/useScreenProtect';
 import loc from '../../loc';
 
 const KIND_OPTIONS: WalletKind[] = ['legacy', 'ecdsa', 'pq'];
@@ -41,6 +44,18 @@ const ImportNeurai: React.FC = () => {
   const [kind, setKind] = useState<WalletKind>('legacy');
   const [network, setNetwork] = useState<NeuraiNetwork>('mainnet');
   const [isImporting, setIsImporting] = useState(false);
+  const { enableScreenProtect, disableScreenProtect } = useScreenProtect();
+
+  // The words typed here are recovery material: keep them out of screenshots, recordings and the
+  // recents thumbnail, whatever the "Allow Screen Capture" setting says.
+  useFocusEffect(
+    useCallback(() => {
+      enableScreenProtect();
+      return () => {
+        disableScreenProtect();
+      };
+    }, [enableScreenProtect, disableScreenProtect]),
+  );
 
   const stylesHook = {
     label: {
@@ -132,8 +147,7 @@ const ImportNeurai: React.FC = () => {
           placeholder={loc.wallets.import_title}
           onChangeText={setMnemonic}
           multiline
-          autoCapitalize="none"
-          autoCorrect={false}
+          {...secretTextInputProps}
           editable={!isImporting}
           style={styles.textInputMultiline}
           underlineColorAndroid="transparent"
@@ -150,6 +164,8 @@ const ImportNeurai: React.FC = () => {
           onChangeText={setPassphrase}
           autoCapitalize="none"
           autoCorrect={false}
+          autoComplete="off"
+          importantForAutofill="no"
           secureTextEntry
           editable={!isImporting}
           style={styles.textInput}

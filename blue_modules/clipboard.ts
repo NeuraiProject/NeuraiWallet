@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Clipboard from '@react-native-clipboard/clipboard';
+import { Platform } from 'react-native';
+import NativeSecureClipboard from '../codegen/NativeSecureClipboard';
 
 const STORAGE_KEY: string = 'ClipboardReadAllowed';
 
@@ -37,4 +39,20 @@ export const getClipboardContent = async (): Promise<string | undefined> => {
     console.error('Error accessing clipboard:', error);
     return undefined;
   }
+};
+
+/**
+ * Copies a secret (e.g. a private key) flagged as sensitive on Android, so the system clipboard
+ * preview hides it and keyboards keep it out of their clipboard history. Elsewhere it is a plain copy.
+ */
+export const setSensitiveClipboardString = async (text: string): Promise<void> => {
+  if (Platform.OS === 'android' && NativeSecureClipboard) {
+    try {
+      await NativeSecureClipboard.setSensitiveString(text);
+      return;
+    } catch (error) {
+      console.warn('setSensitiveClipboardString: falling back to a plain copy', error);
+    }
+  }
+  Clipboard.setString(text);
 };

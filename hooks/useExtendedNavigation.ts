@@ -133,6 +133,10 @@ export const useExtendedNavigation = <T extends NavigationProp<ParamListBase>>()
               await saveToDisk();
               proceedWithNavigation();
             } catch (error) {
+              // This detour lands on WalletExport too, so it needs the same biometric gate.
+              if ((await isBiometricUseEnabled()) && !(await unlockWithBiometrics())) {
+                return;
+              }
               originalNavigation.navigate('WalletExport', { walletID });
             }
             return;

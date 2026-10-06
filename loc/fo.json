@@ -489,7 +489,6 @@
     "wallet_type_this": "Mappan er av slagnum: {type}.",
     "share_number": "{number}. partur",
     "copy_ln_url": "Niðurfest og goym URLið, undir tryggum umstøðum, soleiðis at tú seinni kanst endurinnlesa mappuna.",
-    "copy_ln_public": "Niðurfest og goym fylgjandi upplýsingar, undir tryggum umstøðum, soleiðis at tú seinni kanst endurinnlesa mappuna.",
     "add_ln_wallet_first": "Tú noyðist at leggja eina Lightning mappu inn fyrst.",
     "identity_pubkey": "Pubkey samleiki",
     "xpub_title": "Mappu XPUB",

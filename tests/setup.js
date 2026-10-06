@@ -45,8 +45,8 @@ jest.mock('react-native-reanimated', () => require('react-native-reanimated/mock
 
 jest.mock('react-native-capture-protection', () => ({
   CaptureProtection: {
-    prevent: jest.fn(),
-    allow: jest.fn(),
+    prevent: jest.fn(() => Promise.resolve(true)),
+    allow: jest.fn(() => Promise.resolve(true)),
     isScreenRecording: jest.fn(() => Promise.resolve(false)),
   },
 }));

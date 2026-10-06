@@ -471,7 +471,6 @@
     "wallet_type_this": "Tämän lompakon tyyppi on {type}.",
     "share_number": "Jaa {number}",
     "copy_ln_url": "Kopioi ja tallenna tämä URL-osoite turvallisesti palauttaaksesi lompakkosi myöhemmin.",
-    "copy_ln_public": "Kopioi ja tallenna nämä tiedot turvallisesti palauttaaksesi lompakkosi tiedot myöhemmin.",
     "add_ln_wallet_first": "Sinun on ensin lisättävä Salamalompakko.",
     "identity_pubkey": "Tunnus Pubkey",
     "xpub_title": "lompakon XPUB",

@@ -476,7 +476,6 @@
     "wallet_type_this": "Ce type de portefeuille est {type}.",
     "share_number": "Partager {number}",
     "copy_ln_url": "Copiez et stockez en toute sécurité cette URL pour restaurer votre portefeuille ultérieurement.",
-    "copy_ln_public": "Copiez et stockez ces informations en toute sécurité pour restaurer votre portefeuille ultérieurement.",
     "add_ln_wallet_first": "Vous devez d'abord ajouter un portefeuille Lightning.",
     "identity_pubkey": "Clé publique identité",
     "xpub_title": "XPUB portefeuille",

@@ -1,10 +1,9 @@
 import { RouteProp, useFocusEffect, useLocale, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useCallback, useEffect } from 'react';
-import { BackHandler, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Button from '../../components/Button';
 import { useTheme } from '../../components/themes';
-import { useSettings } from '../../hooks/context/useSettings';
 import { useStorage } from '../../hooks/context/useStorage';
 import loc from '../../loc';
 import { AddWalletStackParamList } from '../../navigation/AddWalletStack';
@@ -19,10 +18,9 @@ const PleaseBackup: React.FC = () => {
   const { walletID } = useRoute<RouteProps>().params;
   const wallet = wallets.find(w => w.getID() === walletID)!;
   const navigation = useNavigation<NavigationProp>();
-  const { isPrivacyBlurEnabled } = useSettings();
   const { colors } = useTheme();
   const { direction } = useLocale();
-  const { enableScreenProtect, disableScreenProtect } = useScreenProtect();
+  const { enableScreenProtect, disableScreenProtect, isProtectionReady } = useScreenProtect();
 
   const stylesHook = StyleSheet.create({
     flex: {
@@ -47,13 +45,14 @@ const PleaseBackup: React.FC = () => {
     };
   }, [handleBackButton]);
 
+  // Recovery material is always protected, whatever the "Allow Screen Capture" setting says.
   useFocusEffect(
     useCallback(() => {
-      if (isPrivacyBlurEnabled) enableScreenProtect();
+      enableScreenProtect();
       return () => {
         disableScreenProtect();
       };
-    }, [disableScreenProtect, enableScreenProtect, isPrivacyBlurEnabled]),
+    }, [disableScreenProtect, enableScreenProtect]),
   );
 
   return (
@@ -67,9 +66,7 @@ const PleaseBackup: React.FC = () => {
       <View style={styles.please}>
         <Text style={[styles.pleaseText, stylesHook.pleaseText]}>{loc.pleasebackup.text}</Text>
       </View>
-      <View style={styles.list}>
-        <SeedWords seed={wallet.getSecret()} />
-      </View>
+      <View style={styles.list}>{isProtectionReady ? <SeedWords seed={wallet.getSecret()} /> : <ActivityIndicator />}</View>
       <View style={styles.bottom}>
         <Button testID="PleasebackupOk" onPress={handleBackButton} title={loc.pleasebackup.ok} />
       </View>

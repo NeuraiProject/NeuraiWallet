@@ -469,7 +469,6 @@
     "wallet_type_this": "O tipo desta carteira é {type}.",
     "share_number": "Compartilhar {number}",
     "copy_ln_url": "Copie e armazene com segurança esta URL para restaurar sua carteira em um momento posterior.",
-    "copy_ln_public": "Copie e armazene essas informações com segurança para restaurar sua carteira mais tarde.",
     "add_ln_wallet_first": "Primeiro você deve adicionar uma carteira Lightning.",
     "identity_pubkey": "Identificar chave pública",
     "xpub_title": "XPUB da Carteira",

@@ -493,7 +493,6 @@
     "wallet_type_this": "Este tipo de billetera es {type}.",
     "share_number": "Compartir {number}",
     "copy_ln_url": "Copia y guarda de forma segura esta URL para restaurar tu billetera más tarde.",
-    "copy_ln_public": "Copia y guarda de forma segura esta información para restaurar tu billetera más adelante.",
     "add_ln_wallet_first": "Primero debes agregar una billetera Lightning.",
     "identity_pubkey": "Identidad Pubkey",
     "xpub_title": "XPUB de la billetera",

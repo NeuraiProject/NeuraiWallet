@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native';
 
@@ -7,11 +7,13 @@ import Button from '../../components/Button';
 import SegmentedControl from '../../components/SegmentedControl';
 import { BlueSpacing20, BlueSpacing40 } from '../../components/BlueSpacing';
 import SafeAreaScrollView from '../../components/SafeAreaScrollView';
+import { secretTextInputProps } from '../../components/secretInputProps';
 import presentAlert from '../../components/Alert';
 import { useTheme } from '../../components/themes';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { useStorage } from '../../hooks/context/useStorage';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
+import { useScreenProtect } from '../../hooks/useScreenProtect';
 import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
 import { deriveLegacyAddress } from '../../blue_modules/neurai-hw/xpubDerivation';
 import { useNeuraiHwDevice } from '../../blue_modules/neurai-hw/useNeuraiHwDevice';
@@ -93,6 +95,18 @@ const AddHardwareWallet: React.FC = () => {
   };
 
   const isUnsupported = status === 'unsupported';
+
+  // The backup step shows the seed and the restore step takes it: keep both out of screenshots,
+  // recordings and the recents thumbnail, whatever the "Allow Screen Capture" setting says.
+  const { enableScreenProtect, disableScreenProtect, isProtectionReady } = useScreenProtect();
+  const handlesSeed = phase === 'backup' || phase === 'restore';
+  useEffect(() => {
+    if (!handlesSeed) return;
+    enableScreenProtect();
+    return () => {
+      disableScreenProtect();
+    };
+  }, [handlesSeed, enableScreenProtect, disableScreenProtect]);
 
   const closeConnection = useCallback(async () => {
     deviceRef.current = null;
@@ -410,11 +424,7 @@ const AddHardwareWallet: React.FC = () => {
         placeholder={loc.wallets.hardware_restore_placeholder}
         placeholderTextColor={colors.alternativeTextColor}
         multiline
-        autoCapitalize="none"
-        autoCorrect={false}
-        autoComplete="off"
-        textContentType="none"
-        spellCheck={false}
+        {...secretTextInputProps}
         textAlignVertical="top"
       />
       <View style={styles.action}>
@@ -434,16 +444,18 @@ const AddHardwareWallet: React.FC = () => {
         <View style={[styles.warning, stylesHook.warning]}>
           <Text style={[styles.warningText, stylesHook.warningText]}>{loc.wallets.hardware_backup_warning}</Text>
         </View>
-        <View style={styles.wordsGrid}>
-          {words.map((word, i) => (
-            <View key={`${i}-${word}`} style={[styles.wordChip, stylesHook.wordChip]}>
-              <Text style={[styles.wordIndex, stylesHook.wordIndex]}>{i + 1}</Text>
-              <Text style={[styles.wordText, stylesHook.wordText]} selectable>
-                {word}
-              </Text>
-            </View>
-          ))}
-        </View>
+        {isProtectionReady ? (
+          <View style={styles.wordsGrid}>
+            {words.map((word, i) => (
+              <View key={`${i}-${word}`} style={[styles.wordChip, stylesHook.wordChip]}>
+                <Text style={[styles.wordIndex, stylesHook.wordIndex]}>{i + 1}</Text>
+                <Text style={[styles.wordText, stylesHook.wordText]}>{word}</Text>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <ActivityIndicator />
+        )}
         <BlueSpacing20 />
         <View style={styles.action}>
           <Button testID="HardwareBackupContinueButton" title={loc.wallets.hardware_backup_continue} onPress={onBackupContinue} />

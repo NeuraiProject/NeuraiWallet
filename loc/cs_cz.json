@@ -489,7 +489,6 @@
     "wallet_type_this": "Typ této peněženky je {type}.",
     "share_number": "Sdílet {number}",
     "copy_ln_url": "Zkopírujte a bezpečně si uložte tuto URL pro pozdější obnovení vaší peněženky.",
-    "copy_ln_public": "Zkopírujte a bezpečně si tuto informaci uložte pro pozdější obnovení vaší peněženky.",
     "add_ln_wallet_first": "Nejdříve musíte přidat Lightning peněženku.",
     "identity_pubkey": "Identity Pubkey",
     "xpub_title": "XPUB peněženky",
