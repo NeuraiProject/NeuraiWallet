@@ -15,6 +15,7 @@ import { fetch } from '../util/fetch';
 const PUSH_TOKEN = 'PUSH_TOKEN';
 const GROUNDCONTROL_BASE_URI = 'GROUNDCONTROL_BASE_URI';
 const NOTIFICATIONS_STORAGE = 'NOTIFICATIONS_STORAGE';
+const GROUNDCONTROL_SUBSCRIPTIONS = 'GROUNDCONTROL_SUBSCRIPTIONS';
 const ANDROID_NOTIFICATION_CHANNEL_ID = 'channel_01';
 export const NOTIFICATIONS_NO_AND_DONT_ASK_FLAG = 'NOTIFICATIONS_NO_AND_DONT_ASK_FLAG';
 let baseURI = groundControlUri;
@@ -28,6 +29,12 @@ let pendingRegistrationTimeout: ReturnType<typeof setTimeout> | undefined;
 // Firebase config file missing in dev builds). When true, every subsequent
 // public call short-circuits to a no-op so the rest of the app keeps working.
 let nativeDisabled = false;
+// Inputs and state of `syncGroundControlSubscriptions`.
+let serverInstance: TServerInstance | null = null;
+let subscriptionEntries: TSubscriptionEntry[] | null = null;
+let lastSyncedSubscriptions: string | null = null;
+let subscriptionSyncRunning = false;
+let subscriptionSyncRequested = false;
 
 const disableNative = (reason: string, error?: unknown) => {
   if (!nativeDisabled) {
@@ -42,6 +49,17 @@ type TPushToken = {
 };
 
 export type TNeuraiChain = 'mainnet' | 'testnet';
+
+/** Addresses of one wallet, to keep subscribed on GroundControl. */
+export type TSubscriptionEntry = { chain: TNeuraiChain; addresses: string[] };
+
+/** The GroundControl database this device talks to: its `instance_id`, the server and the push token it was seen with. */
+type TServerInstance = { id: string; uri: string; token: string };
+
+/** Addresses this device registered on one GroundControl database, persisted so app starts only send what is new. */
+type TRegisteredSubscriptions = { instanceId: string; uri: string; token: string; addresses: Record<TNeuraiChain, string[]> };
+
+const NEURAI_CHAINS: TNeuraiChain[] = ['mainnet', 'testnet'];
 
 type TPayload = {
   subText?: string;
@@ -451,7 +469,7 @@ const postTokenConfig = async () => {
     const appVersion = getSystemName() + ' ' + getSystemVersion() + ';' + getApplicationName() + ' ' + getVersion();
     console.log('postTokenConfig: Posting configuration', { lang, appVersion });
 
-    await fetch(`${baseURI}/setTokenConfiguration`, {
+    const response = await fetch(`${baseURI}/setTokenConfiguration`, {
       method: 'POST',
       headers: _getHeaders(),
       body: JSON.stringify({
@@ -461,11 +479,89 @@ const postTokenConfig = async () => {
         app_version: appVersion,
       }),
     });
+
+    // Servers that identify their database answer with its id; older ones send an empty body.
+    const instanceId = await response
+      .json()
+      .then(json => json?.instance_id)
+      .catch(() => undefined);
+    if (typeof instanceId === 'string' && instanceId) {
+      serverInstance = { id: instanceId, uri: baseURI, token: pushToken.token };
+      syncGroundControlSubscriptions().catch(error => console.warn('GroundControl subscription sync failed:', error));
+    }
   } catch (e) {
     console.error(e);
     await AsyncStorage.setItem('lang', 'en');
     throw e;
   }
+};
+
+const readRegisteredSubscriptions = async (): Promise<TRegisteredSubscriptions | null> => {
+  try {
+    const stored = JSON.parse(String(await AsyncStorage.getItem(GROUNDCONTROL_SUBSCRIPTIONS)));
+    return stored && typeof stored === 'object' ? stored : null;
+  } catch (_) {
+    return null;
+  }
+};
+
+/**
+ * Keeps GroundControl subscribed to every address of the given wallets, including after its database was wiped (which
+ * drops all subscriptions). Call it with the current wallets whenever they change: it only contacts the server for
+ * addresses this device has not registered yet on the current database, identified by the `instance_id` that
+ * /setTokenConfiguration returns on every app start. Until that id is known (or with servers that don't send one), it
+ * does nothing.
+ */
+export const syncGroundControlSubscriptions = async (entries?: TSubscriptionEntry[]): Promise<void> => {
+  if (entries) subscriptionEntries = entries;
+  if (nativeDisabled || !serverInstance || serverInstance.uri !== baseURI || !subscriptionEntries) return;
+  // Wallet updates can arrive while a sync waits on the server; fold them into a single follow-up run.
+  subscriptionSyncRequested = true;
+  if (subscriptionSyncRunning) return;
+  subscriptionSyncRunning = true;
+  try {
+    while (subscriptionSyncRequested) {
+      subscriptionSyncRequested = false;
+      const instance = serverInstance;
+      const wanted = subscriptionEntries;
+      const syncKey = JSON.stringify([instance, wanted]);
+      if (syncKey === lastSyncedSubscriptions) continue;
+      if ((await AsyncStorage.getItem(NOTIFICATIONS_NO_AND_DONT_ASK_FLAG)) === 'true') return;
+
+      // A new database, another server or a rotated push token has none of what we registered before.
+      const stored = await readRegisteredSubscriptions();
+      const sameTarget = stored?.instanceId === instance.id && stored?.uri === instance.uri && stored?.token === instance.token;
+      const registered: TRegisteredSubscriptions = {
+        instanceId: instance.id,
+        uri: instance.uri,
+        token: instance.token,
+        addresses: { mainnet: (sameTarget && stored?.addresses?.mainnet) || [], testnet: (sameTarget && stored?.addresses?.testnet) || [] },
+      };
+
+      for (const chain of NEURAI_CHAINS) {
+        const known = new Set(registered.addresses[chain]);
+        const missing = [...new Set(wanted.filter(entry => entry.chain === chain).flatMap(entry => entry.addresses))].filter(
+          address => !known.has(address),
+        );
+        if (missing.length === 0) continue;
+        await majorTomToGroundControl(missing, [], [], chain);
+        registered.addresses[chain] = [...registered.addresses[chain], ...missing];
+        await AsyncStorage.setItem(GROUNDCONTROL_SUBSCRIPTIONS, JSON.stringify(registered));
+      }
+      lastSyncedSubscriptions = syncKey;
+    }
+  } finally {
+    subscriptionSyncRunning = false;
+  }
+};
+
+/** Drops unsubscribed addresses from the registration record, so the sync sends them again if they come back. */
+const forgetRegisteredAddresses = async (addresses: string[], chain: TNeuraiChain) => {
+  const stored = await readRegisteredSubscriptions();
+  if (!stored?.addresses?.[chain]) return;
+  stored.addresses[chain] = stored.addresses[chain].filter(address => !addresses.includes(address));
+  await AsyncStorage.setItem(GROUNDCONTROL_SUBSCRIPTIONS, JSON.stringify(stored));
+  lastSyncedSubscriptions = null;
 };
 
 const _setPushToken = async (token: TPushToken) => {
@@ -653,6 +749,7 @@ export const unsubscribe = async (addresses: string[], hashes: string[], txids: 
       return;
     }
 
+    await forgetRegisteredAddresses(addresses, chain).catch(error => console.warn('Failed to update GroundControl subscriptions:', error));
     return response;
   } catch (error) {
     console.error('Error during unsubscribe:', error);

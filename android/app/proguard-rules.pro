@@ -41,3 +41,13 @@
 # failure and carries on (this app never calls getInstallReferrer), so this only
 # keeps a confusing exception out of the log and restores pre-R8 behaviour.
 -keep class com.android.installreferrer.api.** { *; }
+
+# react-native-device-info's hasGms() finds GoogleApiAvailability with
+# Class.forName and calls getInstance()/isGooglePlayServicesAvailable() through
+# reflection. R8 renames them, hasGms() then reports no Play Services, and the
+# notifications module (isNotificationsCapable) never registers for FCM: no
+# push token, no GroundControl subscription, no push notifications at all.
+-keep class com.google.android.gms.common.GoogleApiAvailability {
+    public static com.google.android.gms.common.GoogleApiAvailability getInstance();
+    public int isGooglePlayServicesAvailable(android.content.Context);
+}

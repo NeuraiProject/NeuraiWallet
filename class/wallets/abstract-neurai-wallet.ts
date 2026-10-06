@@ -775,7 +775,12 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   }
 
   getAllExternalAddresses(): string[] {
-    return this.getCachedAddresses();
+    // The engine bootstraps lazily (first Send/Receive), so until then answer
+    // from the addresses the previous session subscribed to. Push
+    // registration at app start and wallet deletion rely on this list and
+    // must not pay the bootstrap cost.
+    const engineAddresses = this.getCachedAddresses();
+    return engineAddresses.length > 0 ? engineAddresses : Object.keys(this._addressStatus || {});
   }
 
   weOwnAddress(address: string): boolean {

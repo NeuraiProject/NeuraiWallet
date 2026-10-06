@@ -7,7 +7,13 @@ import loc, { formatBalanceWithoutSuffix } from '../../loc';
 import * as BlueElectrum from '../../blue_modules/BlueElectrum';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { startAndDecrypt } from '../../blue_modules/start-and-decrypt';
-import { isNotificationsEnabled, majorTomToGroundControl, unsubscribe } from '../../blue_modules/notifications';
+import {
+  isNotificationsEnabled,
+  majorTomToGroundControl,
+  syncGroundControlSubscriptions,
+  TSubscriptionEntry,
+  unsubscribe,
+} from '../../blue_modules/notifications';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 import { isTestnetChain } from '../../blue_modules/neurai/networkConfig';
 import { onWalletChanged } from '../../blue_modules/neurai/eventBus';
@@ -313,6 +319,20 @@ export const StorageProvider = ({ children }: { children: React.ReactNode }) => 
       setWallets(BlueApp.getWallets());
     }
   }, [walletsInitialized]);
+
+  // Keep GroundControl subscribed to every wallet address, also after its
+  // database was reset. Cheap on each wallets update: the server is only
+  // contacted for addresses it has not been sent yet.
+  useEffect(() => {
+    if (!walletsInitialized) return;
+    const entries = wallets.map(
+      (wallet): TSubscriptionEntry => ({
+        chain: isNeuraiWallet(wallet) && isTestnetChain(wallet.network) ? 'testnet' : 'mainnet',
+        addresses: wallet.getAllExternalAddresses(),
+      }),
+    );
+    syncGroundControlSubscriptions(entries).catch(error => console.warn('GroundControl subscription sync failed:', error));
+  }, [wallets, walletsInitialized]);
 
   // Re-render `wallets`-consuming screens when a Neurai wallet's cached
   // state changed because of a WSS push (`address.changed`). The wallet
