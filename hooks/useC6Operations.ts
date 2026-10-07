@@ -26,7 +26,8 @@ import { hexToBytes } from '@noble/hashes/utils';
 
 import type { C6Runtime } from '../blue_modules/neurai/privacy/deployment';
 import { tagPrivacyTxs } from '../blue_modules/neurai/privacy/txTags';
-import { signPoolInputs, type PrivacyWallet } from '../blue_modules/neurai/privacy/wallet';
+import { c6FundingAddresses, signPoolInputs, type PrivacyWallet } from '../blue_modules/neurai/privacy/wallet';
+import { useSettings } from './context/useSettings';
 import type { C6PrivateWallet } from './useC6PrivateWallet';
 import loc from '../loc';
 
@@ -55,6 +56,7 @@ export const SPONSOR_BUDGET_ATOMIC = '1000000000';
 
 export function useC6Operations(wallet: PrivacyWallet, runtime: C6Runtime, pool: C6PrivateWallet) {
   const { rpc, live } = pool;
+  const { isPQAddressReuseEnabled } = useSettings();
   const isAsset = runtime.kind === 'asset';
   const meta = useMemo(() => (isAsset ? c6AssetMetadata(runtime.config.manifest as never) : null), [isAsset, runtime]);
   const unit = meta?.name ?? 'XNA';
@@ -251,11 +253,14 @@ export function useC6Operations(wallet: PrivacyWallet, runtime: C6Runtime, pool:
   const prepareFunding = useCallback(
     () =>
       pool.run(loc.privacy.preparing_funding, async token => {
-        const [own] = await wallet.listOwnAddresses();
-        if (!own) throw new Error(loc.privacy.error_no_address);
+        const { to, change } = await c6FundingAddresses(wallet, isPQAddressReuseEnabled);
+        if (!to) throw new Error(loc.privacy.error_no_address);
         const sendAmount = isAsset ? amount : formatXna(parseXna(amount) + BigInt(fee));
         parseAmount(amount);
-        const built = await wallet.buildSendTransaction([{ address: own, amount: sendAmount }], isAsset ? { assetName: unit } : undefined);
+        const built = await wallet.buildSendTransaction([{ address: to, amount: sendAmount }], {
+          forcedChangeAddress: change,
+          ...(isAsset ? { assetName: unit } : {}),
+        });
         live(token);
         const admitted = await admitTransaction(rpc!, built.signedHex);
         live(token);
@@ -269,7 +274,7 @@ export function useC6Operations(wallet: PrivacyWallet, runtime: C6Runtime, pool:
           fee: formatXna(checked.feeAtomic),
         });
       }),
-    [pool, wallet, isAsset, amount, fee, unit, parseAmount, rpc, live],
+    [pool, wallet, isPQAddressReuseEnabled, isAsset, amount, fee, unit, parseAmount, rpc, live],
   );
 
   const publishFunding = useCallback(

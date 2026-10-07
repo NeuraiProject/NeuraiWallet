@@ -27,6 +27,9 @@ export type PrivacyWallet = Pick<
   | 'getEngineNetwork'
   | 'getBackend'
   | 'getSigningKey'
+  | 'walletKind'
+  | 'getStaticReceiveAddress'
+  | 'getChangeAddressAsync'
   | 'listOwnAddresses'
   | 'listOwnUtxos'
   | 'getBaseCurrencyName'
@@ -88,6 +91,21 @@ export function createPrivacyRpc(wallet: PrivacyWallet): PoolRpc {
       if (timer) clearTimeout(timer);
     }
   };
+}
+
+/**
+ * Where the exact funding coin goes (`to`) and where the funding transaction's
+ * change goes. The wallet pays itself, so the two must differ: the transaction
+ * builder refuses a change address equal to a recipient. A PQ wallet that
+ * reuses its address keeps the change there, as a regular send does, and the
+ * coin waits on another own address until the deposit spends it. `to` is
+ * missing only if the wallet has no other address.
+ */
+export async function c6FundingAddresses(wallet: PrivacyWallet, reusePQAddress: boolean): Promise<{ to?: string; change: string }> {
+  const change =
+    reusePQAddress && wallet.walletKind === 'pq' ? await wallet.getStaticReceiveAddress() : await wallet.getChangeAddressAsync();
+  const to = (await wallet.listOwnAddresses()).find(address => address !== change);
+  return { to, change };
 }
 
 export interface PoolInputCoin {
