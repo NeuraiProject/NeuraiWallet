@@ -17,8 +17,13 @@
  *   requires, and then refuses with 4200: this wallet does not build
  *   transactions from a session yet. Showing before refusing is deliberate —
  *   the user should see what was asked for, not just that something was.
- * - `signPsbt` also answers 4200; decoding a PSBT, showing outputs, change and
- *   fee, and signing only our own inputs is a later version's work.
+ * - `signPsbt` decodes the transaction first (blue_modules/neurai/connect/psbt.ts):
+ *   every output with its address and asset, what comes back to this wallet,
+ *   what leaves it and the fee. A request that cannot be shown or must not be
+ *   signed (foreign inputs, a sighash other than ALL, post-quantum inputs) is
+ *   explained and can only be rejected. Legacy and ECDSA software wallets only.
+ * - `neurai_getAccountXpub` shows what sharing the account key reveals before
+ *   it is sent. Legacy and ECDSA software wallets only.
  *
  * The refusals are sent as soon as the screen opens rather than on a button,
  * so the dApp gets its answer instead of waiting out the request TTL.
@@ -45,6 +50,15 @@ import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import { useTheme } from '../../components/themes';
 import { connectClient, peekIncoming, takeIncoming } from '../../blue_modules/neurai/connect/client';
 import { signConnectMessage } from '../../blue_modules/neurai/connect/signer';
+import {
+  inspectSignPsbt,
+  PSBT_ERROR_INVALID,
+  PsbtRequestError,
+  signPsbtWithWallet,
+  type PsbtWallet,
+} from '../../blue_modules/neurai/connect/psbt';
+import type { ConnectAccountXpub } from '../../blue_modules/neurai/connect/xpub';
+import { satsToXna } from '../../blue_modules/neurai/amounts';
 import { useNeuraiHwDevice } from '../../blue_modules/neurai-hw/useNeuraiHwDevice';
 import { useConnectApprovalGate } from '../../hooks/useConnectApprovalGate';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
@@ -54,16 +68,25 @@ import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc from '../../loc';
 import type { DetailViewStackParamList } from '../../navigation/DetailViewStackParamList';
 import {
+  CONNECT_BASE_METHODS,
   CONNECT_EMPTY_FIELD,
   CONNECT_USER_REJECTED,
+  CONNECT_XPUB_METHOD,
   addressFromCaip10,
   asConnectWallet,
+  connectMethodsFor,
   describeError,
+  describePsbtOutput,
   methodHandling,
+  shorten,
   signMessageText,
   summariseSendTransfer,
   unsupportedMethodError,
 } from './logic';
+
+/** Every method a wallet of this version can answer; used while no wallet is resolved. */
+const ALL_METHODS = [...CONNECT_BASE_METHODS, 'signPsbt', CONNECT_XPUB_METHOD];
+const formatXna = (sats: bigint): string => satsToXna(sats);
 
 type RouteProps = RouteProp<DetailViewStackParamList, 'ConnectRequest'>;
 type NavigationProps = NativeStackNavigationProp<DetailViewStackParamList, 'ConnectRequest'>;
@@ -78,7 +101,6 @@ const ConnectRequest: React.FC = () => {
   const incoming = useMemo(() => peekIncoming(id), [id]);
   const event = incoming?.kind === 'request' ? incoming.event : undefined;
   const method = event?.method ?? '';
-  const handling = methodHandling(method);
 
   // The account the session exposed at settlement is the one that answers: a
   // session request must never be served by an address the dApp never saw.
@@ -92,6 +114,48 @@ const ConnectRequest: React.FC = () => {
   // signature and closed once the request is answered.
   const isHardware = wallet?.type === NeuraiHardwareWallet.type;
   const hw = useNeuraiHwDevice();
+
+  // What this wallet implements decides the handling, whatever the session
+  // settled: a post-quantum or hardware wallet refuses signPsbt with 4200.
+  const supported = useMemo(
+    () => (wallet ? connectMethodsFor({ walletKind: wallet.walletKind, isHardware }) : ALL_METHODS),
+    [wallet, isHardware],
+  );
+  const handling = methodHandling(method, supported);
+  const testnet = wallet?.getNeuraiNetwork() === 'testnet';
+
+  const psbtWallet = useMemo<PsbtWallet | undefined>(
+    () =>
+      wallet
+        ? {
+            weOwnAddress: address => wallet.weOwnAddress(address),
+            getMessageSigningMaterial: address => wallet.getMessageSigningMaterial(address),
+          }
+        : undefined,
+    [wallet],
+  );
+  // Decoded once: what the screen shows is exactly what gets checked again and signed.
+  const psbt = useMemo(() => {
+    if (handling !== 'sign-psbt' || !event || !psbtWallet) return undefined;
+    try {
+      return { inspection: inspectSignPsbt(event.params, psbtWallet, testnet) };
+    } catch (error: unknown) {
+      return { error: error instanceof PsbtRequestError ? error : new PsbtRequestError(PSBT_ERROR_INVALID, describeError(error)) };
+    }
+  }, [handling, event, psbtWallet, testnet]);
+
+  const [xpub, setXpub] = useState<ConnectAccountXpub | false | undefined>();
+  useEffect(() => {
+    if (handling !== 'share-xpub' || !wallet) return;
+    let cancelled = false;
+    wallet
+      .getConnectAccountXpub()
+      .then(value => !cancelled && setXpub(value))
+      .catch(() => !cancelled && setXpub(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [handling, wallet]);
 
   const { requireUnlock } = useConnectApprovalGate();
   const [busy, setBusy] = useState(false);
@@ -160,19 +224,60 @@ const ConnectRequest: React.FC = () => {
     }
   }, [wallet, sessionAddress, event, id, finish, requireUnlock, isHardware, hw]);
 
+  const onSignPsbt = useCallback(async () => {
+    if (!event || !psbtWallet || !psbt?.inspection) return;
+    if (!(await requireUnlock())) return;
+    setBusy(true);
+    try {
+      const client = connectClient();
+      if (!client) throw new Error(loc.connect.error_not_connected);
+      const signed = await signPsbtWithWallet(event.params, psbtWallet, testnet);
+      answered.current = true;
+      await client.respondRequest(id, { psbt: signed });
+      presentAlert({ message: loc.connect.request_psbt_signed, type: AlertType.Toast });
+      finish();
+    } catch (error: unknown) {
+      presentAlert({ message: describeError(error) });
+    } finally {
+      setBusy(false);
+    }
+  }, [event, psbtWallet, psbt, testnet, id, finish, requireUnlock]);
+
+  const onShareXpub = useCallback(async () => {
+    if (!xpub) return;
+    // Not a signature, but it opens the whole account to the site: same unlock.
+    if (!(await requireUnlock())) return;
+    setBusy(true);
+    try {
+      const client = connectClient();
+      if (!client) throw new Error(loc.connect.error_not_connected);
+      answered.current = true;
+      await client.respondRequest(id, xpub);
+      presentAlert({ message: loc.connect.request_xpub_sent, type: AlertType.Toast });
+      finish();
+    } catch (error: unknown) {
+      presentAlert({ message: describeError(error) });
+    } finally {
+      setBusy(false);
+    }
+  }, [xpub, id, finish, requireUnlock]);
+
   const onReject = useCallback(async () => {
     setBusy(true);
     try {
       if (!answered.current) {
         answered.current = true;
         // A blocked sign-in message is refused with the guard's own reason, so
-        // the site is told what it did rather than just that it was refused.
+        // the site is told what it did rather than just that it was refused;
+        // a transaction that cannot be signed, with the reason it cannot.
         const guard = event?.guard;
         await connectClient()?.rejectRequest(
           id,
           guard?.blocked === true
             ? { code: CONNECT_USER_REJECTED, message: guard.reason ?? 'sign-in message for another domain' }
-            : undefined,
+            : psbt?.error
+              ? { code: psbt.error.code, message: psbt.error.message }
+              : undefined,
         );
       }
     } catch (error: unknown) {
@@ -181,7 +286,7 @@ const ConnectRequest: React.FC = () => {
       setBusy(false);
       finish();
     }
-  }, [event, id, finish]);
+  }, [event, psbt, id, finish]);
 
   if (!event) {
     return (
@@ -199,7 +304,11 @@ const ConnectRequest: React.FC = () => {
       ? { title: loc.connect.request_addresses_confirm, onPress: onAnswerAddresses, disabled: busy || !sessionAddress }
       : handling === 'sign' && !blocked
         ? { title: loc.connect.request_sign, onPress: onSign, disabled: busy || !wallet, testID: 'ConnectRequestSign' }
-        : undefined;
+        : handling === 'sign-psbt' && psbt?.inspection
+          ? { title: loc.connect.request_sign_transaction, onPress: onSignPsbt, disabled: busy, testID: 'ConnectRequestSignPsbt' }
+          : handling === 'share-xpub' && xpub
+            ? { title: loc.connect.request_xpub_share, onPress: onShareXpub, disabled: busy, testID: 'ConnectRequestShareXpub' }
+            : undefined;
 
   return (
     <SafeAreaScrollView contentContainerStyle={connectStyles.content}>
@@ -217,6 +326,57 @@ const ConnectRequest: React.FC = () => {
           <ConnectSectionTitle title={loc.connect.request_message} />
           <ConnectMonospaceBlock text={signMessageText(event.params)} testID="ConnectRequestMessage" />
           {!blocked && !wallet && <ConnectNotice tone="danger" text={loc.connect.blocked_no_wallet} />}
+        </>
+      )}
+
+      {handling === 'sign-psbt' && !wallet && <ConnectNotice tone="danger" text={loc.connect.blocked_no_wallet} />}
+      {handling === 'sign-psbt' && psbt?.error && (
+        <ConnectNotice
+          tone="danger"
+          testID="ConnectPsbtInvalid"
+          text={loc.formatString(loc.connect.request_psbt_invalid, { reason: psbt.error.message })}
+        />
+      )}
+      {handling === 'sign-psbt' && psbt?.inspection && (
+        <>
+          <ConnectNotice tone="info" text={loc.connect.request_psbt_explanation} />
+          <ConnectSectionTitle title={loc.connect.request_psbt_outputs} />
+          <ConnectCard testID="ConnectRequestPsbtOutputs">
+            {psbt.inspection.outputs.map(output => (
+              <ConnectRow
+                key={output.index}
+                label={
+                  output.ownAddress
+                    ? loc.connect.request_psbt_change
+                    : String(loc.formatString(loc.connect.request_psbt_output, { index: output.index }))
+                }
+                value={describePsbtOutput(output, formatXna)}
+                mono
+              />
+            ))}
+          </ConnectCard>
+          <ConnectCard>
+            <ConnectRow label={loc.connect.request_psbt_spent} value={`${formatXna(psbt.inspection.spentSats)} XNA`} />
+            <ConnectRow label={loc.connect.request_psbt_fee} value={`${formatXna(psbt.inspection.feeSats)} XNA`} />
+            <ConnectRow
+              label={loc.connect.request_psbt_inputs}
+              value={`${psbt.inspection.toSign.length} / ${psbt.inspection.inputCount}`}
+            />
+          </ConnectCard>
+        </>
+      )}
+
+      {handling === 'share-xpub' && (
+        <>
+          <ConnectNotice tone="warn" text={loc.connect.request_xpub_explanation} />
+          {xpub === false && <ConnectNotice tone="danger" text={loc.connect.request_xpub_unavailable} />}
+          {xpub && (
+            <ConnectCard testID="ConnectRequestXpub">
+              <ConnectRow label={loc.connect.request_xpub_path} value={xpub.path} mono />
+              <ConnectRow label={loc.connect.request_xpub_type} value={xpub.addressType === 'ecdsa' ? 'ECDSA witness v3' : 'Legacy'} />
+              <ConnectRow label={loc.connect.request_xpub_key} value={shorten(xpub.xpub, 14)} mono />
+            </ConnectCard>
+          )}
         </>
       )}
 

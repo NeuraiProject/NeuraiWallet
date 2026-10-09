@@ -76,9 +76,20 @@ talks to is configurable from the gear button in the chat (the `DepinRpcEdit` sc
 Neurai Connect is the wallet ↔ web link: a site shows a QR code, the user scans it with
 NeuraiWallet, approves on the phone, and the site is either logged in ("Sign in with Neurai",
 a CAIP-122 message signed with the chosen address) or holds a dApp session it can later use to
-ask the wallet for `getAccountAddresses` and `signMessage` (`sendTransfer` and `signPsbt` are
-declared by the `bip122` profile but not implemented yet). Traffic goes through a relay
+ask the wallet for `getAccountAddresses` and `signMessage`. Legacy and ECDSA software wallets also
+answer `signPsbt` and `neurai_getAccountXpub` when the site lists them as optional methods
+(`sendTransfer` is declared by the `bip122` profile but not implemented yet). Traffic goes through a relay
 that only ever sees opaque encrypted blobs and random topics; no private key leaves the device.
+
+- **`signPsbt`**: the wallet decodes the PSBT before anything is signed. It shows every output
+  with its address and asset, what comes back to the wallet, what leaves it and the fee
+  (`blue_modules/neurai/connect/psbt.ts`). It signs only the requested inputs of its own addresses,
+  only with SIGHASH_ALL, and returns `partialSig` entries for the site to finalize. It never broadcasts.
+  Post-quantum inputs are refused, because a PSBT has no field for an ML-DSA-44 signature.
+- **`neurai_getAccountXpub`** (Neurai extension): after the user approves, the wallet returns
+  `{ xpub, path, addressType }` for account 0: `m/44'/coin'/0'` for Legacy and `m/84'/coin'/0'` for ECDSA
+  (`blue_modules/neurai/connect/xpub.ts`). With it, a site sees every receive (`0/i`) and change (`1/i`)
+  address but cannot spend. The wallet shares the account key, never the master key.
 The wallet side lives in `blue_modules/neurai/connect/` (relay client, session storage, signer,
 per-domain identities) with the approval screens in `screen/connect/`, and pairings arrive as
 `nc:` URIs from the scanner or as `neuraiwallet://connect?uri=…` deep links, recognised by

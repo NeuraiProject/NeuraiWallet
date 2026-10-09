@@ -141,27 +141,67 @@ export function pickChain(chains: string[] | undefined, isOurs: (chainId: string
 // Session proposals (spec/session.md section 3.3)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Which methods a wallet answers
+// ---------------------------------------------------------------------------
+
+/** Methods every Neurai wallet answers, hardware and post-quantum included. */
+export const CONNECT_BASE_METHODS: readonly string[] = ['getAccountAddresses', 'signMessage'];
+
+/**
+ * Neurai extension: the extended public key of the wallet's account, so a site
+ * can see every receive and change address (blue_modules/neurai/connect/xpub.ts).
+ */
+export const CONNECT_XPUB_METHOD = 'neurai_getAccountXpub';
+
+/**
+ * The methods a wallet implements. Legacy and ECDSA software wallets also sign
+ * PSBTs and can share their account key. Post-quantum wallets cannot sign a
+ * PSBT (it has no field for an ML-DSA-44 signature) and have no account key;
+ * hardware wallets sign with one fixed key on the device.
+ */
+export function connectMethodsFor(wallet: { walletKind: string; isHardware: boolean }): string[] {
+  if (wallet.isHardware || (wallet.walletKind !== 'legacy' && wallet.walletKind !== 'ecdsa')) return [...CONNECT_BASE_METHODS];
+  return [...CONNECT_BASE_METHODS, 'signPsbt', CONNECT_XPUB_METHOD];
+}
+
 /** CAIP-10 account identifier. Always a **wallet** address, never an identity one. */
 export function caip10Account(chainId: string, address: string): string {
   return `${chainId}:${address}`;
 }
 
+/** What a proposal asks for in the `bip122` namespace, required and optional apart. */
+export interface ProposalAsk {
+  required?: { methods?: string[]; events?: string[] };
+  optional?: { methods?: string[]; events?: string[] };
+}
+
 /**
- * The namespaces this wallet settles for a proposal. It grants exactly the
- * methods and events the dApp asked for — never more — on the single chain
- * the chosen wallet lives on, with one wallet account exposed.
+ * The namespaces this wallet settles for a proposal, on the single chain the
+ * chosen wallet lives on, with one wallet account exposed. Never more than
+ * the dApp asked for:
+ *
+ * - every **required** method and event is granted (a required method this
+ *   wallet does not implement is answered 4200 per request, as before);
+ * - an **optional** method only when this wallet implements it (`supported`):
+ *   that is how a site learns, before asking, what the wallet can do. The SDK
+ *   merges `{...optional, ...required}` per namespace, which drops the
+ *   optional methods of a namespace that is also required, so the two lists
+ *   are read apart here.
  */
 export function proposalNamespaces(
-  asked: { methods?: string[]; events?: string[] } | undefined,
+  asked: ProposalAsk | undefined,
   chainId: string,
   walletAddress: string,
+  supported: readonly string[],
 ): SettledNamespaces {
+  const unique = (values: string[]) => [...new Set(values)];
   return {
     bip122: {
       chains: [chainId],
       accounts: [caip10Account(chainId, walletAddress)],
-      methods: asked?.methods ?? [],
-      events: asked?.events ?? [],
+      methods: unique([...(asked?.required?.methods ?? []), ...(asked?.optional?.methods ?? []).filter(m => supported.includes(m))]),
+      events: unique([...(asked?.required?.events ?? []), ...(asked?.optional?.events ?? [])]),
     },
   };
 }
@@ -193,12 +233,24 @@ export type ConnectMethodHandling =
   | 'answer'
   /** Needs a signature, so it needs the full message on screen and a PIN. */
   | 'sign'
+  /** A transaction: decoded outputs, fee and own inputs on screen, then a PIN (blue_modules/neurai/connect/psbt.ts). */
+  | 'sign-psbt'
+  /** The account extended public key: what it reveals on screen, then a PIN. */
+  | 'share-xpub'
   /** Refused with 4200: a later version will implement it. */
   | 'unsupported';
 
-export function methodHandling(method: string): ConnectMethodHandling {
+/**
+ * How a request is handled. `supported` are the methods of the wallet that
+ * answers (`connectMethodsFor`): a method it does not implement is refused,
+ * whatever the session settled.
+ */
+export function methodHandling(method: string, supported: readonly string[] = CONNECT_BASE_METHODS): ConnectMethodHandling {
+  if (!supported.includes(method)) return 'unsupported';
   if (method === 'getAccountAddresses') return 'answer';
   if (method === 'signMessage') return 'sign';
+  if (method === 'signPsbt') return 'sign-psbt';
+  if (method === CONNECT_XPUB_METHOD) return 'share-xpub';
   return 'unsupported';
 }
 
@@ -209,7 +261,6 @@ export function methodHandling(method: string): ConnectMethodHandling {
  */
 export function unsupportedMethodError(method: string): { code: number; message: string } {
   if (method === 'sendTransfer') return { code: CONNECT_UNSUPPORTED_METHOD, message: 'sendTransfer is not implemented yet' };
-  if (method === 'signPsbt') return { code: CONNECT_UNSUPPORTED_METHOD, message: 'signPsbt is not implemented yet' };
   return { code: CONNECT_UNSUPPORTED_METHOD, message: `${method} is not supported by this wallet` };
 }
 
@@ -265,6 +316,23 @@ export function isValidRelayUrl(url: string): boolean {
 export function shorten(value: string, keep = 10): string {
   if (value.length <= keep * 2 + 1) return value;
   return `${value.slice(0, keep)}…${value.slice(-keep)}`;
+}
+
+/** One output of a `signPsbt`, as the approval screen prints it. */
+export function describePsbtOutput(
+  output: {
+    address: string | null;
+    scriptHex: string;
+    sats: bigint;
+    asset: { name: string; amount?: string } | null;
+  },
+  formatXna: (sats: bigint) => string,
+): string {
+  const destination = output.address ?? `script ${shorten(output.scriptHex, 12)}`;
+  const xna = `${formatXna(output.sats)} ${CONNECT_BASE_TICKER}`;
+  if (!output.asset) return `${xna} → ${destination}`;
+  const asset = `${output.asset.amount ?? '1'} ${output.asset.name}`;
+  return output.sats > 0n ? `${asset} + ${xna} → ${destination}` : `${asset} → ${destination}`;
 }
 
 /** A message out of anything that was thrown, for a screen that must say *something*. */

@@ -49,7 +49,14 @@ import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
 import { LOCAL_FEE_RATE_RPC, LOCAL_FEE_RATE_XNA_PER_KB } from '../../blue_modules/neurai/feePolicy';
 import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
 import { dustThresholdSats } from '../../blue_modules/neurai/dust';
-import { engineNetworkFor, signerNetworkFor, type EngineNetwork } from '../../blue_modules/neurai/keyNetwork';
+import {
+  ecdsaKeyNetworkFor,
+  engineNetworkFor,
+  legacyKeyNetworkFor,
+  signerNetworkFor,
+  type EngineNetwork,
+} from '../../blue_modules/neurai/keyNetwork';
+import { accountXpub, type ConnectAccountXpub } from '../../blue_modules/neurai/connect/xpub';
 import { getAssetType, type NeuraiHeldAsset } from '../../blue_modules/neurai/assetUtils';
 import { AbstractWallet } from './abstract-wallet';
 import { Transaction, Utxo } from './types';
@@ -902,6 +909,24 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       return false;
     }
     return false;
+  }
+
+  /**
+   * Extended public key of account 0, for Neurai Connect's
+   * `neurai_getAccountXpub`: it lets a site see every receive and change
+   * address of this wallet, never spend from them. False for wallets without
+   * a secp256k1 HD tree of their own: post-quantum (hardened at every level)
+   * and hardware (the key stays on the device).
+   */
+  async getConnectAccountXpub(): Promise<ConnectAccountXpub | false> {
+    if (!this.secret) return false;
+    const keyNetwork = legacyKeyNetworkFor(this.network) ?? ecdsaKeyNetworkFor(this.network);
+    if (!keyNetwork) return false;
+    try {
+      return accountXpub(keyNetwork, this.secret, this.passphrase);
+    } catch {
+      return false;
+    }
   }
 
   _getWIFbyAddress(address: string): string | false {

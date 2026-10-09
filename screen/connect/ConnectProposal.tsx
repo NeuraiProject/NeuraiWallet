@@ -6,7 +6,9 @@
  * asking, what they will be able to do (methods and events), which account
  * they will see, and for how long. All four are shown; nothing is granted that
  * the dApp did not ask for, because the namespaces settled here are built from
- * the proposal itself rather than from a fixed list.
+ * the proposal itself. Optional methods are granted only when the chosen
+ * wallet implements them (`connectMethodsFor`), which is how the site learns
+ * whether it may ask this wallet to sign transactions.
  *
  * The account exposed is always a **wallet** address (spec/session.md section
  * 3.3). Per-domain identity addresses exist so that a site cannot look the user
@@ -37,6 +39,7 @@ import { connectClient, peekIncoming, takeIncoming } from '../../blue_modules/ne
 import { useConnectApprovalGate } from '../../hooks/useConnectApprovalGate';
 import { networkForCaip2 } from '../../blue_modules/neurai/connect/config';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
+import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
 import { useStorage } from '../../hooks/context/useStorage';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc from '../../loc';
@@ -44,6 +47,7 @@ import type { DetailViewStackParamList } from '../../navigation/DetailViewStackP
 import {
   CONNECT_EMPTY_FIELD,
   caip10Account,
+  connectMethodsFor,
   describeError,
   formatMoment,
   pickChain,
@@ -65,6 +69,10 @@ const ConnectProposal: React.FC = () => {
   const incoming = useMemo(() => peekIncoming(id), [id]);
   const event = incoming?.kind === 'proposal' ? incoming.event : undefined;
   const asked = event?.namespaces.bip122;
+  const ask = useMemo(
+    () => ({ required: event?.requiredNamespaces?.bip122, optional: event?.optionalNamespaces?.bip122 }),
+    [event?.requiredNamespaces, event?.optionalNamespaces],
+  );
 
   const chainId = useMemo(() => pickChain(asked?.chains, c => networkForCaip2(c) !== undefined), [asked?.chains]);
   const network = chainId ? networkForCaip2(chainId) : undefined;
@@ -102,6 +110,14 @@ const ConnectProposal: React.FC = () => {
   }, [wallet]);
 
   const approval = sessionApproval({ hasWallet: wallet !== undefined, address });
+  const supported = useMemo(
+    () => (wallet ? connectMethodsFor({ walletKind: wallet.walletKind, isHardware: wallet.type === NeuraiHardwareWallet.type }) : []),
+    [wallet],
+  );
+  const granted = useMemo(
+    () => (chainId && address ? proposalNamespaces(ask, chainId, address, supported).bip122.methods : []),
+    [ask, chainId, address, supported],
+  );
 
   const onApprove = useCallback(async () => {
     if (!chainId || !address) return;
@@ -114,7 +130,7 @@ const ConnectProposal: React.FC = () => {
       const client = connectClient();
       if (!client) throw new Error(loc.connect.error_not_connected);
       await client.approveSession(id, {
-        namespaces: proposalNamespaces(asked, chainId, address),
+        namespaces: proposalNamespaces(ask, chainId, address, supported),
         sessionProperties: sessionProperties([{ address }]),
       });
       takeIncoming(id);
@@ -128,7 +144,7 @@ const ConnectProposal: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [asked, chainId, address, id, event, navigation, requireUnlock]);
+  }, [ask, chainId, address, supported, id, event, navigation, requireUnlock]);
 
   const onReject = useCallback(async () => {
     setBusy(true);
@@ -168,6 +184,7 @@ const ConnectProposal: React.FC = () => {
           mono
         />
         <ConnectRow label={loc.connect.proposal_methods} value={(asked?.methods ?? []).join(', ') || CONNECT_EMPTY_FIELD} />
+        <ConnectRow label={loc.connect.proposal_methods_granted} value={granted.join(', ') || CONNECT_EMPTY_FIELD} />
         <ConnectRow label={loc.connect.proposal_events} value={(asked?.events ?? []).join(', ') || CONNECT_EMPTY_FIELD} />
         <ConnectRow label={loc.connect.proposal_session_length} value={loc.connect.proposal_seven_days} />
         <ConnectRow

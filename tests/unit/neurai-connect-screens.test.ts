@@ -26,6 +26,9 @@ import {
   isValidRelayUrl,
   loginApproval,
   methodHandling,
+  CONNECT_XPUB_METHOD,
+  connectMethodsFor,
+  describePsbtOutput,
   normalizeAddressPolicy,
   pickChain,
   proposalNamespaces,
@@ -121,7 +124,12 @@ describe('session proposals', () => {
   });
 
   it('grants exactly the methods and events asked for, on one chain, with one wallet account', () => {
-    const namespaces = proposalNamespaces({ methods: ['signMessage'], events: ['bip122_addressesChanged'] }, MAINNET, 'NX7s');
+    const namespaces = proposalNamespaces(
+      { required: { methods: ['signMessage'], events: ['bip122_addressesChanged'] } },
+      MAINNET,
+      'NX7s',
+      ['getAccountAddresses', 'signMessage'],
+    );
     expect(namespaces).toEqual({
       bip122: {
         chains: [MAINNET],
@@ -133,8 +141,29 @@ describe('session proposals', () => {
   });
 
   it('grants nothing when the proposal asked for nothing', () => {
-    expect(proposalNamespaces(undefined, MAINNET, 'NX7s').bip122.methods).toEqual([]);
-    expect(proposalNamespaces(undefined, MAINNET, 'NX7s').bip122.events).toEqual([]);
+    expect(proposalNamespaces(undefined, MAINNET, 'NX7s', ['signMessage']).bip122.methods).toEqual([]);
+    expect(proposalNamespaces(undefined, MAINNET, 'NX7s', ['signMessage']).bip122.events).toEqual([]);
+  });
+
+  it('grants optional methods only when this wallet implements them', () => {
+    const ask = {
+      required: { methods: ['getAccountAddresses', 'signMessage'], events: ['bip122_addressesChanged'] },
+      optional: { methods: ['signPsbt', CONNECT_XPUB_METHOD, 'sendTransfer'], events: [] },
+    };
+    const software = connectMethodsFor({ walletKind: 'ecdsa', isHardware: false });
+    expect(proposalNamespaces(ask, TESTNET, 'tnq1r', software).bip122.methods).toEqual([
+      'getAccountAddresses',
+      'signMessage',
+      'signPsbt',
+      CONNECT_XPUB_METHOD,
+    ]);
+    const pq = connectMethodsFor({ walletKind: 'pq', isHardware: false });
+    expect(proposalNamespaces(ask, TESTNET, 'tpq1z', pq).bip122.methods).toEqual(['getAccountAddresses', 'signMessage']);
+  });
+
+  it('serves a dApp that only sends optional namespaces (WalletConnect 2.21.8)', () => {
+    const ask = { required: undefined, optional: { methods: ['signMessage', 'sendTransfer'], events: [] } };
+    expect(proposalNamespaces(ask, MAINNET, 'NX7s', ['getAccountAddresses', 'signMessage']).bip122.methods).toEqual(['signMessage']);
   });
 
   it('hands the initial getAccountAddresses answer over as a JSON session property', () => {
@@ -170,9 +199,37 @@ describe('session requests', () => {
     expect(methodHandling('neurai_somethingNew')).toBe('unsupported');
   });
 
+  it('signs transactions and shares the account key only from Legacy and ECDSA software wallets', () => {
+    for (const walletKind of ['legacy', 'ecdsa']) {
+      const supported = connectMethodsFor({ walletKind, isHardware: false });
+      expect(methodHandling('signPsbt', supported)).toBe('sign-psbt');
+      expect(methodHandling(CONNECT_XPUB_METHOD, supported)).toBe('share-xpub');
+    }
+    for (const wallet of [
+      { walletKind: 'pq', isHardware: false },
+      { walletKind: 'legacy', isHardware: true },
+    ]) {
+      const supported = connectMethodsFor(wallet);
+      expect(methodHandling('signPsbt', supported)).toBe('unsupported');
+      expect(methodHandling(CONNECT_XPUB_METHOD, supported)).toBe('unsupported');
+      expect(methodHandling('signMessage', supported)).toBe('sign');
+    }
+  });
+
+  it('prints a PSBT output with its asset and destination', () => {
+    const fmt = (sats: bigint) => (Number(sats) / 1e8).toFixed(8);
+    expect(describePsbtOutput({ address: 'tAbC', scriptHex: '', sats: 150000000n, asset: null }, fmt)).toBe('1.50000000 XNA → tAbC');
+    expect(describePsbtOutput({ address: 'tAbC', scriptHex: '', sats: 0n, asset: { name: 'MYASSET', amount: '2' } }, fmt)).toBe(
+      '2 MYASSET → tAbC',
+    );
+    expect(describePsbtOutput({ address: null, scriptHex: '6a'.repeat(40), sats: 0n, asset: null }, fmt)).toMatch(
+      /^0.00000000 XNA → script 6a/,
+    );
+  });
+
   it('refuses the unimplemented methods with 4200 and the agreed wording', () => {
     expect(unsupportedMethodError('sendTransfer')).toEqual({ code: 4200, message: 'sendTransfer is not implemented yet' });
-    expect(unsupportedMethodError('signPsbt')).toEqual({ code: 4200, message: 'signPsbt is not implemented yet' });
+    expect(unsupportedMethodError('signPsbt')).toEqual({ code: 4200, message: 'signPsbt is not supported by this wallet' });
     expect(unsupportedMethodError('whatever')).toEqual({ code: 4200, message: 'whatever is not supported by this wallet' });
   });
 
