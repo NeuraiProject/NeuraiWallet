@@ -58,7 +58,7 @@ const stageLabels = (): StageLabels => ({
   verifyingProof: loc.privacy.stage_verifying_proof,
 });
 
-export function useC6PrivateWallet(wallet: PrivacyWallet | undefined, runtime: C6Runtime) {
+export function useC6PrivateWallet(wallet: PrivacyWallet | undefined, runtime: C6Runtime, hidden = false) {
   const bridge = usePrivacyHost();
   const artifacts = useMemo(() => new C6ArtifactStore(runtime), [runtime]);
   const family = wallet ? c6Family(wallet) : null;
@@ -111,7 +111,8 @@ export function useC6PrivateWallet(wallet: PrivacyWallet | undefined, runtime: C
 
   const sync = useC6BackgroundSync({
     active: open && !!summary?.tip,
-    paused: busy,
+    // Not on screen: no scans, so a tap on return never queues behind one.
+    paused: busy || hidden,
     tip: summary?.tip,
     rpc,
     canStart: () => !running.current && !!client.current,

@@ -107,7 +107,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID, pause
     serverInfo,
   });
 
-  const { keyboardHeight, messagesListRef } = useDepinChatKeyboard();
+  const { keyboardHeight, messagesListRef } = useDepinChatKeyboard(!paused);
   const {
     reveal: handleReveal,
     revealPending,

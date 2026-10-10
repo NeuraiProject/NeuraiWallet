@@ -244,9 +244,13 @@ export class WssBackend implements NeuraiBackend {
     }
     for (const a of this.subscribedAddresses) if (!next.has(a)) toRemove.push(a);
     this.subscribedAddresses = next;
+    // Notify only when the stale set really moved. A failed address is retried
+    // on every call, so announcing each retry made every screen focus emit a
+    // wallet change — a full save and re-render — that changed nothing.
+    const staleBefore = this.staleAddresses.size;
     for (const address of toRemove) this.staleAddresses.delete(address);
     for (const address of toAdd) this.staleAddresses.add(address);
-    if (toAdd.length || toRemove.length) this.syncChanged();
+    if (this.staleAddresses.size !== staleBefore) this.syncChanged();
     // Establish the WS if needed. ensureConnected runs the full subscribe.bulk
     // for all currently-subscribed addresses on first connect, so we only
     // need to handle the diff path when the socket is already open.

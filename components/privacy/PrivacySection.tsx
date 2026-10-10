@@ -62,15 +62,17 @@ function PoolView({
   runtime,
   kind,
   onKind,
+  hidden,
 }: {
   wallet: PrivacyWallet;
   runtime: C6Runtime;
   kind: C6PoolKind;
   onKind: (kind: C6PoolKind) => void;
+  hidden: boolean;
 }) {
   const t = usePrivacyTheme();
   const insets = useSafeAreaInsets();
-  const pool = useC6PrivateWallet(wallet, runtime);
+  const pool = useC6PrivateWallet(wallet, runtime, hidden);
   const ops = useC6Operations(wallet, runtime, pool);
   const deployments = useMemo(() => [runtime.config.deployment as never], [runtime]);
   const sponsor = useC6Sponsor(wallet, deployments, SPONSOR_BUDGET_ATOMIC);
@@ -282,7 +284,11 @@ function PoolView({
   );
 }
 
-export default function PrivacySection({ walletID }: { walletID: string }) {
+/**
+ * `hidden`: the section stays mounted behind another wallet tab or screen so an
+ * opened private wallet stays open; meanwhile its background scans wait.
+ */
+export default function PrivacySection({ walletID, hidden = false }: { walletID: string; hidden?: boolean }) {
   // The wallet itself, not the screen's subscription proxy: that proxy is
   // replaced after every transaction fetch, which would lock the private wallet.
   const { wallets } = useStorage();
@@ -293,7 +299,7 @@ export default function PrivacySection({ walletID }: { walletID: string }) {
   return (
     <PrivacyHostProvider>
       {runtime && wallet ? (
-        <PoolView key={`${walletID}:${runtime.id}`} wallet={wallet} runtime={runtime} kind={kind} onKind={setKind} />
+        <PoolView key={`${walletID}:${runtime.id}`} wallet={wallet} runtime={runtime} kind={kind} onKind={setKind} hidden={hidden} />
       ) : null}
     </PrivacyHostProvider>
   );

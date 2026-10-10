@@ -9,7 +9,6 @@
  * device and settled the answer.
  */
 import { useEffect, useState } from 'react';
-import { InteractionManager } from 'react-native';
 
 import { deriveDepinChatIdentity, isDepinChatSupportedNetwork } from '../blue_modules/neurai/depinChatIdentity';
 import { ensureRevealed, isKnownRevealed, subscribeRevealed } from '../blue_modules/neurai/depinRevealed';
@@ -22,6 +21,13 @@ const addresses = new Map<string, string | null>();
 
 /** Same cadence as the chat's own pubkey poll; only runs while unrevealed. */
 const RECHECK_MS = 60_000;
+
+/**
+ * Wait before the first check. InteractionManager no longer waits for anything
+ * (RN 0.85 made it a setImmediate), so "after interactions" meant "during the
+ * launch", while the user's first taps compete with the key derivation.
+ */
+const FIRST_CHECK_DELAY_MS = 3_000;
 
 function depinAddressFor(wallet: TWallet): string | null {
   const id = wallet.getID();
@@ -57,23 +63,25 @@ export function useDepinRevealed(params: { enabled: boolean; wallet: TWallet | n
       if (!cancelled) setRevealedState(isKnownRevealed(id));
     };
     const tick = () => {
+      // Settled already (by the chat, or a previous tick): nothing to derive.
+      if (isKnownRevealed(id)) return sync();
       ensureRevealed(id, depinAddressFor(wallet), network).then(sync);
     };
 
     sync();
-    // Key derivation is the expensive part: keep it off the first paint.
-    const task = InteractionManager.runAfterInteractions(() => {
+    // Key derivation is the expensive part: keep it out of the launch.
+    const timer = setTimeout(() => {
       if (cancelled) return;
       tick();
       if (!isKnownRevealed(id)) interval = setInterval(tick, RECHECK_MS);
-    });
+    }, FIRST_CHECK_DELAY_MS);
     // The chat settles the answer too (and is the only path for hardware
     // wallets); reflect it without waiting for the next tick.
     const unsubscribe = subscribeRevealed(sync);
 
     return () => {
       cancelled = true;
-      task.cancel();
+      clearTimeout(timer);
       if (interval) clearInterval(interval);
       unsubscribe();
     };

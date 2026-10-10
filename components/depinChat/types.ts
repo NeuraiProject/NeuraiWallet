@@ -1,9 +1,10 @@
 export interface DePINChatProps {
   walletID: string;
   /**
-   * The chat stays mounted behind another wallet tab to keep its state. While
-   * hidden it must not poll: each poll marks the pool as read (clearing the
-   * tab's new-message dot unseen) and, on a hardware wallet, costs a device op.
+   * The chat stays mounted behind another wallet tab, or under another screen,
+   * to keep its state. While not on screen it must not poll: each poll marks
+   * the pool as read (clearing the tab's new-message dot unseen) and, on a
+   * hardware wallet, takes the device a user action on top may be waiting for.
    */
   paused?: boolean;
 }

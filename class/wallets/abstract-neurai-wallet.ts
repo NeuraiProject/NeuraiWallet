@@ -303,6 +303,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   /** Lazy engine + backend; created on first use, cleared on network change. */
   private _engine: NeuraiEngine | null;
+  /** Bootstrap in flight, shared so concurrent first callers derive once. */
+  private _enginePromise: Promise<NeuraiEngine> | null;
   private _backend: NeuraiBackend | null;
   /** Disposer for the backend's address.changed listener, if the active
    * backend supports push (only WssBackend does today). */
@@ -326,6 +328,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._pendingTxs = [];
     this._addressStatus = {};
     this._engine = null;
+    this._enginePromise = null;
     this._backend = null;
     this._unsubscribeBackendPush = null;
     this._pushFetchInFlight = false;
@@ -337,6 +340,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     // we want them on disk so the UI can render previous history instantly
     // on app launch, before the next refresh RPC completes.
     Object.defineProperty(this, '_engine', { writable: true, enumerable: false, value: null });
+    Object.defineProperty(this, '_enginePromise', { writable: true, enumerable: false, value: null });
     Object.defineProperty(this, '_backend', { writable: true, enumerable: false, value: null });
     Object.defineProperty(this, '_unsubscribeBackendPush', { writable: true, enumerable: false, value: null });
     Object.defineProperty(this, '_pushFetchInFlight', { writable: true, enumerable: false, value: false });
@@ -383,6 +387,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       this._unsubscribeBackendPush = null;
     }
     this._engine = null;
+    this._enginePromise = null;
     this._backend = null;
     this.balance = 0n;
     this.unconfirmed_balance = 0n;
@@ -410,6 +415,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   setPassphrase(passphrase: string): void {
     this.passphrase = passphrase || '';
     this._engine = null;
+    this._enginePromise = null;
   }
 
   /**
@@ -437,8 +443,34 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   // ---------- engine / backend ----------------------------------------------------
 
-  protected async ensureEngine(): Promise<NeuraiEngine> {
-    if (this._engine) return this._engine;
+  /**
+   * The bootstrap derives the whole address window synchronously (seconds for
+   * PQ wallets on Hermes), so callers that arrive while it runs share it
+   * instead of each paying for their own: the privacy panel alone asks for
+   * addresses and coins in parallel. A reset (network or passphrase change)
+   * drops the shared promise, and a bootstrap started before it is not kept.
+   */
+  protected ensureEngine(): Promise<NeuraiEngine> {
+    if (this._engine) return Promise.resolve(this._engine);
+    if (!this._enginePromise) {
+      const pending = this._createEngine();
+      this._enginePromise = pending;
+      pending.then(
+        engine => {
+          if (this._enginePromise === pending) this._engine = engine;
+        },
+        () => {},
+      );
+      pending
+        .finally(() => {
+          if (this._enginePromise === pending) this._enginePromise = null;
+        })
+        .catch(() => {});
+    }
+    return this._enginePromise;
+  }
+
+  private async _createEngine(): Promise<NeuraiEngine> {
     if (!this.secret) {
       throw new Error('Cannot initialise Neurai engine: wallet has no mnemonic');
     }
@@ -461,7 +493,6 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     // serialized outputs and calculates the exact fee. No node fee quote.
     engine.rpc = (method, params = []) =>
       method === 'estimatesmartfee' ? Promise.resolve({ feerate: LOCAL_FEE_RATE_RPC }) : this.getBackend().rpc(method, params);
-    this._engine = engine;
     return engine;
   }
 
@@ -758,8 +789,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   /** Base currency code used to interpret history deltas. Defaults to the
    * engine's; engine-less subclasses override it. */
   protected async _walletBaseCurrency(): Promise<string> {
-    const engine = await this.ensureEngine();
-    return engine.getBaseCurrency();
+    // What the engine would answer (it sets it from the same network), without
+    // bootstrapping one for a constant.
+    return NeuraiJsWallet.getBaseCurrencyByNetwork(this.getEngineNetwork());
   }
 
   /**
@@ -1074,9 +1106,13 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * here. Amounts come back already divided by 1e8 in `value`.
    */
   async refreshHeldAssets(): Promise<void> {
-    const engine = await this.ensureEngine();
+    // Opening the Assets tab lands here. One balance RPC needs only the
+    // addresses, and the ones the backend is subscribed to are persisted, so
+    // a cold engine is not bootstrapped (seconds of frozen UI) just to list them.
+    const subscribed = Object.keys(this._addressStatus || {});
+    const addresses = this._engine ? this._engine.getAddresses() : subscribed.length > 0 ? subscribed : await this._walletAddresses();
     const baseCurrency = await this._walletBaseCurrency();
-    const raw = (await engine.getAssets()) as Array<{
+    const raw = (await this.getBackend().rpc('getaddressbalance', [{ addresses }, true])) as Array<{
       assetName?: string;
       balance?: string | number | bigint;
       value?: string | number;
@@ -1089,6 +1125,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
         amount: satsToXna(parseRawSats(a.balance)),
       }))
       .sort((x, y) => x.name.localeCompare(y.name));
+    // Every emit is a full save and re-render; an unchanged list needs neither.
+    if (JSON.stringify(assets) === JSON.stringify(this._heldAssets)) return;
     this._heldAssets = assets;
     emitWalletChanged(this.getID());
   }

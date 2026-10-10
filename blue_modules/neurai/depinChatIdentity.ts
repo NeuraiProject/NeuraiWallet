@@ -73,11 +73,7 @@ function compressPubKeyHex(pubKeyHex: string): string {
   return hex;
 }
 
-/**
- * Derive the DePIN chat identity for a Legacy Neurai network. Throws if the
- * derivation fails or the network is unsupported.
- */
-export function deriveDepinChatIdentity(params: {
+function deriveDepinChatIdentityUncached(params: {
   network: DepinChatNetwork;
   mnemonic: string;
   passphrase?: string;
@@ -111,6 +107,36 @@ export function deriveDepinChatIdentity(params: {
   if (publicKey.length !== 66) throw new Error('Failed to derive compressed public key for DePIN chat identity');
 
   return { address, wif, publicKey, path, coinType, account, index };
+}
+
+/**
+ * Derived identities for this app session. Seed-to-key derivation (PBKDF2 plus
+ * the HD path, pure JS) blocks the JS thread for hundreds of milliseconds, and
+ * the wallet card and the chat tab both ask for the same identity, every time
+ * they mount. The mnemonic is already held in memory by the wallet object, so
+ * keeping its derived key here exposes nothing new; it lives until restart.
+ */
+const identityCache = new Map<string, DepinChatIdentity>();
+
+/**
+ * Derive the DePIN chat identity for a Legacy Neurai network. Throws if the
+ * derivation fails or the network is unsupported.
+ */
+export function deriveDepinChatIdentity(params: {
+  network: DepinChatNetwork;
+  mnemonic: string;
+  passphrase?: string;
+  account?: number;
+  index?: number;
+}): DepinChatIdentity {
+  const key = [params.network, params.account ?? 100, params.index ?? 0, params.passphrase ?? '', (params.mnemonic ?? '').trim()].join(
+    '\u0000',
+  );
+  const cached = identityCache.get(key);
+  if (cached) return cached;
+  const identity = deriveDepinChatIdentityUncached(params);
+  identityCache.set(key, identity);
+  return identity;
 }
 
 /**

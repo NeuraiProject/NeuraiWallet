@@ -1,4 +1,4 @@
-import { RouteProp, useFocusEffect, useRoute, useLocale } from '@react-navigation/native';
+import { RouteProp, useFocusEffect, useIsFocused, useRoute, useLocale } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -103,6 +103,9 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   // their words (hardware wallets have none).
   const showPrivacyTab = isNeuraiWallet(wallet) && c6Family(wallet) !== null;
   const [activeTab, setActiveTab] = useState<WalletTab>('transactions');
+  // Kept-mounted panels stop their background work when this screen is covered
+  // (Send, Receive, a transaction...), not only when another tab is shown.
+  const isScreenFocused = useIsFocused();
   // A tab is mounted the first time it is opened and then kept, hidden while
   // another one is shown, so coming back finds it as it was left: scroll
   // position, open chat, unlocked private wallet. Leaving the wallet drops them.
@@ -233,21 +236,22 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   useFocusEffect(
     useCallback(() => {
       setOptions(getWalletTransactionsOptions({ route }));
+      headerCollapsedRef.current = false;
     }, [route, setOptions]),
   );
 
+  // Navigation is synchronous, so there is nothing to guard. Gating on
+  // `isLoading` (the pull-to-refresh flag) dropped a scanned or pasted address
+  // whenever a refresh happened to be running, and the param was then cleared.
   const onBarCodeRead = useCallback(
     (ret?: { data?: any }) => {
-      if (isLoading) return;
-      setIsLoading(true);
       const uri: string | undefined = ret?.data ? ret.data : (ret as unknown as string | undefined);
       navigate('SendNeurai', {
         walletID,
         address: typeof uri === 'string' ? uri : undefined,
       });
-      setIsLoading(false);
     },
-    [isLoading, walletID, navigate],
+    [walletID, navigate],
   );
 
   useEffect(() => {
@@ -523,20 +527,33 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet, wallet.hideBalance, displayUnit, balance]);
 
-  const handleScroll = useCallback(
-    (event: any) => {
-      const offsetY = event.nativeEvent.contentOffset.y;
-      const combinedHeight = 180;
-      if (offsetY < combinedHeight) {
-        setOptions({ ...getWalletTransactionsOptions({ route }), headerTitle: undefined });
+  // The header shows the wallet name once the balance has scrolled away. Only
+  // crossing the line changes anything: setting options on every scroll frame
+  // re-rendered the navigator 60 times a second and starved taps meanwhile.
+  const headerCollapsedRef = useRef(false);
+  const applyHeaderTitle = useCallback(
+    (collapsed: boolean) => {
+      if (collapsed) {
+        navigation.setOptions({ headerTitle: `${wallet.getLabel()} ${walletBalance}` });
       } else {
-        navigation.setOptions({
-          headerTitle: `${wallet.getLabel()} ${walletBalance}`,
-        });
+        setOptions({ ...getWalletTransactionsOptions({ route }), headerTitle: undefined });
       }
     },
     [navigation, wallet, walletBalance, setOptions, route],
   );
+  const handleScroll = useCallback(
+    (event: any) => {
+      const collapsed = event.nativeEvent.contentOffset.y >= 180;
+      if (collapsed === headerCollapsedRef.current) return;
+      headerCollapsedRef.current = collapsed;
+      applyHeaderTitle(collapsed);
+    },
+    [applyHeaderTitle],
+  );
+  // A balance that changes while collapsed still has to reach the title.
+  useEffect(() => {
+    if (headerCollapsedRef.current) applyHeaderTitle(true);
+  }, [applyHeaderTitle]);
 
   const measureHeaderHeight = useCallback(() => {
     if (!headerRef.current) {
@@ -582,8 +599,11 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
           } else {
             (wallet as any).preferredBalanceUnit = selectedUnit;
           }
-          await saveToDisk();
-          console.debug('[UnitSwitch] persisted preferred unit', { walletID, unit: selectedUnit });
+          // The screen already shows the new unit; the toggle must not stay
+          // disabled while the save waits behind other queued writes.
+          saveToDisk()
+            .then(() => console.debug('[UnitSwitch] persisted preferred unit', { walletID, unit: selectedUnit }))
+            .catch(e => console.debug('[UnitSwitch] save failed', e));
           setTimeout(() => {
             setIsUnitSwitching(false);
             console.debug('[UnitSwitch] complete', { walletID, unit: selectedUnit });
@@ -717,65 +737,65 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       {showDepinTab && mountedTabs.has('depin') && (
         <View style={panelStyle('depin')}>
           {renderListHeader('depin')}
-          <DePINChat ref={depinChatRef} walletID={walletID} paused={shownTab !== 'depin'} />
+          <DePINChat ref={depinChatRef} walletID={walletID} paused={shownTab !== 'depin' || !isScreenFocused} />
         </View>
       )}
       {showPrivacyTab && mountedTabs.has('privacy') && (
         <View style={panelStyle('privacy')}>
           {renderListHeader('privacy')}
-          <PrivacySection walletID={walletID} />
+          <PrivacySection walletID={walletID} hidden={shownTab !== 'privacy' || !isScreenFocused} />
         </View>
       )}
 
       {/* The DePIN chat owns the bottom of the screen (message input toolbar), so
           hide the floating Send/Receive actions there — they'd overlap the input
-          and the latest messages. They remain on the Transactions/Assets tabs. */}
-      {!isDepinTabActive && (
-        <>
-          <FloatButtonsBottomFade />
-          <FContainer ref={walletActionButtonsRef}>
-            {wallet.allowReceive() && (
-              <FButton
-                testID="ReceiveButton"
-                text={loc.receive.header}
-                onPress={() => {
-                  navigate('ReceiveDetails', { walletID });
-                }}
-                icon={
-                  <View style={styles.iconContainer}>
-                    <Icon
-                      name="arrow-down"
-                      size={buttonFontSize}
-                      type="font-awesome"
-                      color={colors.buttonTextColor}
-                      style={stylesHook.receiveIcon}
-                    />
-                  </View>
-                }
-              />
-            )}
-            {wallet.allowSend() && (
-              <FButton
-                onLongPress={sendButtonLongPress}
-                onPress={sendButtonPress}
-                text={loc.send.header}
-                testID="SendButton"
-                icon={
-                  <View style={styles.iconContainer}>
-                    <Icon
-                      name="arrow-down"
-                      size={buttonFontSize}
-                      type="font-awesome"
-                      color={colors.buttonTextColor}
-                      style={stylesHook.sendIcon}
-                    />
-                  </View>
-                }
-              />
-            )}
-          </FContainer>
-        </>
-      )}
+          and the latest messages. They remain on the Transactions/Assets tabs.
+          Hidden, not unmounted: remounting replays their slide-in, and taps on
+          the way back land while the buttons are still moving. */}
+      <View style={[StyleSheet.absoluteFill, isDepinTabActive && styles.hiddenPanel]} pointerEvents="box-none">
+        <FloatButtonsBottomFade />
+        <FContainer ref={walletActionButtonsRef}>
+          {wallet.allowReceive() && (
+            <FButton
+              testID="ReceiveButton"
+              text={loc.receive.header}
+              onPress={() => {
+                navigate('ReceiveDetails', { walletID });
+              }}
+              icon={
+                <View style={styles.iconContainer}>
+                  <Icon
+                    name="arrow-down"
+                    size={buttonFontSize}
+                    type="font-awesome"
+                    color={colors.buttonTextColor}
+                    style={stylesHook.receiveIcon}
+                  />
+                </View>
+              }
+            />
+          )}
+          {wallet.allowSend() && (
+            <FButton
+              onLongPress={sendButtonLongPress}
+              onPress={sendButtonPress}
+              text={loc.send.header}
+              testID="SendButton"
+              icon={
+                <View style={styles.iconContainer}>
+                  <Icon
+                    name="arrow-down"
+                    size={buttonFontSize}
+                    type="font-awesome"
+                    color={colors.buttonTextColor}
+                    style={stylesHook.sendIcon}
+                  />
+                </View>
+              }
+            />
+          )}
+        </FContainer>
+      </View>
       {wallet.chain === Chain.ONCHAIN && wallet.getXpub && wallet.getXpub() ? (
         <HandOffComponent
           title={wallet.getLabel()}
