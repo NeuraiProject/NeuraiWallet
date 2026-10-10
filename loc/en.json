@@ -434,6 +434,8 @@
     "details_to": "Output",
     "list_conf": "Conf: {number}",
     "pending": "Pending",
+    "date_today": "Today",
+    "date_yesterday": "Yesterday",
     "pending_with_amount": "Pending {amt1} ({amt2})",
     "received_with_amount": "+{amt1} ({amt2})",
     "eta_10m": "ETA: In ~10 minutes",

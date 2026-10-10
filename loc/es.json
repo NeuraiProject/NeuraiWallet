@@ -372,6 +372,8 @@
     "enable_offline_signing": "Esta billetera no se está usando en conjunción con una firma offline. ¿Quieres activarlo ahora? ",
     "list_conf": "Conf: {number}",
     "pending": "En espera",
+    "date_today": "Hoy",
+    "date_yesterday": "Ayer",
     "pending_with_amount": "En espera {amt1} ({amt2})",
     "received_with_amount": "+{amt1} ({amt2})",
     "eta_10m": "Tiempo estimado: En ~10 minutos",

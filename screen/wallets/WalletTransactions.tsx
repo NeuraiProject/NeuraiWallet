@@ -16,7 +16,6 @@ import {
   View,
   RefreshControl,
 } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import Icon from '../../components/Icon';
 import { isDesktop } from '../../blue_modules/environment';
 import * as fs from '../../blue_modules/fs';
@@ -49,6 +48,7 @@ import { getClipboardContent } from '../../blue_modules/clipboard';
 import HandOffComponent from '../../components/HandOffComponent';
 import { HandOffActivityType } from '../../components/types';
 import WalletGradient from '../../class/wallet-gradient';
+import { groupTransactionsByDay, TransactionListEntry } from '../../helpers/group-transactions-by-day';
 
 const buttonFontSize =
   PixelRatio.roundToNearestPixel(Dimensions.get('window').width / 26) > 22
@@ -60,7 +60,6 @@ type WalletTab = 'transactions' | 'assets' | 'depin' | 'privacy';
 
 type WalletTransactionsProps = NativeStackScreenProps<DetailViewStackParamList, 'WalletTransactions'>;
 
-type TransactionListItem = Transaction & { type: 'transaction' | 'header' };
 const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { route: WalletTransactionsRouteProps }) => {
   const { saveToDisk } = useStorage();
   const { registerTransactionsHandler, unregisterTransactionsHandler } = useMenuElements();
@@ -88,7 +87,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   const [pageSize] = useState(20);
   const navigation = useExtendedNavigation();
   const { setOptions, navigate } = navigation;
-  const { colors } = useTheme();
+  const { colors, dark } = useTheme();
   const walletActionButtonsRef = useRef<View>(null);
   const [lastFetchTimestamp, setLastFetchTimestamp] = useState(() => wallet._lastTxFetch || 0);
   const [fetchFailures, setFetchFailures] = useState(0);
@@ -104,8 +103,24 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   // their words (hardware wallets have none).
   const showPrivacyTab = isNeuraiWallet(wallet) && c6Family(wallet) !== null;
   const [activeTab, setActiveTab] = useState<WalletTab>('transactions');
+  // A tab is mounted the first time it is opened and then kept, hidden while
+  // another one is shown, so coming back finds it as it was left: scroll
+  // position, open chat, unlocked private wallet. Leaving the wallet drops them.
+  const [mountedTabs, setMountedTabs] = useState<ReadonlySet<WalletTab>>(() => new Set<WalletTab>(['transactions']));
+  const selectTab = useCallback((tab: WalletTab) => {
+    setMountedTabs(prev => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+    setActiveTab(tab);
+  }, []);
+  const availableTabs = useMemo<WalletTab[]>(
+    () =>
+      showAssetsTab
+        ? ['transactions', 'assets', ...(showDepinTab ? (['depin'] as const) : []), ...(showPrivacyTab ? (['privacy'] as const) : [])]
+        : ['transactions'],
+    [showAssetsTab, showDepinTab, showPrivacyTab],
+  );
+  const shownTab: WalletTab = availableTabs.includes(activeTab) ? activeTab : 'transactions';
   const MAX_FAILURES = 3;
-  const flatListRef = useRef<FlatList<Transaction>>(null);
+  const flatListRef = useRef<FlatList<TransactionListEntry>>(null);
   const depinChatRef = useRef<DePINChatHandle>(null);
 
   // Cheap "new messages" marker: polls only the unencrypted pool stats once a
@@ -153,14 +168,22 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
     listHeaderText: {
       color: colors.foregroundColor,
     },
-    tabActiveBg: {
-      // Same tone as the list/content area so the active tab reads as part of it.
-      backgroundColor: colors.background,
+    // Segmented control: a recessed track with the selected section raised out
+    // of it. Light and dark swap which of the two surfaces is the lighter one.
+    tabsTrack: {
+      backgroundColor: dark ? colors.elevated : colors.lightBorder,
     },
-    tabInactiveBg: {
-      // Muted/greyed tone + visible outline for the unselected tab.
-      backgroundColor: colors.inputBackgroundColor,
-      borderColor: colors.formBorder,
+    tabActiveBg: {
+      backgroundColor: dark ? colors.lightBorder : colors.elevated,
+    },
+    dayHeaderText: {
+      color: colors.alternativeTextColor,
+    },
+    txCard: {
+      backgroundColor: colors.elevated,
+    },
+    txDivider: {
+      backgroundColor: colors.lightBorder,
     },
     tabLabelActive: {
       color: colors.foregroundColor,
@@ -372,18 +395,36 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
     });
   };
 
-  const getItemLayout = (_: any, index: number) => ({
-    length: 64,
-    offset: 64 * index,
-    index,
-  });
+  const transactionEntries = useMemo(
+    () =>
+      groupTransactionsByDay(getTransactions(limit), {
+        pending: loc.transactions.pending,
+        today: loc.transactions.date_today,
+        yesterday: loc.transactions.date_yesterday,
+      }),
+    [getTransactions, limit],
+  );
 
+  // One rounded card per day under its own heading; rows inside a card are
+  // split by a hairline that starts past the icon.
   const renderItem = useCallback(
     // eslint-disable-next-line react/no-unused-prop-types
-    ({ item }: { item: Transaction }) => (
-      <TransactionListItem key={item.hash} item={item} itemPriceUnit={displayUnit} walletID={walletID} />
-    ),
-    [displayUnit, walletID],
+    ({ item }: { item: TransactionListEntry }) => {
+      if (item.kind === 'header') {
+        return (
+          <Text style={[styles.dayHeader, stylesHook.dayHeaderText]} numberOfLines={1} accessibilityRole="header">
+            {item.title}
+          </Text>
+        );
+      }
+      return (
+        <View style={[styles.txCard, stylesHook.txCard, item.isFirst && styles.txCardTop, item.isLast && styles.txCardBottom]}>
+          <TransactionListItem item={item.tx} itemPriceUnit={displayUnit} walletID={walletID} style={styles.txRow} timeOnly />
+          {!item.isLast && <View style={[styles.txDivider, stylesHook.txDivider]} />}
+        </View>
+      );
+    },
+    [displayUnit, walletID, stylesHook.dayHeaderText, stylesHook.txCard, stylesHook.txDivider],
   );
 
   const choosePhoto = () => {
@@ -400,7 +441,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       });
   };
 
-  const _keyExtractor = useCallback((_item: any, index: number) => index.toString(), []);
+  const _keyExtractor = useCallback((item: TransactionListEntry) => item.key, []);
 
   const pasteFromClipboard = async () => {
     onBarCodeRead({ data: await getClipboardContent() });
@@ -524,122 +565,90 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
     return () => clearTimeout(timer);
   }, [walletID, measureHeaderHeight]);
 
-  const ListHeaderComponent = useCallback(
-    () => (
-      <View ref={headerRef} onLayout={measureHeaderHeight}>
-        <TransactionsNavigationHeader
-          wallet={wallet}
-          onWalletUnitChange={async selectedUnit => {
-            console.debug('[UnitSwitch] requested', { walletID, from: displayUnit, to: selectedUnit });
-            setIsUnitSwitching(true);
-            setDisplayUnit(selectedUnit);
-            if ('setPreferredBalanceUnit' in wallet) {
-              wallet.setPreferredBalanceUnit(selectedUnit);
-            } else {
-              (wallet as any).preferredBalanceUnit = selectedUnit;
-            }
-            await saveToDisk();
-            console.debug('[UnitSwitch] persisted preferred unit', { walletID, unit: selectedUnit });
-            setTimeout(() => {
-              setIsUnitSwitching(false);
-              console.debug('[UnitSwitch] complete', { walletID, unit: selectedUnit });
-            }, 50);
-          }}
-          unit={displayUnit}
-          unitSwitching={isUnitSwitching}
-          onWalletBalanceVisibilityChange={async isShouldBeVisible => {
-            const isBiometricsEnabled = await isBiometricUseCapableAndEnabled();
-            if (wallet.hideBalance && isBiometricsEnabled) {
-              const unlocked = await unlockWithBiometrics();
-              if (!unlocked) throw new Error('Biometrics failed');
-            }
-            wallet.hideBalance = isShouldBeVisible;
-            await saveToDisk();
-          }}
-          onManageFundsPressed={() => {}}
-        />
-        <View style={styles.headerBottomBarSpacer}>
-          <View style={stylesHook.headerBottomBar} />
-        </View>
-        <View style={[styles.flex, stylesHook.backgroundContainer]}>
-          {showAssetsTab ? (
-            <View style={styles.tabsBar}>
-              {(
-                [
-                  'transactions',
-                  'assets',
-                  ...(showDepinTab ? (['depin'] as const) : []),
-                  ...(showPrivacyTab ? (['privacy'] as const) : []),
-                ] as WalletTab[]
-              ).map(tab => {
-                const active = activeTab === tab;
-                const label =
-                  tab === 'transactions'
-                    ? loc.assets.tab_transactions
-                    : tab === 'assets'
-                      ? loc.assets.tab_assets
-                      : tab === 'depin'
-                        ? loc.assets.tab_depin
-                        : loc.privacy.tab;
-                return (
-                  <Pressable
-                    key={tab}
-                    testID={`WalletTab-${tab}`}
-                    onPress={() => setActiveTab(tab)}
-                    style={[
-                      styles.tab,
-                      active ? [styles.tabActive, stylesHook.tabActiveBg] : [styles.tabInactive, stylesHook.tabInactiveBg],
-                    ]}
-                  >
-                    {active && (
-                      <LinearGradient
-                        colors={['rgba(249, 115, 22, 0.5)', 'rgba(249, 115, 22, 0)']}
-                        style={StyleSheet.absoluteFill}
-                        pointerEvents="none"
-                      />
-                    )}
-                    <Text
-                      style={[styles.tabLabel, active ? stylesHook.tabLabelActive : stylesHook.tabLabelInactive]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.75}
-                    >
-                      {label}
-                    </Text>
-                    {tab === 'depin' && hasNewDepinMessages && <View style={styles.depinUnreadDot} testID="DepinTabUnreadDot" />}
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : (
-            <View style={styles.listHeaderTextRow}>
-              <Text style={[styles.listHeaderText, stylesHook.listHeaderText]}>{loc.transactions.list_title}</Text>
-            </View>
-          )}
-        </View>
+  // Every tab panel carries its own copy of the header (it scrolls away with
+  // the transactions and assets lists). It is an element, not a component
+  // type: a component re-created on each render would remount the header
+  // every time. Only the shown panel's copy drives the backdrop measurement.
+  const renderListHeader = (panel: WalletTab) => (
+    <View ref={panel === shownTab ? headerRef : undefined} onLayout={panel === shownTab ? measureHeaderHeight : undefined}>
+      <TransactionsNavigationHeader
+        wallet={wallet}
+        onWalletUnitChange={async selectedUnit => {
+          console.debug('[UnitSwitch] requested', { walletID, from: displayUnit, to: selectedUnit });
+          setIsUnitSwitching(true);
+          setDisplayUnit(selectedUnit);
+          if ('setPreferredBalanceUnit' in wallet) {
+            wallet.setPreferredBalanceUnit(selectedUnit);
+          } else {
+            (wallet as any).preferredBalanceUnit = selectedUnit;
+          }
+          await saveToDisk();
+          console.debug('[UnitSwitch] persisted preferred unit', { walletID, unit: selectedUnit });
+          setTimeout(() => {
+            setIsUnitSwitching(false);
+            console.debug('[UnitSwitch] complete', { walletID, unit: selectedUnit });
+          }, 50);
+        }}
+        unit={displayUnit}
+        unitSwitching={isUnitSwitching}
+        onWalletBalanceVisibilityChange={async isShouldBeVisible => {
+          const isBiometricsEnabled = await isBiometricUseCapableAndEnabled();
+          if (wallet.hideBalance && isBiometricsEnabled) {
+            const unlocked = await unlockWithBiometrics();
+            if (!unlocked) throw new Error('Biometrics failed');
+          }
+          wallet.hideBalance = isShouldBeVisible;
+          await saveToDisk();
+        }}
+        onManageFundsPressed={() => {}}
+      />
+      <View style={styles.headerBottomBarSpacer}>
+        <View style={stylesHook.headerBottomBar} />
       </View>
-    ),
-    [
-      wallet,
-      walletID,
-      displayUnit,
-      isUnitSwitching,
-      measureHeaderHeight,
-      stylesHook.backgroundContainer,
-      stylesHook.headerBottomBar,
-      stylesHook.listHeaderText,
-      stylesHook.tabActiveBg,
-      stylesHook.tabInactiveBg,
-      stylesHook.tabLabelActive,
-      stylesHook.tabLabelInactive,
-      saveToDisk,
-      isBiometricUseCapableAndEnabled,
-      showAssetsTab,
-      showDepinTab,
-      showPrivacyTab,
-      activeTab,
-      hasNewDepinMessages,
-    ],
+      {/* No flex: on DePIN/Privacy this header shares a column with a flex:1 panel,
+            and a flex:1 child of an auto-height parent collapses to zero there. */}
+      <View style={stylesHook.backgroundContainer}>
+        {showAssetsTab ? (
+          <View style={[styles.tabsBar, stylesHook.tabsTrack]} accessibilityRole="tablist">
+            {availableTabs.map(tab => {
+              const active = shownTab === tab;
+              const label =
+                tab === 'transactions'
+                  ? loc.assets.tab_transactions
+                  : tab === 'assets'
+                    ? loc.assets.tab_assets
+                    : tab === 'depin'
+                      ? loc.assets.tab_depin
+                      : loc.privacy.tab;
+              return (
+                <Pressable
+                  key={tab}
+                  testID={`WalletTab-${tab}`}
+                  onPress={() => selectTab(tab)}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  style={[styles.tab, active && [styles.tabActive, stylesHook.tabActiveBg]]}
+                >
+                  <Text
+                    style={[styles.tabLabel, active ? [styles.tabLabelActive, stylesHook.tabLabelActive] : stylesHook.tabLabelInactive]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
+                  >
+                    {label}
+                  </Text>
+                  {tab === 'depin' && hasNewDepinMessages && <View style={styles.depinUnreadDot} testID="DepinTabUnreadDot" />}
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={styles.listHeaderTextRow}>
+            <Text style={[styles.listHeaderText, stylesHook.listHeaderText]}>{loc.transactions.list_title}</Text>
+          </View>
+        )}
+      </View>
+    </View>
   );
 
   useEffect(() => {
@@ -647,6 +656,8 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
       flatListRef.current.scrollToOffset({ offset: 0, animated: true });
     }
   }, [walletID]);
+
+  const panelStyle = (tab: WalletTab) => [styles.flex, stylesHook.backgroundContainer, tab !== shownTab && styles.hiddenPanel];
 
   return (
     <View style={[styles.flex, stylesHook.backgroundContainer]}>
@@ -664,27 +675,14 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
           {loc.wallets.neurai_service_legacy}
         </Text>
       )}
-      {showDepinTab && activeTab === 'depin' ? (
-        <View style={[styles.flex, stylesHook.backgroundContainer]}>
-          <ListHeaderComponent />
-          <DePINChat ref={depinChatRef} walletID={walletID} />
-        </View>
-      ) : isPrivacyTabActive && isNeuraiWallet(wallet) ? (
-        <View style={[styles.flex, stylesHook.backgroundContainer]}>
-          <ListHeaderComponent />
-          <PrivacySection walletID={walletID} />
-        </View>
-      ) : showAssetsTab && activeTab === 'assets' ? (
-        <AssetsList walletID={walletID} ListHeaderComponent={ListHeaderComponent} />
-      ) : (
-        <FlatList<Transaction>
+      <View style={panelStyle('transactions')}>
+        <FlatList<TransactionListEntry>
           ref={flatListRef}
-          getItemLayout={getItemLayout}
           updateCellsBatchingPeriod={50}
           onEndReachedThreshold={0.3}
           onEndReached={loadMoreTransactions}
           ListFooterComponent={renderListFooterComponent}
-          data={getTransactions(limit)}
+          data={transactionEntries}
           extraData={[wallet, displayUnit, wallet.hideBalance]}
           keyExtractor={_keyExtractor}
           renderItem={renderItem}
@@ -696,7 +694,7 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
           onScroll={handleScroll}
           windowSize={15}
           scrollEventThrottle={16}
-          ListHeaderComponent={ListHeaderComponent}
+          ListHeaderComponent={renderListHeader('transactions')}
           ListEmptyComponent={
             <ScrollView style={[styles.emptyTxsContainer, stylesHook.backgroundContainer]} contentContainerStyle={styles.scrollViewContent}>
               <Text numberOfLines={0} style={styles.emptyTxs} testID="TransactionsListEmpty">
@@ -710,6 +708,23 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
             ) : undefined
           }
         />
+      </View>
+      {showAssetsTab && mountedTabs.has('assets') && (
+        <View style={panelStyle('assets')}>
+          <AssetsList walletID={walletID} ListHeaderComponent={renderListHeader('assets')} />
+        </View>
+      )}
+      {showDepinTab && mountedTabs.has('depin') && (
+        <View style={panelStyle('depin')}>
+          {renderListHeader('depin')}
+          <DePINChat ref={depinChatRef} walletID={walletID} paused={shownTab !== 'depin'} />
+        </View>
+      )}
+      {showPrivacyTab && mountedTabs.has('privacy') && (
+        <View style={panelStyle('privacy')}>
+          {renderListHeader('privacy')}
+          <PrivacySection walletID={walletID} />
+        </View>
       )}
 
       {/* The DePIN chat owns the bottom of the screen (message input toolbar), so
@@ -786,28 +801,47 @@ const styles = StyleSheet.create({
   },
   syncText: { fontSize: 13, flexShrink: 1 },
   flex: { flex: 1 },
+  hiddenPanel: { display: 'none' },
   headerBottomBarSpacer: { position: 'relative', height: 12 },
   scrollViewContent: { flex: 1, justifyContent: 'center', paddingHorizontal: 16, paddingBottom: 500 },
   activityIndicator: { marginVertical: 20 },
   listHeaderTextRow: { flex: 1, marginHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between' },
-  tabsBar: { flexDirection: 'row', marginHorizontal: 16, marginTop: 2, columnGap: 8 },
+  tabsBar: { flexDirection: 'row', marginHorizontal: 16, marginTop: 4, marginBottom: 4, padding: 4, borderRadius: 14 },
   // Same green marker the chat uses for unread conversations.
-  depinUnreadDot: { position: 'absolute', top: 8, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' },
+  depinUnreadDot: { position: 'absolute', top: 5, right: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' },
   tab: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 12,
+    justifyContent: 'center',
+    paddingVertical: 9,
     paddingHorizontal: 4,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
+    borderRadius: 10,
   },
-  // Selected tab: merges with the content tone, marked by a soft Neurai-orange
-  // gradient fading down from the top. `overflow: hidden` clips the gradient to
-  // the rounded top corners.
-  tabActive: { overflow: 'hidden' },
-  // Unselected tab: outlined, muted background (set via stylesHook).
-  tabInactive: { borderWidth: 1 },
-  tabLabel: { fontSize: 14, fontWeight: '700' },
+  tabActive: {
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.12, shadowRadius: 3 },
+      android: { elevation: 2 },
+    }),
+  },
+  tabLabel: { fontSize: 14, fontWeight: '600' },
+  tabLabelActive: { fontWeight: '700' },
+  dayHeader: {
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginHorizontal: 20,
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  txCard: { marginHorizontal: 16, overflow: 'hidden' },
+  txCardTop: { borderTopLeftRadius: 16, borderTopRightRadius: 16 },
+  txCardBottom: { borderBottomLeftRadius: 16, borderBottomRightRadius: 16 },
+  // Stable object: TransactionListItem's memo compares `style` by identity.
+  txRow: { backgroundColor: 'transparent', borderBottomWidth: 0 },
+  // Starts where the row's text does: 16 padding + 30 icon + 16 gap. A whole
+  // dp, not a hairline: Android drops sub-pixel lines at some row offsets.
+  txDivider: { position: 'absolute', bottom: 0, left: 62, right: 16, height: 1 },
   listHeaderText: { marginTop: 0, marginBottom: 16, fontWeight: 'bold', fontSize: 24 },
   refreshIndicatorBackground: {
     position: 'absolute',

@@ -1,5 +1,11 @@
 export interface DePINChatProps {
   walletID: string;
+  /**
+   * The chat stays mounted behind another wallet tab to keep its state. While
+   * hidden it must not poll: each poll marks the pool as read (clearing the
+   * tab's new-message dot unseen) and, on a hardware wallet, costs a device op.
+   */
+  paused?: boolean;
 }
 
 export interface DePINChatHandle {

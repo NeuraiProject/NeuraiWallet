@@ -256,8 +256,21 @@ export function useDePINChat(params: {
   device?: NeuraiESP32 | null;
   /** Called when the USB link dies (device rebooted/unplugged) so the owner can reconnect. */
   onDeviceLost?: () => void;
+  /** Chat is mounted but not on screen: skip automatic polling until it is shown again. */
+  paused?: boolean;
 }) {
-  const { rpc, selectedAsset, identity, recipientList, activeTab = 'group', walletID, network, device = null, onDeviceLost } = params;
+  const {
+    rpc,
+    selectedAsset,
+    identity,
+    recipientList,
+    activeTab = 'group',
+    walletID,
+    network,
+    device = null,
+    onDeviceLost,
+    paused = false,
+  } = params;
   // The visible conversation is read by definition; keep it in a ref so message
   // ingestion can consult it without re-creating the polling callbacks.
   const activeTabRef = useRef(activeTab);
@@ -933,7 +946,7 @@ export function useDePINChat(params: {
 
   // Automatic polling every 5s while connected.
   useEffect(() => {
-    if (!selectedAsset || !effectiveAddress || !isPolling || !rpc) return;
+    if (paused || !selectedAsset || !effectiveAddress || !isPolling || !rpc) return;
     // Hold off until the device has authorized the channel: talking to it while
     // it waits for the owner's approval scrambles the response pairing.
     if (deviceBacked && !deviceSessionActive) return;
@@ -989,7 +1002,18 @@ export function useDePINChat(params: {
       pollAbortRef.current = true; // stop an in-flight loop from using the port
       clearInterval(interval);
     };
-  }, [rpc, selectedAsset, effectiveAddress, isPolling, pollOnce, deviceBacked, deviceSessionActive, handleDeviceLost, confirmDeviceGone]);
+  }, [
+    paused,
+    rpc,
+    selectedAsset,
+    effectiveAddress,
+    isPolling,
+    pollOnce,
+    deviceBacked,
+    deviceSessionActive,
+    handleDeviceLost,
+    confirmDeviceGone,
+  ]);
 
   const refreshMessages = useCallback(async () => {
     try {

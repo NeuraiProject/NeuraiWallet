@@ -51,7 +51,7 @@ import { shortAddr } from './depinChat/utils';
 
 export type { DePINChatHandle } from './depinChat/types';
 
-const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref) => {
+const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID, paused = false }, ref) => {
   const { colors } = useTheme();
   const { navigate } = useExtendedNavigation();
   const insets = useSafeAreaInsets();
@@ -156,6 +156,7 @@ const DePINChat = forwardRef<DePINChatHandle, DePINChatProps>(({ walletID }, ref
     recipientList,
     activeTab,
     walletID,
+    paused,
     network,
     device: isHardware ? deviceId.device : null,
     // The device rebooted or was unplugged: drop the dead handle so the screen

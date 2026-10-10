@@ -10,6 +10,7 @@ import TransactionAssetIcon from '../components/icons/TransactionAssetIcon';
 import TransactionPrivacyIcon from '../components/icons/TransactionPrivacyIcon';
 import { usePrivacyTxKind } from '../blue_modules/neurai/privacy/txTags';
 import { formatAssetAmount } from '../blue_modules/neurai/assetUtils';
+import dayjs from 'dayjs';
 import loc, { formatBalanceWithoutSuffix, formatTransactionListDate, transactionTimeToReadable } from '../loc';
 import { XnaUnit } from '../models/xnaUnits';
 import { getBlockExplorerUrlForWallet } from '../models/blockExplorer';
@@ -112,6 +113,8 @@ interface TransactionListItemProps {
   renderHighlightedText?: (text: string, query: string) => React.ReactElement;
   onPress?: () => void;
   disableNavigation?: boolean;
+  /** The list already shows the day above the row, so the row only needs the time. */
+  timeOnly?: boolean;
 }
 
 type NavigationProps = NativeStackNavigationProp<DetailViewStackParamList>;
@@ -126,6 +129,7 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
     renderHighlightedText,
     onPress: customOnPress,
     disableNavigation = false,
+    timeOnly = false,
   }: TransactionListItemProps) => {
     const { colors } = useTheme();
     const { navigate } = useExtendedNavigation<NavigationProps>();
@@ -171,10 +175,11 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
 
     const dateLine = useMemo(() => {
       if (isPending) return transactionTimeToReadable(item.timestamp);
+      if (timeOnly) return dayjs(item.timestamp * 1000).format('LT');
       return formatTransactionListDate(item.timestamp * 1000);
       // language in deps so date format updates when locale changes (formatters use global locale)
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isPending, item.timestamp, language]);
+    }, [isPending, timeOnly, item.timestamp, language]);
 
     const formattedAmount = useMemo(() => {
       return formatBalanceWithoutSuffix(item.value && item.value, itemPriceUnit, true).toString();
@@ -195,7 +200,7 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
       }
       return {
         color,
-        fontSize: 14,
+        fontSize: 15,
         fontWeight: '600' as TextStyle['fontWeight'],
         textAlign: 'right',
         paddingRight: insets.right,
@@ -241,6 +246,13 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
       const unitSuffix = itemPriceUnit === XnaUnit.XNA || itemPriceUnit === XnaUnit.SATS ? ` ${itemPriceUnit}` : ' ';
       return `${formattedAmount}${unitSuffix}`;
     }, [isAsset, rowTitle, formattedAmount, itemPriceUnit]);
+
+    // What the row shows: the direction as a sign (outgoing amounts already
+    // carry their minus) and the unit, so a bare "5" never stands alone.
+    const displayAmount = useMemo(() => {
+      if (isAsset) return `${assetSent ? '-' : '+'}${rowTitle}`;
+      return `${Number(item.value ?? 0) > 0 ? '+' : ''}${amountWithUnit.trim()}`;
+    }, [isAsset, assetSent, rowTitle, item.value, amountWithUnit]);
 
     const onPress = useCallback(async () => {
       // If a custom onPress handler was provided, use it and return
@@ -381,7 +393,7 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
             title={listTitle}
             subtitle={<Text style={styles.dateLine}>{dateLine}</Text>}
             chevron={false}
-            rightTitle={rowTitle}
+            rightTitle={displayAmount}
             rightTitleStyle={rowTitleStyle}
             rightSubtitle={noteForCopy}
             rightSubtitleStyle={styles.rightColumn}
@@ -415,7 +427,9 @@ export const TransactionListItem: React.FC<TransactionListItemProps> = memo(
       prevProps.item.timestamp === nextProps.item.timestamp &&
       prevProps.itemPriceUnit === nextProps.itemPriceUnit &&
       prevProps.walletID === nextProps.walletID &&
-      prevProps.searchQuery === nextProps.searchQuery
+      prevProps.searchQuery === nextProps.searchQuery &&
+      prevProps.timeOnly === nextProps.timeOnly &&
+      prevProps.style === nextProps.style
     );
   },
 );
