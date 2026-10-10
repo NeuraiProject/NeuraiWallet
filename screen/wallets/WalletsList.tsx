@@ -23,13 +23,14 @@ import { DetailViewStackParamList } from '../../navigation/DetailViewStackParamL
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import { useStorage } from '../../hooks/context/useStorage';
 import TotalWalletsBalance from '../../components/TotalWalletsBalance';
+import AddWalletGuide from '../../components/AddWalletGuide';
 import { useSettings } from '../../hooks/context/useSettings';
 import useMenuElements from '../../hooks/useMenuElements';
 import SafeAreaSectionList from '../../components/SafeAreaSectionList';
 import { scanQrHelper } from '../../helpers/scan-qr';
 import { useNetworkSelection } from '../../hooks/useNetworkSelection';
 
-const WalletsListSections = { CAROUSEL: 'CAROUSEL', TRANSACTIONS: 'TRANSACTIONS' };
+const WalletsListSections = { CAROUSEL: 'CAROUSEL', TRANSACTIONS: 'TRANSACTIONS', ADD_GUIDE: 'ADD_GUIDE' };
 
 /** Electrum `ping` while the list is visible; detects mid-session drops without polling when user is elsewhere. */
 const ELECTRUM_HEALTH_POLL_WHILE_WALLETS_LIST_FOCUSED_MS = 30_000;
@@ -125,9 +126,14 @@ const WalletsList: React.FC = () => {
   const { network, visibleWallets } = useNetworkSelection();
   // The recent list follows the card in view unless the user opted into the
   // merged list. Large screens have no carousel (wallets live in the drawer),
-  // so there is no card to follow and they always get the merged list. The
-  // "add wallet" card past the end keeps the last wallet's transactions.
+  // so there is no card to follow and they always get the merged list.
   const showUnifiedTransactions = isUnifiedTransactionsEnabled || sizeClass === SizeClass.Large;
+  // The "add wallet" card past the end has no transactions of its own: under
+  // it goes the guide to the ways of adding one. Also the whole content when
+  // there is no wallet yet, merged list or not.
+  const showAddGuide =
+    sizeClass !== SizeClass.Large &&
+    (visibleWallets.length === 0 || (!showUnifiedTransactions && focusedWalletIndex >= visibleWallets.length));
   const focusedWallet: TWallet | undefined = visibleWallets[Math.min(focusedWalletIndex, visibleWallets.length - 1)];
   // Same rules as BlueApp.getTransactions (hidden-wallet flag, newest first)
   // over the visible subset — the storage-wide getter cannot filter by network.
@@ -342,20 +348,35 @@ const WalletsList: React.FC = () => {
     [width],
   );
 
-  const renderListHeaderComponent = useCallback(() => {
-    return (
-      <View style={[styles.listHeaderBack, stylesHook.listHeaderBack]}>
-        <Text
-          textBreakStrategy="simple"
-          style={[styles.listHeaderText, stylesHook.listHeaderText]}
-          numberOfLines={2}
-          adjustsFontSizeToFit={true}
-        >
-          {`${loc.transactions.list_title}${'  '}`}
-        </Text>
-      </View>
-    );
-  }, [stylesHook.listHeaderBack, stylesHook.listHeaderText]);
+  const renderListHeaderComponent = useCallback(
+    (title: string) => {
+      return (
+        <View style={[styles.listHeaderBack, stylesHook.listHeaderBack]}>
+          <Text
+            textBreakStrategy="simple"
+            style={[styles.listHeaderText, stylesHook.listHeaderText]}
+            numberOfLines={2}
+            adjustsFontSizeToFit={true}
+          >
+            {`${title}${'  '}`}
+          </Text>
+        </View>
+      );
+    },
+    [stylesHook.listHeaderBack, stylesHook.listHeaderText],
+  );
+
+  // Import and hardware open inside the add-wallet flow, with its first screen
+  // underneath, so back lands on the full list of options.
+  const openCreateWallet = useCallback(() => navigation.navigate('AddWalletRoot'), [navigation]);
+  const openImportWallet = useCallback(
+    () => navigation.navigate('AddWalletRoot', { screen: 'ImportNeurai', initial: false }),
+    [navigation],
+  );
+  const openHardwareWallet = useCallback(
+    () => navigation.navigate('AddWalletRoot', { screen: 'AddHardwareWallet', initial: false }),
+    [navigation],
+  );
 
   const handleLongPress = useCallback(() => {
     navigation.navigate('ManageWallets');
@@ -397,11 +418,13 @@ const WalletsList: React.FC = () => {
           return sizeClass === SizeClass.Large ? null : renderWalletsCarousel();
         case WalletsListSections.TRANSACTIONS:
           return renderTransactionListsRow(item.item);
+        case WalletsListSections.ADD_GUIDE:
+          return <AddWalletGuide onCreate={openCreateWallet} onImport={openImportWallet} onHardware={openHardwareWallet} />;
         default:
           return null;
       }
     },
-    [sizeClass, renderTransactionListsRow, renderWalletsCarousel],
+    [sizeClass, renderTransactionListsRow, renderWalletsCarousel, openCreateWallet, openImportWallet, openHardwareWallet],
   );
 
   const renderSectionHeader = useCallback(
@@ -412,7 +435,9 @@ const WalletsList: React.FC = () => {
 
       switch (section.section.key) {
         case WalletsListSections.TRANSACTIONS:
-          return renderListHeaderComponent();
+          return renderListHeaderComponent(loc.transactions.list_title);
+        case WalletsListSections.ADD_GUIDE:
+          return renderListHeaderComponent(loc.wallets.add_guide_title);
         case WalletsListSections.CAROUSEL: {
           // Any wallet at all, not two: with one network on screen the total is
           // also where the fiat view lives, and a single-wallet mainnet user
@@ -552,12 +577,14 @@ const WalletsList: React.FC = () => {
       return [{ key: WalletsListSections.TRANSACTIONS, data: dataSource }];
     }
 
-    // On smaller screens, show both carousel and transactions
+    // On smaller screens, show both carousel and transactions (or the guide)
     return [
       { key: WalletsListSections.CAROUSEL, data: [WalletsListSections.CAROUSEL] },
-      { key: WalletsListSections.TRANSACTIONS, data: dataSource },
+      showAddGuide
+        ? { key: WalletsListSections.ADD_GUIDE, data: [WalletsListSections.ADD_GUIDE] }
+        : { key: WalletsListSections.TRANSACTIONS, data: dataSource },
     ];
-  }, [sizeClass, dataSource]);
+  }, [sizeClass, dataSource, showAddGuide]);
 
   // Constants for layout calculations
   const TRANSACTION_ITEM_HEIGHT = 80;
@@ -620,7 +647,8 @@ const WalletsList: React.FC = () => {
         floatingButtonHeight={70}
         maxToRenderPerBatch={10}
         updateCellsBatchingPeriod={50}
-        getItemLayout={getItemLayout}
+        // Fixed row heights do not describe the guide.
+        getItemLayout={showAddGuide ? undefined : getItemLayout}
         ignoreTopInset={true} // Ignore top inset as the screen header already handles it
         {...refreshProps}
       />
