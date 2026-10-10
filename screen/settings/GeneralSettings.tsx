@@ -48,6 +48,8 @@ const GeneralSettings: React.FC = () => {
     setIsHandOffUseEnabledAsyncStorage,
     themeMode,
     setThemeModeStorage,
+    isUnifiedTransactionsEnabled,
+    setIsUnifiedTransactionsEnabledStorage,
   } = useSettings();
   const [isLoading, setIsLoading] = useState<number>(SettingsPrivacySection.All);
   const [storageIsEncrypted, setStorageIsEncrypted] = useState<boolean>(true);
@@ -154,6 +156,19 @@ const GeneralSettings: React.FC = () => {
         onPress: onThemePress,
         chevron: true,
         testID: 'ThemeModeSetting',
+        showItem: true,
+      },
+      {
+        id: 'unifiedTransactions',
+        title: loc.settings.unified_transactions,
+        subtitle: <SettingsSubtitle>{loc.settings.unified_transactions_explanation}</SettingsSubtitle>,
+        switch: {
+          value: isUnifiedTransactionsEnabled,
+          onValueChange: setIsUnifiedTransactionsEnabledStorage,
+          disabled: isLoading === SettingsPrivacySection.All,
+        },
+        testID: 'UnifiedTransactionsSwitch',
+        Component: View,
         showItem: true,
       },
       {
@@ -321,6 +336,8 @@ const GeneralSettings: React.FC = () => {
     onHandOffUseEnabledChange,
     themeLabel,
     onThemePress,
+    isUnifiedTransactionsEnabled,
+    setIsUnifiedTransactionsEnabledStorage,
   ]);
 
   const renderItem: ListRenderItem<SettingItem> = useCallback(

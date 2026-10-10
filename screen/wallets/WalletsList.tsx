@@ -92,7 +92,7 @@ function reducer(state: WalletListState, action: WalletListAction) {
     case ActionTypes.SET_WALLETS:
       return { ...state, wallets: action.payload };
     case ActionTypes.SET_CURRENT_INDEX:
-      return { ...state, currentWalletIndex: action.payload };
+      return state.currentWalletIndex === action.payload ? state : { ...state, currentWalletIndex: action.payload };
     case ActionTypes.SET_REFRESH_FUNCTION:
       return { ...state, refreshFunction: action.payload };
     default:
@@ -105,14 +105,14 @@ type RouteProps = RouteProp<DetailViewStackParamList, 'WalletsList'>;
 
 const WalletsList: React.FC = () => {
   const [state, dispatch] = useReducer(reducer, initialState);
-  const { isLoading } = state;
+  const { isLoading, currentWalletIndex: focusedWalletIndex } = state;
   const { sizeClass, isLarge } = useSizeClass();
   const walletsCarousel = useRef<any>(null);
   const connectionPoll = useContext(ConnectionPollContext);
   const currentWalletIndex = useRef<number>(0);
   const { registerTransactionsHandler, unregisterTransactionsHandler } = useMenuElements();
   const { wallets, refreshAllWalletTransactions } = useStorage();
-  const { isTotalBalanceEnabled } = useSettings();
+  const { isTotalBalanceEnabled, isUnifiedTransactionsEnabled } = useSettings();
   const { width } = useWindowDimensions();
   const { colors, scanImage } = useTheme();
   const navigation = useExtendedNavigation<NavigationProps>();
@@ -122,19 +122,26 @@ const WalletsList: React.FC = () => {
   // list below. `wallets` (all of them) is still what gets connected and
   // refreshed: hidden wallets keep syncing, or the switcher's dot would never
   // light and their balances would be stale on the way back.
-  const { visibleWallets } = useNetworkSelection();
+  const { network, visibleWallets } = useNetworkSelection();
+  // The recent list follows the card in view unless the user opted into the
+  // merged list. Large screens have no carousel (wallets live in the drawer),
+  // so there is no card to follow and they always get the merged list. The
+  // "add wallet" card past the end keeps the last wallet's transactions.
+  const showUnifiedTransactions = isUnifiedTransactionsEnabled || sizeClass === SizeClass.Large;
+  const focusedWallet: TWallet | undefined = visibleWallets[Math.min(focusedWalletIndex, visibleWallets.length - 1)];
   // Same rules as BlueApp.getTransactions (hidden-wallet flag, newest first)
   // over the visible subset — the storage-wide getter cannot filter by network.
   const dataSource = useMemo<ExtendedTransaction[]>(() => {
+    const sourceWallets = showUnifiedTransactions ? visibleWallets : focusedWallet ? [focusedWallet] : [];
     const txs: ExtendedTransaction[] = [];
-    for (const wallet of visibleWallets) {
+    for (const wallet of sourceWallets) {
       if (wallet.getHideTransactionsInWalletsList()) continue;
       const walletID = wallet.getID();
       const walletPreferredBalanceUnit = wallet.getPreferredBalanceUnit();
       for (const t of wallet.getTransactions()) txs.push({ ...t, walletID, walletPreferredBalanceUnit });
     }
     return txs.sort((a, b) => b.timestamp - a.timestamp).slice(0, RECENT_TRANSACTIONS_LIMIT);
-  }, [visibleWallets]);
+  }, [showUnifiedTransactions, visibleWallets, focusedWallet]);
   const walletsCount = useRef<number>(wallets.length);
   const walletActionButtonsRef = useRef<View>(null);
 
@@ -241,6 +248,13 @@ const WalletsList: React.FC = () => {
   }, [isFocused, connectionPoll]);
 
   useEffect(() => {
+    // Switching network swaps the carousel's cards and sends it back to the
+    // first one, so the focused card is the first wallet of the new network.
+    currentWalletIndex.current = 0;
+    dispatch({ type: ActionTypes.SET_CURRENT_INDEX, payload: 0 });
+  }, [network]);
+
+  useEffect(() => {
     // new wallet added - no longer auto-scrolls
     if (!isLarge) {
       // Just update the count, no scrolling
@@ -314,6 +328,20 @@ const WalletsList: React.FC = () => {
     [isFocused, wallets, width],
   );
 
+  // Tracks the card in view from every scroll, not only from a finished swipe:
+  // the carousel also scrolls by itself (to a freshly added wallet, back to the
+  // start on a network swap) and those moves do not reliably end in a
+  // momentum event.
+  // The reducer bails out on an unchanged index, so per-frame events only
+  // re-render when the card in view actually changes.
+  const onCarouselScroll = useCallback(
+    (e: { nativeEvent: { contentOffset: { x: number } } }) => {
+      const index = Math.max(0, Math.round(e.nativeEvent.contentOffset.x / getWalletCarouselItemWidth(width)));
+      dispatch({ type: ActionTypes.SET_CURRENT_INDEX, payload: index });
+    },
+    [width],
+  );
+
   const renderListHeaderComponent = useCallback(() => {
     return (
       <View style={[styles.listHeaderBack, stylesHook.listHeaderBack]}>
@@ -349,6 +377,8 @@ const WalletsList: React.FC = () => {
           onPress={handleClick}
           handleLongPress={handleLongPress}
           onMomentumScrollEnd={onSnapToItem}
+          onScroll={onCarouselScroll}
+          scrollEventThrottle={16}
           ref={walletsCarousel}
           onNewWalletPress={handleClick}
           testID="WalletsList"
@@ -358,7 +388,7 @@ const WalletsList: React.FC = () => {
         />
       </>
     );
-  }, [handleClick, handleLongPress, isFocused, onSnapToItem, visibleWallets]);
+  }, [handleClick, handleLongPress, isFocused, onCarouselScroll, onSnapToItem, visibleWallets]);
 
   const renderSectionItem = useCallback(
     (item: { section: any; item: ExtendedTransaction }) => {

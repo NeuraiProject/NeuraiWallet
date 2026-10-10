@@ -337,6 +337,8 @@
     "saved": "Guardado",
     "total_balance": "Balance total",
     "total_balance_explanation": "Muestra el balance total de todas tus carteras en los widgets de tu pantalla principal.",
+    "unified_transactions": "Transacciones unificadas",
+    "unified_transactions_explanation": "Muestra juntas en la pantalla principal las transacciones recientes de todas las carteras de la red seleccionada, en lugar de solo las de la tarjeta que está a la vista.",
     "widgets": "Widgets",
     "tools": "Herramientas"
   },

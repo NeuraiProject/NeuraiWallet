@@ -385,6 +385,8 @@
     "theme_system": "System default",
     "theme_light": "Light",
     "theme_dark": "Dark",
+    "unified_transactions": "Unified Transactions",
+    "unified_transactions_explanation": "Show the recent transactions of every wallet on the selected network together on the home screen, instead of only those of the wallet card in view.",
     "privacy": "Privacy",
     "privacy_read_clipboard": "Read Clipboard",
     "privacy_system_settings": "System Settings",
