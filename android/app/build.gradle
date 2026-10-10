@@ -100,8 +100,8 @@ android {
         // versionCode is the Unix timestamp of the build (NeuraiWallet legacy
         // convention: the About screen renders `new Date(versionCode * 1000)`).
         // Bump this on each release to keep the timeline correct.
-        versionCode 1791352128
-        versionName "1.1.6"
+        versionCode 1791661298
+        versionName "1.1.7"
         testBuildType System.getProperty('testBuildType', 'debug')
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         // Keep compatibility across react-native-capture-protection flavor changes.
