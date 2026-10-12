@@ -29,6 +29,16 @@ console.debug = console.log = (...args) => {
   consoleLogOrig.apply(consoleLogOrig, args);
 };
 
+// Number formatting follows the runtime's default locale (the device's, in the app).
+// Tests expect en-US whatever locale the machine running them has.
+const NativeNumberFormat = Intl.NumberFormat;
+function NumberFormat(locales, options) {
+  return new NativeNumberFormat(locales ?? 'en-US', options);
+}
+NumberFormat.prototype = NativeNumberFormat.prototype;
+NumberFormat.supportedLocalesOf = NativeNumberFormat.supportedLocalesOf;
+Intl.NumberFormat = NumberFormat;
+
 global.net = require('net'); // needed by Electrum client. For RN it is proviced in shim.js
 global.tls = require('tls'); // needed by Electrum client. For RN it is proviced in shim.js
 global.fetch = require('node-fetch');

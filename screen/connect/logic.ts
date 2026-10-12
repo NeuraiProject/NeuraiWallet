@@ -20,6 +20,7 @@
  * exercised directly from `tests/unit/neurai-connect-screens.test.ts`.
  */
 
+import { decodeAddress } from '@neuraiproject/neurai-create-transaction';
 import type { SettledNamespaces } from '@neuraiproject/neurai-connect-wallet';
 import type { AbstractNeuraiWallet } from '../../class/wallets/abstract-neurai-wallet';
 import type { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
@@ -333,6 +334,73 @@ export function describePsbtOutput(
   if (!output.asset) return `${xna} → ${destination}`;
   const asset = `${output.asset.amount ?? '1'} ${output.asset.name}`;
   return output.sats > 0n ? `${asset} + ${xna} → ${destination}` : `${asset} → ${destination}`;
+}
+
+/** What a cancelled sell order holds, as the request screen shows it. */
+export function describePsbtCancellation(cancellation: { locked: { name: string; amount: string } }): string {
+  return `${cancellation.locked.amount} ${cancellation.locked.name}`;
+}
+
+/**
+ * Whether a wallet holds `address`, without starting its address engine:
+ * the engine's addresses when it is up, otherwise the addresses the wallet
+ * watched last time (`getAllExternalAddresses`). For display (the session
+ * badge on every wallet card), where starting engines would take seconds each.
+ */
+export function walletKnowsAddress(
+  wallet: { weOwnAddress(address: string): boolean; getAllExternalAddresses(): string[] },
+  address: string,
+): boolean {
+  return wallet.weOwnAddress(address) || wallet.getAllExternalAddresses().includes(address);
+}
+
+/** What `walletForSessionAddress` needs from a wallet. */
+export interface SessionWallet {
+  prewarmEngine(): Promise<void>;
+  weOwnAddress(address: string): boolean;
+  getAllExternalAddresses(): string[];
+  getNeuraiNetwork(): string;
+  readonly walletKind: string;
+}
+
+/** Wallet kind and network an address belongs to; undefined when it does not decode. */
+function ownerOfAddress(address: string): { kind: 'legacy' | 'ecdsa' | 'pq'; network: 'mainnet' | 'testnet' } | undefined {
+  try {
+    const decoded = decodeAddress(address);
+    // Post-quantum wallets: strict v2 (software) or generic AuthScript v1 (hardware).
+    const kind = decoded.type === 'p2pkh' ? 'legacy' : decoded.type === 'ecdsa' ? 'ecdsa' : 'pq';
+    return { kind, network: String(decoded.network).endsWith('-test') ? 'testnet' : 'mainnet' };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The wallet that answers a session request: the one owning the address the
+ * session exposed. A wallet answers `weOwnAddress` from its address engine,
+ * which starts lazily (first Send or Receive) and takes seconds to start on a
+ * phone, so a request arriving right after the app opens would find no wallet.
+ * Wallets already started (and hardware wallets) answer first; then only the
+ * wallets of the address's network and family are started, one at a time,
+ * those whose last known addresses include it first, stopping at the owner.
+ */
+export async function walletForSessionAddress<W extends SessionWallet>(
+  wallets: readonly W[],
+  address: string | undefined,
+): Promise<W | undefined> {
+  if (address === undefined) return undefined;
+  const ready = wallets.find(wallet => wallet.weOwnAddress(address));
+  if (ready) return ready;
+  const owner = ownerOfAddress(address);
+  const knows = (wallet: W) => (wallet.getAllExternalAddresses().includes(address) ? 1 : 0);
+  const candidates = wallets
+    .filter(wallet => !owner || (wallet.walletKind === owner.kind && wallet.getNeuraiNetwork() === owner.network))
+    .sort((a, b) => knows(b) - knows(a));
+  for (const wallet of candidates) {
+    await wallet.prewarmEngine().catch(() => undefined);
+    if (wallet.weOwnAddress(address)) return wallet;
+  }
+  return undefined;
 }
 
 /** A message out of anything that was thrown, for a screen that must say *something*. */

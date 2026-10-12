@@ -30,7 +30,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
@@ -76,12 +76,14 @@ import {
   asConnectWallet,
   connectMethodsFor,
   describeError,
+  describePsbtCancellation,
   describePsbtOutput,
   methodHandling,
   shorten,
   signMessageText,
   summariseSendTransfer,
   unsupportedMethodError,
+  walletForSessionAddress,
 } from './logic';
 
 /** Every method a wallet of this version can answer; used while no wallet is resolved. */
@@ -105,10 +107,23 @@ const ConnectRequest: React.FC = () => {
   // The account the session exposed at settlement is the one that answers: a
   // session request must never be served by an address the dApp never saw.
   const sessionAddress = addressFromCaip10(event?.session.namespaces.bip122?.accounts?.[0]);
-  const wallet = useMemo(
-    () => wallets.filter(isNeuraiWallet).find(w => sessionAddress !== undefined && w.weOwnAddress(sessionAddress)),
-    [wallets, sessionAddress],
-  );
+  const neuraiWallets = useMemo(() => wallets.filter(isNeuraiWallet), [wallets]);
+  // Resolved once the wallets' address engines are up (see walletForSessionAddress).
+  const [wallet, setWallet] = useState<(typeof neuraiWallets)[number] | undefined>();
+  const [resolvingWallet, setResolvingWallet] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    const started = Date.now();
+    walletForSessionAddress(neuraiWallets, sessionAddress).then(found => {
+      console.debug('[neurai-connect] request wallet resolved', { found: found !== undefined, ms: Date.now() - started });
+      if (cancelled) return;
+      setWallet(found);
+      setResolvingWallet(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [neuraiWallets, sessionAddress]);
 
   // A hardware wallet signs on the device; the link is opened for the
   // signature and closed once the request is answered.
@@ -325,11 +340,23 @@ const ConnectRequest: React.FC = () => {
         <>
           <ConnectSectionTitle title={loc.connect.request_message} />
           <ConnectMonospaceBlock text={signMessageText(event.params)} testID="ConnectRequestMessage" />
-          {!blocked && !wallet && <ConnectNotice tone="danger" text={loc.connect.blocked_no_wallet} />}
+          {!blocked && !resolvingWallet && !wallet && <ConnectNotice tone="danger" text={loc.connect.blocked_no_wallet} />}
         </>
       )}
 
-      {handling === 'sign-psbt' && !wallet && <ConnectNotice tone="danger" text={loc.connect.blocked_no_wallet} />}
+      {(handling === 'sign' || handling === 'sign-psbt') && resolvingWallet && (
+        <>
+          <ConnectNotice
+            tone="info"
+            testID="ConnectRequestResolving"
+            text={String(
+              loc.formatString(loc.connect.request_resolving_wallet, { address: shorten(sessionAddress ?? CONNECT_EMPTY_FIELD) }),
+            )}
+          />
+          <ActivityIndicator />
+        </>
+      )}
+      {handling === 'sign-psbt' && !resolvingWallet && !wallet && <ConnectNotice tone="danger" text={loc.connect.blocked_no_wallet} />}
       {handling === 'sign-psbt' && psbt?.error && (
         <ConnectNotice
           tone="danger"
@@ -340,6 +367,23 @@ const ConnectRequest: React.FC = () => {
       {handling === 'sign-psbt' && psbt?.inspection && (
         <>
           <ConnectNotice tone="info" text={loc.connect.request_psbt_explanation} />
+          {psbt.inspection.cancellations.length > 0 && (
+            <>
+              <ConnectNotice tone="info" text={loc.connect.request_psbt_cancel_explanation} />
+              <ConnectSectionTitle title={loc.connect.request_psbt_cancel_title} />
+              <ConnectCard testID="ConnectRequestPsbtCancellations">
+                {psbt.inspection.cancellations.map(cancellation => (
+                  <React.Fragment key={cancellation.index}>
+                    <ConnectRow
+                      label={String(loc.formatString(loc.connect.request_psbt_cancel_locked, { index: cancellation.index }))}
+                      value={describePsbtCancellation(cancellation)}
+                    />
+                    <ConnectRow label={loc.connect.request_psbt_cancel_key} value={cancellation.address} mono />
+                  </React.Fragment>
+                ))}
+              </ConnectCard>
+            </>
+          )}
           <ConnectSectionTitle title={loc.connect.request_psbt_outputs} />
           <ConnectCard testID="ConnectRequestPsbtOutputs">
             {psbt.inspection.outputs.map(output => (

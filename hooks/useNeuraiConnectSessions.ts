@@ -7,12 +7,14 @@
  * address. Logins do not settle sessions, so a wallet that has only signed in
  * somewhere is correctly not counted: the badge means "a site can still ask
  * this wallet for things", which is what a user needs to see on the card.
+ * Ownership is read without starting the wallet's address engine (it starts
+ * lazily and takes seconds on a phone): see `walletKnowsAddress`.
  */
 
 import { useEffect, useState } from 'react';
 
 import { connectSessions, onConnectSessionsChanged } from '../blue_modules/neurai/connect/client';
-import { addressFromCaip10 } from '../screen/connect/logic';
+import { addressFromCaip10, walletKnowsAddress } from '../screen/connect/logic';
 import type { TWallet } from '../class/wallets/types';
 
 export function useNeuraiConnectSessions(wallet?: TWallet): number {
@@ -29,7 +31,7 @@ export function useNeuraiConnectSessions(wallet?: TWallet): number {
         const accounts = session.namespaces?.bip122?.accounts ?? [];
         const mine = accounts.some(account => {
           const address = addressFromCaip10(account);
-          return address !== undefined && wallet.weOwnAddress(address);
+          return address !== undefined && walletKnowsAddress(wallet, address);
         });
         if (mine) live++;
       }

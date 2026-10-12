@@ -28,6 +28,7 @@ import {
   methodHandling,
   CONNECT_XPUB_METHOD,
   connectMethodsFor,
+  describePsbtCancellation,
   describePsbtOutput,
   normalizeAddressPolicy,
   pickChain,
@@ -40,6 +41,8 @@ import {
   signMessageText,
   summariseSendTransfer,
   unsupportedMethodError,
+  walletForSessionAddress,
+  walletKnowsAddress,
 } from '../../screen/connect/logic';
 
 const keyStore = new Map<string, string>();
@@ -225,6 +228,70 @@ describe('session requests', () => {
     expect(describePsbtOutput({ address: null, scriptHex: '6a'.repeat(40), sats: 0n, asset: null }, fmt)).toMatch(
       /^0.00000000 XNA → script 6a/,
     );
+  });
+
+  // Like the Neurai wallets: `weOwnAddress` is false until the address engine has started;
+  // `getAllExternalAddresses` answers from the addresses watched last time.
+  const LEGACY = 't9Zo5RAwAucmz3tGuTFak6ZqpytiyxnLiJ';
+  const ECDSA = 'tnq1r0c9zl485wv7wcfutxfyv8k2ltpfk5hdyp3s7g4chlphx8d2m6npqwxvjya';
+  const started: string[] = [];
+  const fakeWallet = (
+    name: string,
+    owns: string[],
+    { walletKind = 'legacy', network = 'testnet', known = [] as string[], warm = false } = {},
+  ) => {
+    let up = warm;
+    return {
+      name,
+      walletKind,
+      getNeuraiNetwork: () => network,
+      getAllExternalAddresses: () => (up ? owns : known),
+      prewarmEngine: async () => {
+        started.push(name);
+        up = true;
+      },
+      weOwnAddress: (candidate: string) => up && owns.includes(candidate),
+    };
+  };
+
+  it('finds the wallet of a session address, starting only the engines that can own it', async () => {
+    started.length = 0;
+    const wallets = [
+      fakeWallet('pq', ['tpq1z…'], { walletKind: 'pq' }),
+      fakeWallet('ecdsa', [ECDSA], { walletKind: 'ecdsa' }),
+      fakeWallet('mainnet', [], { network: 'mainnet' }),
+      fakeWallet('legacyOther', ['tOther']),
+      fakeWallet('legacy', [LEGACY], { known: [LEGACY] }),
+    ];
+    expect((await walletForSessionAddress(wallets, LEGACY))?.name).toBe('legacy');
+    // The legacy testnet wallet that watched the address last time is started first, and alone.
+    expect(started).toEqual(['legacy']);
+
+    started.length = 0;
+    expect((await walletForSessionAddress(wallets, ECDSA))?.name).toBe('ecdsa');
+    expect(started).toEqual(['ecdsa']);
+    expect(await walletForSessionAddress(wallets, undefined)).toBeUndefined();
+  });
+
+  it('answers at once from a wallet already started, and survives a wallet that cannot start', async () => {
+    started.length = 0;
+    expect((await walletForSessionAddress([fakeWallet('warm', [LEGACY], { warm: true })], LEGACY))?.name).toBe('warm');
+    expect(started).toEqual([]);
+    const failing = { ...fakeWallet('failing', []), prewarmEngine: async () => Promise.reject(new Error('no mnemonic')) };
+    expect((await walletForSessionAddress([failing, fakeWallet('legacy', [LEGACY])], LEGACY))?.name).toBe('legacy');
+    expect(await walletForSessionAddress([fakeWallet('legacy', [LEGACY])], 'tNotAnAddress')).toBeUndefined();
+  });
+
+  it('knows a session address without starting the engine (session badge)', () => {
+    const cold = fakeWallet('legacy', [LEGACY], { known: [LEGACY] });
+    expect(cold.weOwnAddress(LEGACY)).toBe(false);
+    expect(walletKnowsAddress(cold, LEGACY)).toBe(true);
+    expect(walletKnowsAddress(fakeWallet('other', ['tOther'], { known: ['tOther'] }), LEGACY)).toBe(false);
+    expect(walletKnowsAddress(fakeWallet('warm', [LEGACY], { warm: true }), LEGACY)).toBe(true);
+  });
+
+  it('prints what a cancelled order holds', () => {
+    expect(describePsbtCancellation({ locked: { name: 'STAYTOKEN', amount: '7' } })).toBe('7 STAYTOKEN');
   });
 
   it('refuses the unimplemented methods with 4200 and the agreed wording', () => {
