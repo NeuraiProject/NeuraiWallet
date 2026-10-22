@@ -60,6 +60,7 @@ function service(version: 1 | 2, amount: string, confirmExact = true, network = 
   let failSubscription = false;
   let holdReads = false;
   const methods: string[] = [];
+  const rawRequests: string[] = [];
   let socket: any;
   class FakeSocket {
     readyState = 0;
@@ -77,6 +78,7 @@ function service(version: 1 | 2, amount: string, confirmExact = true, network = 
     }
 
     send(data: string) {
+      rawRequests.push(data);
       const request = JSON.parse(data);
       methods.push(request.method + ':' + (request.params.protocol ?? ''));
       let result: unknown;
@@ -100,6 +102,8 @@ function service(version: 1 | 2, amount: string, confirmExact = true, network = 
         result = 'pong';
       } else if (request.method === 'depin.msg_info') {
         result = { body: 'signed-body', poolsig: 'signature' };
+      } else if (request.method === 'depin.receive_seq') {
+        result = { encrypted: 'opaque', poolsig: 'signature', protocol: 5, request_hash: 'hash' };
       } else if (request.method === 'rpc.call') {
         result = [{ satoshis: amount, script: '51' }];
       } else if (request.method === 'tx.broadcast') {
@@ -132,6 +136,7 @@ function service(version: 1 | 2, amount: string, confirmExact = true, network = 
   global.WebSocket = FakeSocket as any;
   return {
     methods,
+    rawRequests,
     socket: () => socket,
     holdReads: (hold: boolean) => {
       holdReads = hold;
@@ -221,8 +226,8 @@ test('uses only the selected socket for builder queries and broadcast, including
     expect(await backend.rpc('sendrawtransaction', ['signed-hex'])).toBe('signed-tx');
     server.close();
     await backend.rpc('getaddressutxos', []);
-    expect(server.methods.filter(m => m === 'rpc.call:')).toHaveLength(2);
-    expect(server.methods.filter(m => m === 'hello:wss/2')).toHaveLength(2);
+    expect(server.methods.filter((m) => m === 'rpc.call:')).toHaveLength(2);
+    expect(server.methods.filter((m) => m === 'hello:wss/2')).toHaveLength(2);
     expect(global.fetch).not.toHaveBeenCalled();
   } finally {
     server.close();
@@ -262,7 +267,7 @@ it('reports stale and recovery at unchanged monetary status', async () => {
   }
 });
 
-test.each(['mainnet', 'testnet'] as const)('default and custom %s wallet/DePIN backends use only the selected WSS', async network => {
+test.each(['mainnet', 'testnet'] as const)('default and custom %s wallet/DePIN backends use only the selected WSS', async (network) => {
   const server = service(2, '10000000000000001', true, network);
   global.fetch = jest.fn(() => {
     throw new Error('HTTP forbidden');
@@ -303,9 +308,9 @@ it('retries failed subscriptions on re-entry, even when addresses and monetary s
     server.failSubscription(false);
     await backend.setSubscribedAddresses(['a']);
     expect(backend.getServiceStatus()).toBe('exact');
-    expect(server.methods.filter(m => m === 'address.subscribe.bulk:')).toHaveLength(2);
+    expect(server.methods.filter((m) => m === 'address.subscribe.bulk:')).toHaveLength(2);
     await backend.setSubscribedAddresses(['a']);
-    expect(server.methods.filter(m => m === 'address.subscribe.bulk:')).toHaveLength(2);
+    expect(server.methods.filter((m) => m === 'address.subscribe.bulk:')).toHaveLength(2);
   } finally {
     backend.disconnect();
   }
@@ -322,7 +327,7 @@ it('recovers a suspended OPEN socket on notification resume and ignores old-sess
     const oldSocket = server.socket();
     expect(oldSocket.readyState).toBe(1);
     server.holdReads(true);
-    const interrupted = backend.getBalance(['a']).catch(error => error);
+    const interrupted = backend.getBalance(['a']).catch((error) => error);
     await Promise.resolve();
     await Promise.resolve();
     server.holdReads(false);
@@ -334,8 +339,8 @@ it('recovers a suspended OPEN socket on notification resume and ignores old-sess
     oldSocket.onmessage({ data: JSON.stringify({ method: 'address.sync_status', params: { address: 'a', stale: true } }) });
     expect(backend.getServiceStatus()).toBe('exact');
     expect(await backend.getBalance(['a'])).toBe(1n);
-    expect(server.methods.filter(m => m === 'hello:wss/2')).toHaveLength(2);
-    expect(server.methods.filter(m => m === 'address.subscribe.bulk:')).toHaveLength(2);
+    expect(server.methods.filter((m) => m === 'hello:wss/2')).toHaveLength(2);
+    expect(server.methods.filter((m) => m === 'address.subscribe.bulk:')).toHaveLength(2);
   } finally {
     backend.disconnect();
   }
@@ -352,5 +357,21 @@ it('can resume while an asynchronous connection handshake is still pending', asy
     expect(backend.getServiceStatus()).toBe('exact');
   } finally {
     backend.disconnect();
+  }
+});
+
+test('DePIN sequence transport keeps the signed request and every cursor digit intact', async () => {
+  const server = service(2, '1'),
+    backend = new WssBackend({ chain: 'xna-test', url: 'ws://local/push' });
+  try {
+    const request = { protocol: 5, signature: 'signature', args: { cursor: { after_seq: 9007199254740993n } } };
+    const result = await backend.rpc('depinreceiveseq', [request]);
+    expect(result).toEqual({ encrypted: 'opaque', poolsig: 'signature', protocol: 5, request_hash: 'hash' });
+    const raw = server.rawRequests.find((r) => r.includes('depin.receive_seq'))!;
+    expect(raw).toContain('9007199254740993');
+    expect(raw).not.toContain('9007199254740992');
+  } finally {
+    backend.disconnect();
+    server.close();
   }
 });

@@ -1,41 +1,13 @@
-/**
- * Trusted access to the DePIN pool.
- *
- * Under protocol 2 the node answers `depingetmsginfo` and `depinpoolstats` as
- * `{ body, poolsig }`: the content plus a signature made with the pool key. The
- * catch is that the key used to verify that signature travels INSIDE the same
- * body, so verifying it against itself proves only that the answer is
- * self-consistent — not who produced it. A substituted key comes with a
- * matching signature and passes.
- *
- * The app therefore has to decide, ahead of the answer, which key is
- * legitimate. That is what the pin below is for.
- *
- * ## What this does today, and what it does not
- *
- * TOFU: the key seen on first contact with an endpoint is stored, and any later
- * change is refused rather than silently adopted. That stops an attacker who
- * appears afterwards; it does not stop one who is already there on the first
- * connection, which is why the fingerprint is exposed for the UI to show.
- *
- * The planned replacement is verifying the recipient set against several
- * independent nodes — the holder list is on-chain data, so it can be checked
- * rather than trusted. See the plan's §4.1.1: until that lands, a malicious
- * endpoint can add itself to the recipients and read new messages.
- *
- * ## What is persisted
- *
- * Only `{ serviceId, poolRoot, poolPublicKey }`, keyed by network + normalised
- * URL. Never credentials: they rotate without the endpoint changing and must
- * not reach storage.
+/** RPC 5 pool bootstrap and persistent endpoint/genesis/key/root pinning.
+ * TOFU records an observed first contact; later key changes require explicit
+ * user action. A verified directory still needs independent ownership checks.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
-  decodePlainReply,
+  callDepinRpc,
   getDepinPoolInfo,
   poolKeyFingerprint,
-  verifyDepinReply,
   type DepinPoolInfoResult,
   type DepinPoolPin,
   type DepinTrust,
@@ -137,12 +109,17 @@ export interface VerifiedPool extends DepinPoolInfoResult {
  * @returns The verified pool info plus whether this was a first contact
  * @throws {DepinPoolPinMismatchError} If the endpoint answers with another key
  */
-export async function getVerifiedPool(params: { call: RawRpcCall; network: string; url: string }): Promise<VerifiedPool> {
+export async function getVerifiedPool(params: {
+  call: RawRpcCall;
+  network: string;
+  url: string;
+  persistPin?: boolean;
+}): Promise<VerifiedPool> {
   const serviceId = depinServiceId(params.network, params.url);
   const stored = await loadPin(serviceId);
   const rpc = createDepinRpc(params.call);
 
-  const trust: DepinTrust = stored ? { mode: 'pinned', pin: stored } : { mode: 'tofu', serviceId };
+  const trust: DepinTrust = stored ? { mode: 'pinned', pin: stored } : { mode: 'tofu' };
 
   let result: DepinPoolInfoResult;
   try {
@@ -161,7 +138,7 @@ export async function getVerifiedPool(params: { call: RawRpcCall; network: strin
     throw new DepinPoolPinMismatchError(serviceId, poolFingerprint(stored.poolPublicKey), poolFingerprint(seenKey));
   }
 
-  if (!stored && result.pin) await savePin(result.pin);
+  if (!stored && result.pin && params.persistPin !== false) await savePin(result.pin);
 
   return {
     ...result,
@@ -180,32 +157,29 @@ export interface DepinPoolStats {
   [key: string]: unknown;
 }
 
-/**
- * Reads `depinpoolstats` through its signed envelope.
- *
- * Protocol 2 wrapped this reply too — it now arrives as `{ body, poolsig }`,
- * and the app used to read `total_messages` straight off that object, getting
- * `undefined` every time. The poll's "has the pool moved?" shortcut and the
- * unread marker both hang off that number, so both were silently dead against
- * an updated node.
- *
- * The library has no dedicated flow for this call, so the envelope is verified
- * here with the same primitives its own flows use. The signature binds the pool
- * ROOT token (established against the live testnet node, which does not verify
- * unbound), and only a value branded by the verifier can be decoded.
- *
- * @param params.call - RPC function bound to the node
- * @param params.pool - The verified pool, for the pinned key and root token
- * @returns The decoded stats body
- * @throws If the envelope does not verify against the pinned pool key
- */
+/** Authenticate live stats and adopt their signed membership context. */
 export async function getVerifiedPoolStats(params: { call: RawRpcCall; pool: VerifiedPool }): Promise<DepinPoolStats> {
-  const reply = await params.call('depinpoolstats', []);
-  const verified = verifyDepinReply({
-    reply,
-    method: 'depinpoolstats',
-    token: params.pool.pin?.poolRoot ?? params.pool.info?.token ?? '',
-    poolPublicKey: params.pool.info.depinpoolpkey,
-  });
-  return (decodePlainReply(verified) ?? {}) as DepinPoolStats;
+  const result = await callDepinRpc({ rpc: createDepinRpc(params.call), context: params.pool.context, method: 'depinpoolstats' });
+  params.pool.context = result.context;
+  return {
+    ...result.body,
+    stream_id: params.pool.info.stream_id,
+    admission_sequence: params.pool.info.admission_sequence,
+    membership_revision: result.context.membership_revision,
+    instance_id: result.context.instance_id,
+  };
+}
+
+/** Bootstrap already contains the admission high water; no second request is needed for activity. */
+export function summarizeVerifiedPool(pool: VerifiedPool): DepinPoolStats {
+  return {
+    enabled: pool.info.enabled,
+    token: pool.info.token,
+    total_messages: typeof pool.info.messages === 'number' ? pool.info.messages : undefined,
+    newest_message: typeof pool.info.newestmessage === 'string' ? pool.info.newestmessage : '',
+    stream_id: pool.info.stream_id,
+    admission_sequence: pool.info.admission_sequence,
+    membership_revision: pool.context.membership_revision,
+    instance_id: pool.context.instance_id,
+  };
 }

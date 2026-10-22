@@ -2,11 +2,11 @@
  * DePIN chat client hook — React Native port of the Neurai web wallet's
  * `useDePINChat`.
  *
- * Talks to a DePIN-enabled Neurai node over JSON-RPC (`depinreceivemsg` /
+ * Talks to a DePIN-enabled Neurai node over JSON-RPC (`depinreceiveseq` /
  * `depinsubmitmsg` / `depinpoolstats` / `checkdepinvalidity` / `depingetmsginfo`)
  * and does all encryption/decryption client-side via `blue_modules/neurai/
  * depinMsg` (ECIES + AES-256-GCM). Messages are polled every 5s (incremental by
- * timestamp) and de-duplicated.
+ * admission sequence) and de-duplicated.
  *
  * Differences from the web wallet:
  *   - The transport is injected as `rpc(method, params)` (built from
@@ -17,13 +17,12 @@
  *     localStorage (hydrated into an in-memory map for synchronous lookups).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Buffer } from 'buffer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native';
 
-import { decryptDepinReceiveEncryptedPayload, normalizeDepinToken } from '../blue_modules/neurai/depinMsg';
+import { normalizeDepinToken, type DepinSequenceCursor } from '../blue_modules/neurai/depinMsg';
 import type { NeuraiNetwork } from '../blue_modules/neurai';
-import { getVerifiedPool, getVerifiedPoolStats } from '../blue_modules/neurai/depinPool';
+import { getVerifiedPool, getVerifiedPoolStats, summarizeVerifiedPool } from '../blue_modules/neurai/depinPool';
 import { auditRecipients } from '../blue_modules/neurai/depinRecipientAudit';
 import { sendDepinGroupMessage, sendDepinPrivateMessage, softwareIdentity } from '../blue_modules/neurai/depinSend';
 import {
@@ -34,45 +33,16 @@ import {
   type DepinPlainMessage,
 } from '../blue_modules/neurai/depinReceive';
 import { getDepinRpcConfig } from '../blue_modules/neurai/depinRpcOverrides';
+import type { DepinRpc } from './useDepinChatSetup';
 import type { RawRpcCall } from '../blue_modules/neurai/depinRpcAdapter';
 import type { DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
-import { clearDepinSession, loadDepinSession, saveDepinSession } from '../blue_modules/neurai/depinSessionStore';
-import { withDevice } from '../blue_modules/neurai-hw/deviceQueue';
 import { isMeaningfulSignature, markPoolSeen, poolSignature } from '../blue_modules/neurai/depinPoolSeen';
-
-/** Decode a device `plaintext_b64` response to a UTF-8 string. */
-const b64ToUtf8 = (b64: string): string => Buffer.from(b64, 'base64').toString('utf8');
 
 const DEPIN_POLL_INTERVAL_MS = 5_000;
 const PRIVATE_MSG_PREFIX = 'depin_private_msg_';
 
-/**
- * Hardware wallets have no local key, so the privacy-wrapped server envelope is
- * forwarded to the device to decrypt — and a full pool dump can exceed what the
- * device accepts (a ~19.6 KB envelope rebooted an ESP32 on older firmware).
- * `depinreceivemsg` supports pagination, so a device-backed identity walks the
- * `after_hash` cursor with a bounded page size, as the firmware's own contract
- * requires ("larger server histories must be paginated by the host").
- * Local-key identities decrypt host-side and still fetch in one shot.
- */
-const DEVICE_PAGE_LIMIT = 1;
-/** Safety stop so a bogus `has_more` can't spin the cursor forever. */
-const MAX_PAGES_PER_POLL = 25;
-/** Upper bound for an adaptive page, so one request can't balloon unboundedly. */
-const MAX_DEVICE_PAGE_LIMIT = 50;
-/**
- * The device reports its ECIES capacity as *decoded binary* bytes
- * (`depin_max_decrypt_bytes` in the ping response). How much of that we can
- * actually use depends on the wire encoding the library negotiates: with the
- * `depin_bulk_decrypt_b64` capability it sends base64 (~4/3 expansion) and the
- * full capacity is reachable; without it, payloads go as hex (2x) and the
- * firmware's incoming-line cap binds first. Library ≥0.5.11 picks the encoding
- * itself and raises RangeError past the limit, so this budget only has to keep
- * pages comfortably below it.
- */
-const DEVICE_LEGACY_HEX_CAP_BYTES = 24 * 1024 - 256;
-const DEVICE_BULK_B64_CAPABILITY = 'depin_bulk_decrypt_b64';
-const DEVICE_BUDGET_SAFETY = 0.7;
+/** Bound each poll; its admission cursor continues on the next tick. */
+const MAX_PAGES_PER_POLL = 2;
 /** Consecutive poll failures before polling stops, so a failing device isn't hammered every 5s. */
 const MAX_CONSECUTIVE_FAILURES = 4;
 
@@ -87,66 +57,12 @@ interface CachedChannel {
   privateConversations: Map<string, PrivateConversation>;
   lastTimestamp: number;
   seenKeys: string[];
+  cursor: DepinSequenceCursor | null;
 }
 const channelCache = new Map<string, CachedChannel>();
 
-/**
- * The device's DePIN session outlives this hook: `depin_session_begin` always
- * asks the owner for a physical approval (it is not idempotent) and the
- * firmware offers no way to query whether a session is open, so we remember it
- * here — module scope, so leaving and re-entering the DePIN section reuses the
- * authorization the owner already gave instead of prompting again. The firmware
- * expires it on inactivity; if it turns out to be gone, a device command fails
- * with `session_required` and we re-authorize once, on demand.
- */
-interface ActiveDeviceSession {
-  token: string;
-  ttlMs: number;
-  lastUseMs: number;
-}
-const deviceSession: { current: ActiveDeviceSession | null } = { current: null };
-
-const deviceSessionIsLive = (token: string): boolean => {
-  const s = deviceSession.current;
-  return !!s && s.token === token && Date.now() - s.lastUseMs < s.ttlMs;
-};
-
-/** Slide the session deadline after a successful device operation. */
-const touchDeviceSession = (): void => {
-  if (deviceSession.current) deviceSession.current.lastUseMs = Date.now();
-};
-
-/**
- * Only one poll may drive the serial port at a time — and the guard has to be
- * shared across hook instances, not per component: navigating in and out
- * remounts the chat while the previous poll is still running, and two loops
- * writing to the one physical port interleave their chunks, which the device
- * can only report as `Invalid JSON`.
- */
+/** Nonces are single-use across automatic and manual reads. */
 const pollLock = { current: false };
-
-const isSessionRequiredError = (e: unknown): boolean => /session_required/i.test(String((e as any)?.message ?? e));
-
-/**
- * Possible transport-level failure: the USB write itself did not go through,
- * which is what a rebooted or unplugged device looks like. Deliberately narrow
- * — a response timeout is NOT included, because that is the signature of the
- * library's transient response-pairing desync on a perfectly live device, and
- * treating it as a disconnect tore down a working session. Always confirm with
- * a ping before acting on it.
- */
-const isDeviceGoneError = (e: unknown): boolean =>
-  /send failed|serial port not connected|ENODEV|EPIPE/i.test(String((e as any)?.message ?? e));
-
-/** A `depinreceivemsg` page: a bare array (no limit) or `{ messages, has_more }` (paginated). */
-const normalizePage = (parsed: unknown): { pageItems: DepinReceiveMsgItem[]; hasMore: boolean } => {
-  if (Array.isArray(parsed)) return { pageItems: parsed as DepinReceiveMsgItem[], hasMore: false };
-  if (parsed && typeof parsed === 'object') {
-    const p = parsed as { messages?: unknown; has_more?: unknown };
-    if (Array.isArray(p.messages)) return { pageItems: p.messages as DepinReceiveMsgItem[], hasMore: p.has_more === true };
-  }
-  return { pageItems: [], hasMore: false };
-};
 
 /** The RPC client rejects with the raw JSON error object (no `.message`), so dig the real message out. */
 const describeRpcError = (err: any): string | null => {
@@ -155,27 +71,6 @@ const describeRpcError = (err: any): string | null => {
   if (typeof nested === 'string' && nested.length > 0) return nested;
   return null;
 };
-
-const stripAmp = (name: string): string => name.replace(/^&/, '');
-
-/**
- * DePIN asset names start with '&' on-chain, and that full name is what we
- * send to the server by default. Some operators configure their node's token
- * without the prefix though (e.g. the internal test node serves
- * 'TESTDEPIN112025' for asset '&TESTDEPIN112025'), in which case the server
- * rejects with "Token '&X' does not match configured token 'X'". When that
- * happens — and it's clearly the SAME token, just spelled differently — we
- * adopt the server's spelling for subsequent calls instead of erroring out.
- */
-const alternateTokenSpelling = (asset: string, err: unknown): string | null => {
-  const msg = describeRpcError(err);
-  const m = msg?.match(/configured token '([^']+)'/i);
-  if (!m) return null;
-  const configured = m[1];
-  return stripAmp(configured).toUpperCase() === stripAmp(asset).toUpperCase() ? configured : null;
-};
-
-export type DepinRpc = <T = unknown>(method: string, params: unknown[]) => Promise<T>;
 
 export interface DePINMessage {
   recipient: string;
@@ -222,20 +117,6 @@ export interface RecipientInfo {
   pubkey: string | null;
 }
 
-interface DepinReceiveMsgItem {
-  hash: string;
-  sender: string;
-  timestamp: number;
-  message_type?: 'private' | 'group';
-  encrypted_payload_hex: string;
-  signature_hex: string;
-}
-
-const isEncryptedResult = (value: unknown): value is { encrypted: string } => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  return typeof (value as { encrypted?: unknown }).encrypted === 'string';
-};
-
 const shortAddr = (a: string) => (a.length > 8 ? `${a.substring(0, 4)}…${a.substring(a.length - 4)}` : a);
 
 export function useDePINChat(params: {
@@ -243,6 +124,7 @@ export function useDePINChat(params: {
   selectedAsset: string | null;
   identity: DepinChatIdentity | null;
   recipientList: RecipientInfo[];
+  onMembershipChanged?: () => void;
   /** Conversation currently on screen ('group' or a contact address) — its arrivals are already read. */
   activeTab?: string;
   /** Wallet showing the chat, for the per-wallet "already seen" marker. */
@@ -264,25 +146,24 @@ export function useDePINChat(params: {
     selectedAsset,
     identity,
     recipientList,
+    onMembershipChanged,
     activeTab = 'group',
     walletID,
     network,
     device = null,
-    onDeviceLost,
     paused = false,
   } = params;
   // The visible conversation is read by definition; keep it in a ref so message
   // ingestion can consult it without re-creating the polling callbacks.
+  const onMembershipChangedRef = useRef(onMembershipChanged);
+  onMembershipChangedRef.current = onMembershipChanged;
   const activeTabRef = useRef(activeTab);
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
 
-  // Device-backed identity (hardware wallet): sign/decrypt are routed to the
-  // device instead of a local WIF. The device must have an active DePIN session
-  // (opened per channel below) for depin_sign / depin_decrypt_payload.
+  // Hardware RPC 5 support is deferred. Software identities keep local keys.
   const deviceBacked = !!identity?.deviceBacked;
-  // Can we perform local crypto (has a WIF) OR device crypto (session-backed)?
   const canCrypt = !!identity?.wif || (deviceBacked && !!device);
 
   const [groupMessages, setGroupMessages] = useState<DePINMessage[]>([]);
@@ -305,7 +186,7 @@ export function useDePINChat(params: {
       setGroupUnread(0);
       return;
     }
-    setPrivateConversations(prev => {
+    setPrivateConversations((prev) => {
       const conversation = prev.get(activeTab);
       if (!conversation || conversation.unreadCount === 0) return prev;
       const updated = new Map(prev);
@@ -330,59 +211,17 @@ export function useDePINChat(params: {
   }, [privateConversations]);
 
   const lastTimestampRef = useRef<number>(0);
+  const cursorRef = useRef<DepinSequenceCursor | null>(null);
+  const channelEpochRef = useRef(0);
+  const membershipRef = useRef<string | null>(null);
   const consecutiveFailuresRef = useRef<number>(0);
-  // Token spelling the server actually accepts (learned via alternateTokenSpelling).
-  const serverTokenRef = useRef<string | null>(null);
   const seenMessageKeysRef = useRef<Set<string>>(new Set());
-  // Largest envelope seen per message (decoded bytes), used to size the next
-  // page. Worst case rather than a mean, so one big message can't overflow it.
-  const worstBytesPerMessageRef = useRef<number>(0);
-  // A poll now spans many device round-trips and can outlast the 5s tick. Two
-  // overlapping polls interleave writes on the one serial line, which corrupts
-  // framing (the device answers "Invalid JSON") and mismatches responses, so
-  // only one poll may be in flight at a time.
-  // Set when this instance stops polling (unmount, channel change): an in-flight
-  // loop checks it between device round-trips and stops instead of finishing a
-  // long backlog nobody is waiting for.
+  // Stop an obsolete channel's in-flight page before publishing it.
   const pollAbortRef = useRef(false);
-  // Fingerprint of the server pool (`total_messages|newest_message`) at the last
-  // fetch, so an unchanged pool skips the device round-trip entirely.
-  const lastPoolSignatureRef = useRef<string | null>(null);
-  // Challenge carried between authenticated reads. Every reply hands out the
-  // next nonce, so the chain avoids a `depinchallenge` round trip per page —
-  // but a nonce is single-use, which is why polls are serialized above.
+  // The next nonce is single-use, so manual and automatic reads share a lock.
   const challengeRef = useRef<ChallengeState | null>(null);
-  const recipientPubKeyCacheRef = useRef<Map<string, string | null>>(new Map());
   // In-memory mirror of persisted private-message recipient mapping (hash -> address).
   const privateMsgRecipientsRef = useRef<Map<string, string>>(new Map());
-
-  // Ask the device how much ECIES it can take (`depin_max_decrypt_bytes`, ping).
-  // Firmware that predates capability reporting omits it — then we stay on the
-  // conservative one-message page instead of guessing.
-  const [deviceLimits, setDeviceLimits] = useState<{ maxBytes: number; base64: boolean } | null>(null);
-  useEffect(() => {
-    if (!deviceBacked || !device) {
-      setDeviceLimits(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        // The library's typings lag the firmware, which does report these.
-        const info = (await withDevice(() => device.ping())) as { depin_max_decrypt_bytes?: unknown; capabilities?: unknown };
-        const maxBytes = Number(info?.depin_max_decrypt_bytes);
-        if (!cancelled && Number.isFinite(maxBytes) && maxBytes > 0) {
-          const base64 = Array.isArray(info?.capabilities) && info.capabilities.includes(DEVICE_BULK_B64_CAPABILITY);
-          setDeviceLimits({ maxBytes, base64 });
-        }
-      } catch (e) {
-        console.debug('useDePINChat: could not read device decrypt limits', e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [deviceBacked, device]);
 
   // Hydrate the private-message recipient map from AsyncStorage once.
   useEffect(() => {
@@ -390,7 +229,7 @@ export function useDePINChat(params: {
     (async () => {
       try {
         const keys = await AsyncStorage.getAllKeys();
-        const mine = keys.filter(k => k.startsWith(PRIVATE_MSG_PREFIX));
+        const mine = keys.filter((k) => k.startsWith(PRIVATE_MSG_PREFIX));
         if (mine.length === 0 || cancelled) return;
         const pairs = await AsyncStorage.multiGet(mine);
         for (const [k, v] of pairs) {
@@ -411,29 +250,6 @@ export function useDePINChat(params: {
     AsyncStorage.setItem(PRIVATE_MSG_PREFIX + hash, address).catch(() => {});
   }, []);
 
-  const preloadRecipientPubkeys = useCallback(
-    async (assetName: string) => {
-      if (!assetName || !rpc) return;
-      try {
-        const data = (await rpc('listdepinaddresses', [serverTokenRef.current ?? assetName])) as Array<{
-          address: string;
-          pubkey?: string;
-        }>;
-        for (const item of data ?? []) {
-          const pk = (item.pubkey ?? '').trim().toLowerCase();
-          if (pk.length === 66 && (pk.startsWith('02') || pk.startsWith('03'))) {
-            recipientPubKeyCacheRef.current.set(item.address, pk);
-          } else {
-            recipientPubKeyCacheRef.current.set(item.address, null);
-          }
-        }
-      } catch (e) {
-        console.debug('useDePINChat: preloadRecipientPubkeys failed', e);
-      }
-    },
-    [rpc],
-  );
-
   const getContactAddress = useCallback(
     (messageHash: string, sender: string, myAddr: string, messageType?: 'private' | 'group'): string | undefined => {
       if (messageType !== 'private') return undefined;
@@ -445,37 +261,33 @@ export function useDePINChat(params: {
     [],
   );
 
-  // Switching channel: stash what we already decrypted and restore the channel
-  // we are entering. Every message costs a device round-trip to decrypt, so
-  // re-reading them on each visit made entering the chat slow for no reason.
+  // Keep the admission cursor with its decrypted history when changing channels.
   useEffect(() => {
-    const key = effectiveAddress && selectedAsset ? `${effectiveAddress}|${selectedAsset}` : null;
+    const key =
+      effectiveAddress && selectedAsset ? `${network}|${getDepinRpcConfig(network).url}|${effectiveAddress}|${selectedAsset}` : null;
     const cached = key ? channelCache.get(key) : undefined;
 
+    channelEpochRef.current++;
+    membershipRef.current = null;
     consecutiveFailuresRef.current = 0;
-    serverTokenRef.current = null;
-    // Message sizes differ per channel, so recalibrate the page budget.
-    worstBytesPerMessageRef.current = 0;
-    lastPoolSignatureRef.current = null;
     // A challenge is bound to token + address, so it cannot cross a channel.
     challengeRef.current = null;
     setError(null);
     setLastPoll(null);
-    recipientPubKeyCacheRef.current.clear();
 
     if (cached) {
       lastTimestampRef.current = cached.lastTimestamp;
+      cursorRef.current = cached.cursor ?? null;
       seenMessageKeysRef.current = new Set(cached.seenKeys);
       setGroupMessages(cached.groupMessages);
       setPrivateConversations(new Map(cached.privateConversations));
     } else {
       lastTimestampRef.current = 0;
+      cursorRef.current = null;
       seenMessageKeysRef.current = new Set();
       setGroupMessages([]);
       setPrivateConversations(new Map());
     }
-
-    if (selectedAsset) preloadRecipientPubkeys(selectedAsset);
 
     return () => {
       if (!key) return;
@@ -484,129 +296,20 @@ export function useDePINChat(params: {
         privateConversations: privateConversationsRef.current,
         lastTimestamp: lastTimestampRef.current,
         seenKeys: Array.from(seenMessageKeysRef.current),
+        cursor: cursorRef.current,
       });
     };
-  }, [selectedAsset, effectiveAddress, preloadRecipientPubkeys]);
+  }, [selectedAsset, effectiveAddress, network, rpc]);
 
-  // Device-backed session lifecycle: opening a channel authorizes the device to
-  // auto-sign/decrypt on THIS token (one physical approval), scoped to the
-  // canonical `&NAME`. The device signs/decrypts only while this is active; the
-  // session is revoked on channel close, unmount, disconnect, or timeout.
-  const deviceSessionTokenRef = useRef<string | null>(null);
-  // State mirror of the ref: polling must not send a single device command
-  // before the session is open. `depin_session_begin` blocks on a physical
-  // approval, and any command issued meanwhile is answered out of order by the
-  // library's FIFO response matching — which desynced the queue and left a
-  // command waiting out its full 35s timeout.
-  const [deviceSessionActive, setDeviceSessionActive] = useState(false);
-  // Bumped when the device reports `session_required`, to re-run the effect
-  // below and ask for a fresh authorization exactly once.
-  const [sessionEpoch, setSessionEpoch] = useState(0);
-  const renewDeviceSession = useCallback(() => {
-    deviceSession.current = null;
-    deviceSessionTokenRef.current = null;
-    setDeviceSessionActive(false);
-    if (effectiveAddress) clearDepinSession(effectiveAddress);
-    setSessionEpoch(e => e + 1);
-  }, [effectiveAddress]);
-
-  // Never tear a working session down on a hunch: ask the device directly.
-  // If it still answers, the failure was transient and we keep going.
-  const confirmDeviceGone = useCallback(async (): Promise<boolean> => {
-    if (!device) return true;
-    try {
-      await withDevice(() => device.ping());
-      return false;
-    } catch {
-      return true;
-    }
-  }, [device]);
-
-  // The device vanished mid-use: forget the session (its RAM went with it),
-  // stop polling a dead link, and let the owner reconnect.
-  const handleDeviceLost = useCallback(() => {
-    deviceSession.current = null;
-    deviceSessionTokenRef.current = null;
-    setDeviceSessionActive(false);
-    if (effectiveAddress) clearDepinSession(effectiveAddress);
-    setIsPolling(false);
-    onDeviceLost?.();
-  }, [effectiveAddress, onDeviceLost]);
+  // ESP32 protocol migration is a separate phase. Do not open an obsolete signing session.
   useEffect(() => {
-    if (!deviceBacked || !device) {
-      deviceSessionTokenRef.current = null;
-      return;
+    if (deviceBacked && selectedAsset) {
+      setIsPolling(false);
+      setError('This device needs firmware and library support for DePIN RPC 5. Hardware messaging will be updated separately.');
     }
-    // Stepping back to the token picker keeps the session: it belongs to the
-    // channel, not to the screen, and re-opening it would ask the owner for
-    // another physical approval on every navigation.
-    if (!selectedAsset) return;
-    const token = selectedAsset; // canonical '&NAME' — matches the signed message
-    // Reuse the approval the owner already gave: the device keeps DePIN mode
-    // active until it times out, so re-entering must not prompt again.
-    if (deviceSessionIsLive(token)) {
-      deviceSessionTokenRef.current = token;
-      setDeviceSessionActive(true);
-      return;
-    }
-    let cancelled = false;
-    const markActive = (ttlSeconds: unknown) => {
-      deviceSession.current = {
-        token,
-        ttlMs: Number.isFinite(Number(ttlSeconds)) && Number(ttlSeconds) > 0 ? Number(ttlSeconds) * 1000 : 60_000,
-        lastUseMs: Date.now(),
-      };
-      if (!cancelled) {
-        deviceSessionTokenRef.current = token;
-        setDeviceSessionActive(true);
-      }
-    };
+  }, [deviceBacked, selectedAsset]);
 
-    (async () => {
-      try {
-        // The app process may have restarted while the device stayed in DePIN
-        // mode. Restore the capability key we stored and let the device tell us
-        // whether it is still valid — that is what avoids a pointless approval.
-        const stored = effectiveAddress ? await loadDepinSession(effectiveAddress) : null;
-        if (!cancelled && stored && stored.token === token) {
-          device.setDepinSessionKey(stored.key);
-          let restored = false;
-          try {
-            const status = await withDevice(() => device.depinSessionStatus());
-            if (status?.active && status.token === token) {
-              markActive(status.expires_in_s);
-              restored = true;
-            }
-          } catch (e) {
-            console.debug('useDePINChat: session status check failed', e);
-          }
-          if (restored) return;
-          // Expired or rejected: forget it and ask the owner once.
-          device.setDepinSessionKey(null);
-          if (effectiveAddress) await clearDepinSession(effectiveAddress);
-        }
-        if (cancelled) return;
-
-        const res = (await withDevice(() => device.depinSessionBegin(token))) as { expires_in_s?: unknown };
-        markActive(res?.expires_in_s);
-        // Persist the key the library cached, so the next app start can reuse it.
-        const key = device.getDepinSessionKey();
-        if (key && effectiveAddress) await saveDepinSession(effectiveAddress, { key, token });
-      } catch (e) {
-        if (!cancelled) {
-          deviceSession.current = null;
-          deviceSessionTokenRef.current = null;
-          setDeviceSessionActive(false);
-          setError(describeRpcError(e) ?? 'Could not open the device DePIN session');
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [deviceBacked, device, selectedAsset, sessionEpoch, effectiveAddress]);
-
-  const ingestItems = useCallback((items: DepinReceiveMsgItem[], myAddr: string, decrypted: DePINMessage[]) => {
+  const ingestItems = useCallback((myAddr: string, decrypted: DePINMessage[]) => {
     const newGroup: DePINMessage[] = [];
     const privateUpdates = new Map<string, DePINMessage[]>();
     for (const msg of decrypted) {
@@ -618,25 +321,25 @@ export function useDePINChat(params: {
       }
     }
     if (newGroup.length > 0) {
-      setGroupMessages(prev => [...prev, ...newGroup].sort((a, b) => a.timestamp - b.timestamp));
+      setGroupMessages((prev) => [...prev, ...newGroup].sort((a, b) => a.timestamp - b.timestamp));
       // Only count what the user is not looking at, and never your own echo.
-      const unseen = activeTabRef.current === 'group' ? 0 : newGroup.filter(m => m.sender !== myAddr).length;
-      if (unseen > 0) setGroupUnread(prev => prev + unseen);
+      const unseen = activeTabRef.current === 'group' ? 0 : newGroup.filter((m) => m.sender !== myAddr).length;
+      if (unseen > 0) setGroupUnread((prev) => prev + unseen);
     }
     if (privateUpdates.size > 0) {
-      setPrivateConversations(prev => {
+      setPrivateConversations((prev) => {
         const updated = new Map(prev);
         for (const [contact, msgs] of privateUpdates.entries()) {
           const existing = updated.get(contact);
           const all = existing ? [...existing.messages, ...msgs].sort((a, b) => a.timestamp - b.timestamp) : msgs;
           // Messages landing in the open conversation are read on arrival, and
           // your own outgoing ones never count.
-          const unseen = activeTabRef.current === contact ? 0 : msgs.filter(m => m.sender !== myAddr).length;
+          const unseen = activeTabRef.current === contact ? 0 : msgs.filter((m) => m.sender !== myAddr).length;
           updated.set(contact, {
             address: contact,
             displayName: contact === myAddr ? 'Me' : shortAddr(contact),
             unreadCount: (existing?.unreadCount || 0) + unseen,
-            lastMessageTime: Math.max(...all.map(m => m.timestamp)),
+            lastMessageTime: Math.max(...all.map((m) => m.timestamp)),
             messages: all,
           });
         }
@@ -647,105 +350,26 @@ export function useDePINChat(params: {
 
   const pollOnce = useCallback(async () => {
     if (!selectedAsset || !effectiveAddress || !canCrypt || !rpc) return;
+    if (deviceBacked) throw new Error('Hardware messaging requires DePIN RPC 5 firmware support');
+    const channelEpoch = channelEpochRef.current;
 
-    // On a hardware wallet every fetch costs a device decryption — and the
-    // server re-sends the newest message on each incremental poll, so an idle
-    // channel still burned one op every 5s (visible as the DePIN counter
-    // climbing on the ESP32). `depinpoolstats` needs no identity — only the
-    // pinned pool key to verify its envelope — so we can ask whether the pool
-    // actually moved without involving the device at all, and fetch only then.
-    // Every protocol-2 reply is checked against the PINNED pool key, so the pool
-    // must be resolved before anything else is read. A rotated key stops the
-    // poll here rather than being adopted silently.
-    const pool = await getVerifiedPool({
+    // Bootstrap fixes the current pool instance/revision before private reads.
+    // Keep reading by admission cursor even when count/timestamp stats are unchanged.
+    let pool = await getVerifiedPool({
       call: rpc as unknown as RawRpcCall,
       network,
       url: getDepinRpcConfig(network).url,
     });
 
-    try {
-      const poolStats = await getVerifiedPoolStats({ call: rpc as unknown as RawRpcCall, pool });
-      const signature = poolSignature(poolStats);
-      // Opening the chat is what marks the channel as read, so record the state
-      // we are about to display — this is what clears the wallet's new-message
-      // dot without any decryption.
-      if (isMeaningfulSignature(signature)) markPoolSeen(walletID, signature);
-      if (isMeaningfulSignature(signature) && signature === lastPoolSignatureRef.current) {
-        setLastPoll(new Date());
-        return;
-      }
-      lastPoolSignatureRef.current = signature;
-    } catch (e) {
-      // Stats unavailable: fall through and fetch as usual.
-      console.debug('useDePINChat: pool stats check failed, fetching anyway', e);
-    }
-    // ECIES decryption: local WIF, or routed to the device (bare-payload verb).
-    // Both `depinreceivemsg`'s per-item payload and the privacy-wrapped server
-    // envelope are the same ECIES format, so one path handles both.
-    const decryptEcies = async (encHex: string, what: string): Promise<{ text: string | null; notForUs: boolean }> => {
-      if (!encHex) return { text: null, notForUs: false };
-      if (deviceBacked) {
-        if (!device) return { text: null, notForUs: false };
-        try {
-          const { plaintext_b64 } = await withDevice(() => device.depinDecryptPayload(encHex));
-          touchDeviceSession();
-          return { text: plaintext_b64 ? b64ToUtf8(plaintext_b64) : null, notForUs: false };
-        } catch (e) {
-          // The firmware expired the session (inactivity): drop our record so a
-          // single fresh approval is requested instead of failing forever.
-          if (isSessionRequiredError(e)) renewDeviceSession();
-          else if (isDeviceGoneError(e) && (await confirmDeviceGone())) handleDeviceLost();
-          // `not_for_us` is the device saying this identity isn't among the
-          // recipients — routine for other members' traffic, not a failure. It
-          // must not abort the poll (doing so stalled the whole channel and
-          // tripped the failure backoff).
-          if (/not_for_us/i.test(String((e as any)?.message ?? e))) {
-            console.debug(`useDePINChat: ${what} not addressed to this identity, skipping`);
-            return { text: null, notForUs: true };
-          }
-          throw e;
-        }
-      }
-      return { text: await decryptDepinReceiveEncryptedPayload(encHex, String(identity!.wif)), notForUs: false };
-    };
-
-    // `after_hash` / `limit` are positional args 4 and 5, so the timestamp must
-    // be sent too (0 = no filter, same as omitting it).
-    const callReceive = (token: string, afterHash: string, limit: number) => {
-      const rpcParams: (string | number)[] = [token, effectiveAddress, lastTimestampRef.current > 0 ? lastTimestampRef.current : 0];
-      if (limit > 0) rpcParams.push(afterHash, limit);
-      return rpc('depinreceivemsg', rpcParams);
-    };
-
-    // Envelope capacity for one command, in decoded binary bytes: base64
-    // firmware reaches its full advertised buffer, hex-only firmware is capped
-    // by the serial line instead.
-    const budgetBytes = deviceLimits
-      ? Math.floor(
-          (deviceLimits.base64 ? deviceLimits.maxBytes : Math.min(deviceLimits.maxBytes, DEVICE_LEGACY_HEX_CAP_BYTES)) *
-            DEVICE_BUDGET_SAFETY,
-        )
-      : 0;
-    // Local keys fetch everything at once (limit 0). A device pulls one message
-    // until it has measured one, then fits as many as the budget allows.
-    const nextPageLimit = (): number => {
-      if (!deviceBacked) return 0;
-      const perMessage = worstBytesPerMessageRef.current;
-      if (!budgetBytes || perMessage <= 0) return DEVICE_PAGE_LIMIT;
-      return Math.max(1, Math.min(MAX_DEVICE_PAGE_LIMIT, Math.floor(budgetBytes / perMessage)));
-    };
-
-    // Decrypt one page's messages and publish them right away, so a backlog
-    // fills the screen as it arrives instead of after the whole poll — every
-    // message is a device round-trip, so the wait is otherwise very visible.
-    // One readable message, mapped to what the chat renders. Shared by both
-    // fetch paths so they cannot drift on private-message routing.
+    if (channelEpoch !== channelEpochRef.current) return;
+    const signature = poolSignature(summarizeVerifiedPool(pool));
+    // Publish verified pages incrementally while the admission cursor advances.
     const toChatMessage = (meta: Omit<DepinPlainMessage, 'plaintext'>, plaintext: string): DePINMessage => {
       const ts = typeof meta.timestamp === 'number' ? meta.timestamp : Math.floor(Date.now() / 1000);
       // Some clients send private messages as plain "@recipient text" without
       // tagging message_type — route those to the private conversation (and
       // strip the prefix) instead of showing them raw in the group chat.
-      const privMatch = plaintext.match(/^@(N[a-zA-Z0-9]{33,34}|t[a-zA-Z0-9]{33,34})\s+([\s\S]*)$/);
+      const privMatch = plaintext.match(/^@(N[a-zA-Z0-9]{33,34}|t[a-zA-Z0-9]{33,34}|(?:nq|tnq)1r[a-z0-9]{58})\s+([\s\S]*)$/);
       const messageType = privMatch ? 'private' : meta.messageType;
       let contactAddress = getContactAddress(meta.hash, meta.sender, effectiveAddress, messageType);
       if (privMatch && meta.sender === effectiveAddress) contactAddress = privMatch[1];
@@ -762,7 +386,7 @@ export function useDePINChat(params: {
       };
     };
 
-    // Publishes a page that arrived already verified and decrypted (protocol 2).
+    // Publishes a page that arrived already verified and decrypted (RPC 5).
     const ingestVerified = (resolved: DepinPlainMessage[]) => {
       const seen = seenMessageKeysRef.current;
       let maxTimestamp = lastTimestampRef.current;
@@ -774,187 +398,66 @@ export function useDePINChat(params: {
         fresh.push(toChatMessage(msg, msg.plaintext));
       }
       lastTimestampRef.current = maxTimestamp;
-      if (fresh.length > 0) ingestItems([], effectiveAddress, fresh);
+      if (fresh.length > 0) ingestItems(effectiveAddress, fresh);
     };
 
-    const ingestPage = async (pageItems: DepinReceiveMsgItem[]) => {
-      const decrypted: DePINMessage[] = [];
-      const seen = seenMessageKeysRef.current;
-      let maxTimestamp = lastTimestampRef.current;
-
-      for (const item of pageItems) {
-        if (pollAbortRef.current) break;
-        if (typeof item?.timestamp === 'number') maxTimestamp = Math.max(maxTimestamp, item.timestamp);
-        const key = `${String(item?.hash ?? '')}|${String(item?.signature_hex ?? '')}`;
-        if (!item?.hash || seen.has(key)) continue;
-
-        let plaintext: string | null = null;
-        let notForUs = false;
-        try {
-          const res = await decryptEcies(String(item.encrypted_payload_hex ?? ''), `message ${String(item.hash ?? '').slice(0, 8)}`);
-          plaintext = res.text;
-          notForUs = res.notForUs;
-        } catch {
-          plaintext = null;
-        }
-        // A message addressed to someone else never becomes readable, so retire
-        // it instead of re-decrypting it on the device every 5s. `seen` is
-        // cleared when the channel or identity changes, so this is not permanent.
-        if (notForUs) {
-          seen.add(key);
-          continue;
-        }
-        if (typeof plaintext !== 'string' || plaintext.length === 0) continue;
-
-        seen.add(key);
-        decrypted.push(
-          toChatMessage(
-            {
-              hash: String(item.hash ?? ''),
-              sender: String(item.sender ?? ''),
-              timestamp: typeof item.timestamp === 'number' ? item.timestamp : Math.floor(Date.now() / 1000),
-              messageType: item.message_type === 'private' ? 'private' : 'group',
-            },
-            plaintext,
-          ),
-        );
-      }
-
-      lastTimestampRef.current = maxTimestamp;
-      if (decrypted.length > 0) ingestItems(pageItems, effectiveAddress, decrypted);
-    };
-
-    // Protocol 2, software identity: the node refuses an unauthenticated read,
-    // so each page carries a signed single-use challenge, the reply's `poolsig`
-    // is checked against the pinned key, and only then does the library open the
-    // payloads through `identity.openReply`. Nothing reaches the decryptor
-    // unless the envelope authenticated first.
-    //
-    // A device-backed identity still walks the old path below: signing the
-    // challenge on the ESP32 is the hardware phase, deliberately left for last.
-    if (!deviceBacked && identity?.wif) {
-      const receiveIdentity = await softwareIdentity(String(identity.wif), network);
-      let cursor = '';
-
-      for (let page = 0; page < MAX_PAGES_PER_POLL; page++) {
-        const fetchPage = (token: string) =>
-          receiveDepinPage({
-            call: rpc as unknown as RawRpcCall,
-            identity: receiveIdentity,
-            token,
-            poolPublicKey: pool.info.depinpoolpkey,
-            network,
-            previous: challengeRef.current,
-            ...(cursor ? { afterHash: cursor } : {}),
-          });
-
-        let result;
-        try {
-          result = await fetchPage(serverTokenRef.current ?? selectedAsset);
-        } catch (err) {
-          // Never carry a nonce through a failure. The node may already have
-          // spent it, and a rejected reuse fails the same way every time — the
-          // channel would stall for good instead of recovering on the next poll.
-          challengeRef.current = null;
-          const alt = alternateTokenSpelling(selectedAsset, err);
-          if (!alt) throw err;
-          console.debug(`useDePINChat: adopting server token spelling '${alt}' for asset '${selectedAsset}'`);
-          serverTokenRef.current = alt;
-          result = await fetchPage(alt);
-        }
-
-        challengeRef.current = result.next;
-        const readable = readableMessages(result.messages);
-        ingestVerified(readable);
-
-        if (pollAbortRef.current) break;
-        if (!result.hasMore || result.messages.length === 0) break;
-        const last = result.messages[result.messages.length - 1];
-        const next = typeof last?.hash === 'string' ? last.hash : '';
-        if (!next || next === cursor) break;
-        cursor = next;
-      }
-
-      setLastPoll(new Date());
-      return;
+    const membership = [pool.context.instance_id, pool.context.membership_revision].join('|');
+    if (membershipRef.current !== membership) {
+      challengeRef.current = null;
+      onMembershipChangedRef.current?.();
+      membershipRef.current = membership;
     }
-
-    let afterHash = '';
-    let pageLimit = nextPageLimit();
-
+    if (channelEpoch !== channelEpochRef.current) return;
+    if (!identity?.wif) throw new Error('No local DePIN signing identity');
+    const receiveIdentity = await softwareIdentity(String(identity.wif), network, identity.address);
+    let caughtUp = false;
     for (let page = 0; page < MAX_PAGES_PER_POLL; page++) {
-      let result: unknown;
+      const previousCursor = cursorRef.current;
       try {
-        result = await callReceive(serverTokenRef.current ?? selectedAsset, afterHash, pageLimit);
-      } catch (err) {
-        const alt = alternateTokenSpelling(selectedAsset, err);
-        if (!alt) throw err;
-        console.debug(`useDePINChat: adopting server token spelling '${alt}' for asset '${selectedAsset}'`);
-        serverTokenRef.current = alt;
-        result = await callReceive(alt, afterHash, pageLimit);
+        const result = await receiveDepinPage({
+          call: rpc as unknown as RawRpcCall,
+          identity: receiveIdentity,
+          token: normalizeDepinToken(selectedAsset),
+          pool,
+          network,
+          previous: challengeRef.current,
+          cursor: previousCursor,
+          limit: 100,
+          refreshPool: () => getVerifiedPool({ call: rpc as unknown as RawRpcCall, network, url: getDepinRpcConfig(network).url }),
+        });
+        if (channelEpoch !== channelEpochRef.current) return;
+        pool = result.pool;
+        challengeRef.current = result.next;
+        ingestVerified(readableMessages(result.messages));
+        cursorRef.current = result.cursor;
+        if (result.membershipChanged) {
+          onMembershipChangedRef.current?.();
+          membershipRef.current = [pool.context.instance_id, pool.context.membership_revision].join('|');
+        }
+        caughtUp = !result.hasMore;
+        if (pollAbortRef.current || caughtUp) break;
+        if (previousCursor && result.cursor.stream_id === previousCursor.stream_id && result.cursor.after_seq === previousCursor.after_seq)
+          throw new Error('DePIN cursor made no progress');
+      } catch (error) {
+        if (channelEpoch !== channelEpochRef.current) return;
+        challengeRef.current = null;
+        throw error;
       }
-
-      let parsed: unknown = result;
-      let envelopeHexLen = 0;
-      if (isEncryptedResult(result)) {
-        envelopeHexLen = result.encrypted.length;
-        // Let a decryption failure propagate: with a hardware wallet it means the
-        // device rejected or died on the envelope, and the caller's failure
-        // counter must see it (swallowing it here looked like an empty pool and
-        // retried forever).
-        const envelope = await decryptEcies(result.encrypted, 'server envelope');
-        parsed = envelope.text ? JSON.parse(envelope.text) : null;
-      }
-
-      const { pageItems, hasMore } = normalizePage(parsed);
-
-      // Calibrate from what this page actually cost, so the next one carries as
-      // many messages as the device's budget allows.
-      if (envelopeHexLen > 0 && pageItems.length > 0) {
-        // The envelope travels as hex here, so two chars per decoded byte.
-        worstBytesPerMessageRef.current = Math.max(worstBytesPerMessageRef.current, envelopeHexLen / 2 / pageItems.length);
-      }
-
-      await ingestPage(pageItems);
-
-      if (pollAbortRef.current) break;
-      if (pageLimit === 0 || !hasMore || pageItems.length === 0) break;
-      const cursor = String(pageItems[pageItems.length - 1]?.hash ?? '');
-      if (!cursor || cursor === afterHash) break;
-      afterHash = cursor;
-      pageLimit = nextPageLimit();
     }
 
+    if (caughtUp && isMeaningfulSignature(signature)) markPoolSeen(walletID, signature);
     setLastPoll(new Date());
-  }, [
-    rpc,
-    network,
-    selectedAsset,
-    effectiveAddress,
-    identity,
-    getContactAddress,
-    ingestItems,
-    deviceBacked,
-    device,
-    canCrypt,
-    deviceLimits,
-    renewDeviceSession,
-    handleDeviceLost,
-    confirmDeviceGone,
-    walletID,
-  ]);
+  }, [rpc, network, selectedAsset, effectiveAddress, identity, getContactAddress, ingestItems, deviceBacked, device, canCrypt, walletID]);
 
   // Automatic polling every 5s while connected.
   useEffect(() => {
     if (paused || !selectedAsset || !effectiveAddress || !isPolling || !rpc) return;
-    // Hold off until the device has authorized the channel: talking to it while
-    // it waits for the owner's approval scrambles the response pairing.
-    if (deviceBacked && !deviceSessionActive) return;
+    if (deviceBacked) return;
     let active = true;
     pollAbortRef.current = false;
 
     const run = async () => {
-      if (pollLock.current) return; // another cycle (possibly a stale instance) owns the port
+      if (pollLock.current) return; // another read owns the single-use nonce
       pollLock.current = true;
       try {
         await pollOnce();
@@ -964,28 +467,17 @@ export function useDePINChat(params: {
         }
       } catch (err: any) {
         console.warn('useDePINChat: poll failed:', describeRpcError(err) ?? err);
-        // A dead USB link never recovers by retrying: surface it so the chat
-        // offers to reconnect instead of counting failures against a ghost.
-        if (deviceBacked && isDeviceGoneError(err) && (await confirmDeviceGone())) {
-          if (active) {
-            setError(describeRpcError(err) ?? 'The device is no longer connected');
-            handleDeviceLost();
-          }
-          return;
-        }
         // The first poll right after selecting a token often races a cold RPC
         // connection; polling keeps retrying every 5s, so only surface an error
         // after it fails repeatedly (the UI shows a "checking…" state meanwhile).
         consecutiveFailuresRef.current += 1;
-        // Some protocol-2 rejections describe a state polling cannot escape —
+        // Some RPC-5 rejections describe a state polling cannot escape —
         // say what it is instead of repeating the node's wording.
         const explained = explainDepinReceiveRejection(describeRpcError(err) ?? err);
         if (active && (explained || consecutiveFailuresRef.current >= 2)) {
           setError(explained ?? describeRpcError(err) ?? 'Failed to fetch messages');
         }
-        // Give up after repeated failures instead of retrying forever: when the
-        // failure is a hardware wallet that can't answer, each retry hits the
-        // device again. Re-entering the channel restarts polling.
+        // Re-entering the channel or a manual refresh permits another attempt.
         if (active && consecutiveFailuresRef.current >= MAX_CONSECUTIVE_FAILURES) {
           console.warn('useDePINChat: polling stopped after repeated failures');
           setIsPolling(false);
@@ -999,42 +491,38 @@ export function useDePINChat(params: {
     const interval = setInterval(run, DEPIN_POLL_INTERVAL_MS);
     return () => {
       active = false;
-      pollAbortRef.current = true; // stop an in-flight loop from using the port
+      pollAbortRef.current = true; // stop an in-flight page from publishing
       clearInterval(interval);
     };
-  }, [
-    paused,
-    rpc,
-    selectedAsset,
-    effectiveAddress,
-    isPolling,
-    pollOnce,
-    deviceBacked,
-    deviceSessionActive,
-    handleDeviceLost,
-    confirmDeviceGone,
-  ]);
+  }, [paused, rpc, selectedAsset, effectiveAddress, isPolling, pollOnce, deviceBacked]);
 
   const refreshMessages = useCallback(async () => {
+    if (pollLock.current) return;
+    pollLock.current = true;
+    const epoch = channelEpochRef.current;
     try {
       await pollOnce();
-      setError(null);
+      if (epoch === channelEpochRef.current) setError(null);
     } catch (err: any) {
       console.debug('useDePINChat: manual refresh failed', err?.message ?? err);
+      if (epoch === channelEpochRef.current) setError(describeRpcError(err) ?? 'Failed to fetch messages');
+    } finally {
+      pollLock.current = false;
     }
   }, [pollOnce]);
 
   const fetchStats = useCallback(async (): Promise<PoolStats | null> => {
     if (!rpc) return null;
     try {
-      const result = (await rpc('depinpoolstats', [])) as PoolStats;
+      const pool = await getVerifiedPool({ call: rpc as unknown as RawRpcCall, network, url: getDepinRpcConfig(network).url });
+      const result = (await getVerifiedPoolStats({ call: rpc as unknown as RawRpcCall, pool })) as unknown as PoolStats;
       setStats(result);
       return result;
     } catch (e) {
       console.debug('useDePINChat: depinpoolstats failed', e);
       return null;
     }
-  }, [rpc]);
+  }, [rpc, network]);
 
   const sendMessage = useCallback(
     async (message: string) => {
@@ -1043,7 +531,7 @@ export function useDePINChat(params: {
       }
       if (!rpc) throw new Error('No DePIN RPC backend');
 
-      const privateMatch = message.match(/^@(N[a-zA-Z0-9]{33,34}|t[a-zA-Z0-9]{33,34})\s+([\s\S]*)$/);
+      const privateMatch = message.match(/^@(N[a-zA-Z0-9]{33,34}|t[a-zA-Z0-9]{33,34}|(?:nq|tnq)1r[a-z0-9]{58})\s+([\s\S]*)$/);
       const isPrivate = !!privateMatch;
       const targetAddress = isPrivate ? privateMatch![1] : null;
       const cleaned = isPrivate ? privateMatch![2] : message;
@@ -1051,36 +539,23 @@ export function useDePINChat(params: {
       const senderPubKey = String(identity.publicKey).trim().toLowerCase();
       const timestamp = Math.floor(Date.now() / 1000);
 
-      // Protocol 2: the pool key comes from a VERIFIED and PINNED answer, and
-      // wrapping is mandatory — the node refuses a bare hex payload with
-      // "depinsubmitmsg expects {sender, encrypted}".
+      if (deviceBacked) throw new Error('Hardware messaging requires DePIN RPC 5 firmware support');
+
+      // Verify the current pool identity before building a signed RPC 5 request.
       const pool = await getVerifiedPool({
         call: rpc as unknown as RawRpcCall,
         network,
         url: getDepinRpcConfig(network).url,
       });
 
-      if (deviceBacked) {
-        // The device path used to build and sign a message that was then thrown
-        // away, with a group message submitted in its place. Rather than leave
-        // that, it fails until the hardware phase wires signing into this flow.
-        throw new Error('Sending from a hardware wallet is not supported on the new DePIN protocol yet.');
-      }
+      const chatIdentity = await softwareIdentity(String(identity.wif), network, identity.address);
 
-      const chatIdentity = await softwareIdentity(String(identity.wif), network);
-
-      // The messaging server decides who a group message is encrypted to, and it
-      // is the party that can lie. The library already refuses a public key that
-      // does not hash to its address, so the one move left is adding an address
-      // the server controls — which "who holds the token" settles, because that
-      // is on-chain data. Ask a DIFFERENT node: the app's own default RPC.
-      //
-      // Warn, do not block: an auditor that is down, or an endpoint that is not
-      // actually independent, is not evidence of an attack, and refusing to send
-      // on that basis would break the chat for the wrong reason.
-      const auditedAddresses = isPrivate && targetAddress ? [targetAddress] : recipientList.map(r => r.address);
+      // C1 remains separate: the current audit hook has no independent source
+      // and reports independent:false. Pool signatures and address/key binding
+      // do not prove asset ownership; this hook never claims otherwise.
+      const auditedAddresses = isPrivate && targetAddress ? [targetAddress] : recipientList.map((r) => r.address);
       auditRecipients({ addresses: auditedAddresses, token: normalizeDepinToken(selectedAsset), network })
-        .then(audit => {
+        .then((audit) => {
           if (audit.independent && !audit.ok && audit.unconfirmed.length > 0) {
             setRecipientWarning(
               `${audit.unconfirmed.length} recipient address(es) are not confirmed as active holders of ` +
@@ -1091,7 +566,7 @@ export function useDePINChat(params: {
             setRecipientWarning(null);
           }
         })
-        .catch(e => console.debug('useDePINChat: recipient audit failed', e));
+        .catch((e) => console.debug('useDePINChat: recipient audit failed', e));
 
       // A private message goes to one holder and to us, and to nobody else. A
       // group message is resolved and encrypted to every holder by the library.
@@ -1127,16 +602,8 @@ export function useDePINChat(params: {
         rememberPrivateRecipient(result, targetAddress);
       }
 
-      // Sending changes the pool too. Record the new state right away, otherwise
-      // leaving the chat before the next poll leaves the wallet flagging the
-      // user's own message as unread.
-      try {
-        const poolAfterSend = await getVerifiedPoolStats({ call: rpc as unknown as RawRpcCall, pool });
-        const signature = poolSignature(poolAfterSend);
-        if (isMeaningfulSignature(signature)) markPoolSeen(walletID, signature);
-      } catch {
-        // Non-fatal: the next poll will catch up.
-      }
+      // Only a completed receive scan marks the pool as read. A send receipt
+      // cannot prove that concurrent messages from others have been read.
       return result;
     },
     [rpc, network, selectedAsset, effectiveAddress, identity, recipientList, rememberPrivateRecipient, deviceBacked, canCrypt, walletID],
@@ -1154,7 +621,7 @@ export function useDePINChat(params: {
 
   const createPrivateConversation = useCallback(
     (address: string) => {
-      setPrivateConversations(prev => {
+      setPrivateConversations((prev) => {
         if (prev.has(address)) return prev;
         const updated = new Map(prev);
         updated.set(address, {

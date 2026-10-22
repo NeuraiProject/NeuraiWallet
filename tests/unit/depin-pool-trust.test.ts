@@ -37,9 +37,9 @@ const KEY_B = '02' + 'b'.repeat(64);
 const URL = 'https://rpc-testnet-depin.neurai.org/rpc';
 
 const replyWith = (poolPublicKey: string) => ({
-  info: { enabled: true, token: '&DEPINTESTING', protocol: 2, depinpoolpkey: poolPublicKey },
+  info: { enabled: true, token: '&DEPINTESTING', protocol: 5, depinpoolpkey: poolPublicKey },
   pin: { serviceId: `xna-test|${URL}`, poolRoot: '&DEPINTESTING', poolPublicKey },
-  trust: { mode: 'tofu', serviceId: `xna-test|${URL}` },
+  trust: 'tofu',
   fingerprint: poolPublicKey,
 });
 
@@ -58,7 +58,14 @@ describe('getVerifiedPool', () => {
 
     expect(first.firstContact).toBe(true);
     expect(first.fingerprint).toBe(poolFingerprint(KEY_A));
-    expect(getDepinPoolInfo.mock.calls[0][0].trust).toEqual({ mode: 'tofu', serviceId: `xna-test|${URL}` });
+    expect(getDepinPoolInfo.mock.calls[0][0].trust).toEqual({ mode: 'tofu' });
+  });
+
+  it('a background observation leaves first-contact pinning to the interactive client', async () => {
+    getDepinPoolInfo.mockResolvedValue(replyWith(KEY_A));
+    await getVerifiedPool({ call, network: 'xna-test', url: URL, persistPin: false });
+    expect(storage.size).toBe(0);
+    expect((await getVerifiedPool({ call, network: 'xna-test', url: URL })).firstContact).toBe(true);
   });
 
   it('uses the stored pin on later contacts, not TOFU again', async () => {

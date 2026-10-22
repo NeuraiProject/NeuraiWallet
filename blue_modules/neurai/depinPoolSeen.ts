@@ -2,11 +2,9 @@
  * Tracks how much of a DePIN channel the user has already seen, so the wallet
  * can show a "new activity" marker without decrypting anything.
  *
- * `depinpoolstats` is the one DePIN call that is never privacy-wrapped: it
- * reports the pool's message count and newest timestamp in the clear. That is
- * enough to tell that the channel moved — no identity, no device, no signature,
- * so a background check costs one small HTTP request and never wakes the
- * hardware wallet.
+ * A verified RPC 5 bootstrap exposes the stream and admission high water in
+ * its signed public body. The background check requires no user key or device.
+ * The marker advances after the chat finishes scanning its receive pages.
  *
  * What it cannot tell is whether the new traffic is addressed to *you*: only
  * decryption answers that, and that is exactly the work we are avoiding here.
@@ -27,12 +25,25 @@ const listeners = new Set<Listener>();
 /** In-memory mirror so reads are synchronous after the first hydration. */
 const seen = new Map<string, string>();
 
-/** Fingerprint of a pool state: `total_messages|newest_message`. */
-export const poolSignature = (stats: { total_messages?: unknown; newest_message?: unknown } | null | undefined): string =>
-  `${String(stats?.total_messages ?? '')}|${String(stats?.newest_message ?? '')}`;
+/** Stream/high-water/revision marker; retain the old form for stored legacy state. */
+export const poolSignature = (
+  stats:
+    | {
+        total_messages?: unknown;
+        newest_message?: unknown;
+        admission_sequence?: unknown;
+        stream_id?: unknown;
+        membership_revision?: unknown;
+      }
+    | null
+    | undefined,
+): string =>
+  stats?.admission_sequence !== undefined
+    ? `v5|${String(stats.stream_id)}|${String(stats.admission_sequence)}|${String(stats.membership_revision)}`
+    : `${String(stats?.total_messages ?? '')}|${String(stats?.newest_message ?? '')}`;
 
 /** An empty pool answer carries no information — do not treat it as a state. */
-export const isMeaningfulSignature = (signature: string): boolean => signature !== '|';
+export const isMeaningfulSignature = (signature: string): boolean => signature !== '|' && !signature.startsWith('||');
 
 export async function loadSeenSignature(walletID: string): Promise<string | null> {
   if (seen.has(walletID)) return seen.get(walletID) ?? null;
@@ -54,7 +65,7 @@ export function markPoolSeen(walletID: string, signature: string): void {
   if (!walletID || !isMeaningfulSignature(signature) || seen.get(walletID) === signature) return;
   seen.set(walletID, signature);
   AsyncStorage.setItem(KEY_PREFIX + walletID, signature).catch(() => {});
-  listeners.forEach(listener => listener());
+  listeners.forEach((listener) => listener());
 }
 
 export function subscribePoolSeen(listener: Listener): () => void {

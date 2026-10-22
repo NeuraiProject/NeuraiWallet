@@ -1,3 +1,4 @@
+import {stringifyRpcJson,assertNoDuplicateJsonKeys} from '@neuraiproject/neurai-rpc';
 import { parseRpcJson } from '@neuraiproject/neurai-rpc';
 import { parseRawSats, parseMoneySats, satsToXna } from './amounts';
 /**
@@ -24,6 +25,7 @@ const DEPIN_METHODS: Record<string, string> = {
   depinmcpstatus: 'depin.mcp_status',
   depinchallenge: 'depin.challenge',
   depinreceivemsg: 'depin.receive_msg',
+  depinreceiveseq: 'depin.receive_seq',
   depinsubmitmsg: 'depin.submit_msg',
   depinlistsections: 'depin.sections',
   depinclearmsg: 'depin.clear_msg',
@@ -130,9 +132,11 @@ function getWebSocketCtor(): WebSocketCtor {
 }
 
 function responseError(error: WssError): Error {
-  const err = new Error(error.message || 'WSS request failed') as Error & { code?: number; details?: WssError };
+  const err = new Error(error.message || 'WSS request failed') as Error & { code?: number; nodeCode?: number; data?: unknown; details?: WssError };
   err.code = error.code;
   err.details = error;
+  if(typeof error.node_code === "number") err.nodeCode=error.node_code;
+  if(error.data !== undefined) err.data=error.data;
   return err;
 }
 
@@ -651,7 +655,7 @@ export class WssBackend implements NeuraiBackend {
     const openWs = ws as WebSocketLike;
 
     const id = this.nextId++;
-    const payload = JSON.stringify({ id, method, params });
+    const payload = stringifyRpcJson({ id, method, params });
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -666,6 +670,7 @@ export class WssBackend implements NeuraiBackend {
     const text = typeof data === 'string' ? data : String(data ?? '');
     let msg: WssResponse<unknown>;
     try {
+      assertNoDuplicateJsonKeys(text);
       msg = parseRpcJson(text) as WssResponse<unknown>;
     } catch {
       return;

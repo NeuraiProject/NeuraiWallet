@@ -1,5 +1,5 @@
 /**
- * Sending a DePIN message under protocol 2.
+ * Sending a DePIN message under RPC 5.
  *
  * Replaces the hand-rolled assembly the app used to do — fetch each recipient's
  * key with `getpubkey`, build, wrap, submit — with the library calls that carry
@@ -20,14 +20,15 @@
  * by `depinRecipientAudit`.
  */
 import {
-  buildDepinMessage,
   buildDepinMessageForPool,
   createSoftwareIdentity,
-  decodeDepinRecipients,
-  decodePlainReply,
+  decodeDepinRecipientDirectory,
+  callDepinRpc,
+  depinNetwork,
   normalizeDepinToken,
   submitDepinMessage,
-  verifyDepinReply,
+  isVerifiedDepinRpcError,
+  type DepinPoolBuildResult,
   type DepinIdentity,
 } from './depinMsg';
 import { createDepinRpc, type RawRpcCall } from './depinRpcAdapter';
@@ -52,8 +53,39 @@ export interface DepinSendResult {
  * @param privateKey - WIF or 64-hex private key of the DePIN identity address
  * @param network - Chain, needed to derive the address the same way the node does
  */
-export function softwareIdentity(privateKey: string, network: string): Promise<DepinIdentity> {
-  return createSoftwareIdentity({ privateKey, network });
+export function softwareIdentity(privateKey: string, network: string, address?: string): Promise<DepinIdentity> {
+  return createSoftwareIdentity({ privateKey, network, address });
+}
+
+/** Rebuild at most once after an authenticated rejection before admission.
+ * A timeout, malformed reply, signature failure or unknown outcome is never retried.
+ */
+async function submitWithFreshRecipients(
+  params: {
+    call: RawRpcCall;
+    pool: VerifiedPool;
+    identity: DepinIdentity;
+  },
+  build: () => Promise<DepinPoolBuildResult>,
+): Promise<DepinSendResult> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const built = await build();
+      const receipt = await submitDepinMessage({
+        rpc: createDepinRpc(params.call),
+        identity: params.identity,
+        messageHex: built.hex,
+        context: built.context,
+      });
+      params.pool.context = receipt.context;
+      return { messageHash: receipt.hash, recipientCount: built.recipientCount ?? 0, truncated: false };
+    } catch (error) {
+      if (attempt || !isVerifiedDepinRpcError(error) || !(error.depinError === 'membership_stale' || error.code === -26)) throw error;
+      params.pool.context = error.context;
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  throw new Error('DePIN recipients changed repeatedly');
 }
 
 /**
@@ -74,43 +106,35 @@ export async function sendDepinGroupMessage(params: {
 }): Promise<DepinSendResult> {
   const rpc = createDepinRpc(params.call);
   const token = normalizeDepinToken(params.token);
-  const poolPublicKey = params.pool.info.depinpoolpkey;
 
-  const built = await buildDepinMessageForPool({
-    rpc,
-    token,
-    poolRoot: normalizeDepinToken(params.pool.info.token),
-    maxRecipients: params.pool.info.maxrecipients,
-    poolPublicKey,
-    network: params.network,
-    identity: params.identity,
-    message: params.message,
-    timestamp: params.timestamp,
-    messageType: 'group',
+  return submitWithFreshRecipients(params, async () => {
+    const built = await buildDepinMessageForPool({
+      rpc,
+      token,
+      poolRoot: normalizeDepinToken(params.pool.info.token),
+      maxRecipients: params.pool.info.maxrecipients,
+      context: params.pool.context,
+      network: depinNetwork(params.network),
+      maxMessageBytes: params.pool.info.maxmessagesize,
+      identity: params.identity,
+      message: params.message,
+      timestamp: params.timestamp,
+      messageType: 'group',
+    });
+
+    const skipped = built.resolution?.skipped;
+    // `null` is not permission either: it means the pool did not say whether the
+    // skip accounting was complete, which is the same unknown group as `false`.
+    const truncated = skipped ? skipped.noPubKeyComplete !== true || skipped.restrictedComplete !== true : false;
+    if (truncated) {
+      throw new Error(
+        'The pool returned a truncated recipient list, so some holders of this token would silently ' +
+          'miss the message. Nothing was sent.',
+      );
+    }
+
+    return built;
   });
-
-  const skipped = built.resolution?.skipped;
-  // `null` is not permission either: it means the pool did not say whether the
-  // skip accounting was complete, which is the same unknown group as `false`.
-  const truncated = skipped ? skipped.noPubKeyComplete !== true || skipped.restrictedComplete !== true : false;
-  if (truncated) {
-    throw new Error(
-      'The pool returned a truncated recipient list, so some holders of this token would silently ' + 'miss the message. Nothing was sent.',
-    );
-  }
-
-  const receipt = await submitDepinMessage({
-    rpc,
-    identity: params.identity,
-    messageHex: built.hex,
-    poolPublicKey,
-  });
-
-  return {
-    messageHash: (typeof receipt === 'object' && receipt?.messageHash) || built.messageHash,
-    recipientCount: built.recipientCount ?? 0,
-    truncated: false,
-  };
 }
 
 /** One holder of the token, with a public key verified against it. */
@@ -120,47 +144,32 @@ export interface VerifiedRecipient {
 }
 
 /**
- * The token's holders with their public keys, verified.
- *
- * Runs the library's own pipeline, composed from its published pieces: verify
- * the `poolsig`, decode only what the verifier branded, then hand the body to
- * `decodeDepinRecipients`, which throws on a truncated list, a scope mismatch,
- * or any key that does not hash to the address offered for it. Only then are the
- * `{address, pubkey}` pairs read from that same body, so they are not the
- * server's word but what the library just finished checking.
- *
- * `resolveDepinRecipients` does exactly this but surfaces the keys without their
- * addresses, which is why the pipeline is assembled here.
+ * The pool's complete directory, with every exact address/key binding checked.
+ * Its signature authenticates the pool statement; independent asset-ownership
+ * verification remains an application policy in depinRecipientAudit.
  */
 export async function verifiedRecipients(params: {
   call: RawRpcCall;
   pool: VerifiedPool;
   token: string;
   senderPubKey: string;
+  senderAddress: string;
   network: string;
 }): Promise<VerifiedRecipient[]> {
   const rpc = createDepinRpc(params.call);
   const token = normalizeDepinToken(params.token);
   const poolRoot = normalizeDepinToken(params.pool.info.token);
-  const maxRecipients = params.pool.info.maxrecipients;
 
-  // One above the limit, so "at the limit" and "over it" stay distinct.
-  const reply = await rpc.call('depingetancestorrecipients', [token, maxRecipients + 1, poolRoot]);
-  const branded = verifyDepinReply({
-    reply,
+  const result = await callDepinRpc({
+    rpc,
+    context: params.pool.context,
     method: 'depingetancestorrecipients',
     token,
-    poolPublicKey: params.pool.info.depinpoolpkey,
+    args: { max_results: 10000, stop_at: poolRoot },
   });
-  const body = decodePlainReply(branded) as { recipients?: Array<{ address?: unknown; pubkey?: unknown }> };
-
-  await decodeDepinRecipients(body, {
-    token,
-    poolRoot,
-    maxRecipients,
-    senderPubKey: params.senderPubKey,
-    network: params.network,
-  });
+  const body = result.body as { recipients?: Array<{ address?: unknown; pubkey?: unknown }> };
+  await decodeDepinRecipientDirectory(body, { token, poolRoot, network: depinNetwork(params.network) });
+  params.pool.context = result.context;
 
   const pairs: VerifiedRecipient[] = [];
   for (const entry of body.recipients ?? []) {
@@ -203,41 +212,23 @@ export async function sendDepinPrivateMessage(params: {
 }): Promise<DepinSendResult> {
   const rpc = createDepinRpc(params.call);
   const token = normalizeDepinToken(params.token);
-  const poolPublicKey = params.pool.info.depinpoolpkey;
 
-  const pairs = await verifiedRecipients({
-    call: params.call,
-    pool: params.pool,
-    token,
-    senderPubKey: params.senderPubKey,
-    network: params.network,
+  return submitWithFreshRecipients(params, async () => {
+    const built = await buildDepinMessageForPool({
+      rpc,
+      context: params.pool.context,
+      identity: params.identity,
+      token,
+      poolRoot: params.pool.info.token,
+      maxRecipients: params.pool.info.maxrecipients,
+      selectedAddresses: [params.toAddress],
+      network: depinNetwork(params.network),
+      maxMessageBytes: params.pool.info.maxmessagesize,
+      timestamp: params.timestamp,
+      message: `@${params.toAddress} ${params.message}`,
+      messageType: 'private',
+    });
+
+    return built;
   });
-  const match = pairs.find(entry => entry.address === params.toAddress);
-  if (!match) {
-    throw new Error(`${params.toAddress} is not a holder of ${token} with a published public key, so nothing can be encrypted to it.`);
-  }
-
-  const built = await buildDepinMessage({
-    token,
-    senderAddress: params.identity.address,
-    senderPubKey: params.senderPubKey,
-    privateKey: params.privateKey,
-    timestamp: params.timestamp,
-    message: `@${params.toAddress} ${params.message}`,
-    recipientPubKeys: [match.pubkey],
-    messageType: 'private',
-  });
-
-  const receipt = await submitDepinMessage({
-    rpc,
-    identity: params.identity,
-    messageHex: built.hex,
-    poolPublicKey,
-  });
-
-  return {
-    messageHash: (typeof receipt === 'object' && receipt?.messageHash) || built.messageHash,
-    recipientCount: built.recipientCount ?? 2,
-    truncated: false,
-  };
 }

@@ -22,6 +22,7 @@ const receiveDepinMessages = jest.fn();
 jest.mock('../../blue_modules/neurai/depinMsg', () => ({
   __esModule: true,
   requestDepinChallenge: (...a: unknown[]) => requestDepinChallenge(...a),
+  depinNetwork: () => 'test',
   receiveDepinMessages: (...a: unknown[]) => receiveDepinMessages(...a),
 }));
 
@@ -29,12 +30,32 @@ const NOW = 1_700_000_000_000;
 const identity = { address: 'tME', publicKey: '02' + 'b'.repeat(64) } as never;
 const call = jest.fn();
 
+const context = {
+  network: 'net',
+  pool_pubkey: 'key',
+  pool_root: '&DEPINTESTING',
+  instance_id: 'instance',
+  membership_revision: 'revision',
+  membership_height: 1,
+  membership_blockhash: 'block',
+};
+const pool = { context, pin: { serviceId: 'service' } } as never;
+const contextKey = ['service', 'net', 'key', '&DEPINTESTING', 'instance', 'revision', '&DEPINTESTING', 'tME'].join('|');
+const cursor = {
+  version: 1 as const,
+  stream_id: '11'.repeat(32),
+  after_seq: 9007199254740993n,
+  scope: '&DEPINTESTING',
+  address: 'tME',
+  from_timestamp: 0,
+};
+
 const read = (previous?: unknown, nowMs = NOW) =>
   receiveDepinPage({
     call,
     identity,
     token: '&DEPINTESTING',
-    poolPublicKey: '02' + 'a'.repeat(64),
+    pool,
     network: 'xna-test',
     previous: previous as never,
     nowMs,
@@ -43,8 +64,8 @@ const read = (previous?: unknown, nowMs = NOW) =>
 beforeEach(() => {
   requestDepinChallenge.mockReset();
   receiveDepinMessages.mockReset();
-  requestDepinChallenge.mockResolvedValue({ challenge: 'FRESH', expiresIn: 30 });
-  receiveDepinMessages.mockResolvedValue({ messages: [], hasMore: false, nextChallenge: 'NEXT', nextExpiresIn: 300 });
+  requestDepinChallenge.mockResolvedValue({ contextKey, challenge: 'FRESH', expiresIn: 30, context });
+  receiveDepinMessages.mockResolvedValue({ messages: [], hasMore: false, cursor, context, nextChallenge: 'NEXT', nextExpiresIn: 300 });
 });
 
 describe('receiveDepinPage', () => {
@@ -56,18 +77,18 @@ describe('receiveDepinPage', () => {
   });
 
   it('reuses a chained challenge instead of spending a new one', async () => {
-    await read({ challenge: 'CHAINED', expiresAtMs: NOW + 300_000 });
+    await read({ contextKey, challenge: 'CHAINED', expiresAtMs: NOW + 300_000 });
     expect(requestDepinChallenge).not.toHaveBeenCalled();
     expect(receiveDepinMessages.mock.calls[0][0].challenge).toBe('CHAINED');
   });
 
   it('carries the next challenge forward with an absolute deadline', async () => {
     const page = await read(null);
-    expect(page.next).toEqual({ challenge: 'NEXT', expiresAtMs: NOW + 300_000 });
+    expect(page.next).toEqual({ contextKey, challenge: 'NEXT', expiresAtMs: NOW + 300_000 });
   });
 
   it('requests a fresh one when the carried challenge expired', async () => {
-    await read({ challenge: 'STALE', expiresAtMs: NOW - 1 });
+    await read({ contextKey, challenge: 'STALE', expiresAtMs: NOW - 1 });
     expect(requestDepinChallenge).toHaveBeenCalledTimes(1);
     expect(receiveDepinMessages.mock.calls[0][0].challenge).toBe('FRESH');
   });
@@ -75,12 +96,12 @@ describe('receiveDepinPage', () => {
   it('does not cut it fine: a challenge about to expire is replaced', async () => {
     // A round trip can outlive the last second of validity, and the node would
     // reject the read. The margin buys that back.
-    await read({ challenge: 'ALMOST', expiresAtMs: NOW + 2_000 });
+    await read({ contextKey, challenge: 'ALMOST', expiresAtMs: NOW + 2_000 });
     expect(requestDepinChallenge).toHaveBeenCalledTimes(1);
   });
 
   it('restarts the chain when the reply carries no next challenge', async () => {
-    receiveDepinMessages.mockResolvedValue({ messages: [], hasMore: false, nextChallenge: null });
+    receiveDepinMessages.mockResolvedValue({ messages: [], hasMore: false, cursor, context, nextChallenge: null });
     const page = await read(null);
     expect(page.next).toBeNull();
   });
@@ -90,26 +111,26 @@ describe('receiveDepinPage', () => {
       call,
       identity,
       token: '&DEPINTESTING',
-      poolPublicKey: '02' + 'a'.repeat(64),
+      pool,
       network: 'xna-test',
-      previous: { challenge: 'C', expiresAtMs: NOW + 300_000 },
-      afterHash: 'abc',
+      previous: { contextKey, challenge: 'C', expiresAtMs: NOW + 300_000 },
+      cursor,
       limit: 25,
       nowMs: NOW,
     });
-    expect(receiveDepinMessages.mock.calls[0][0]).toMatchObject({ afterHash: 'abc', limit: 25 });
+    expect(receiveDepinMessages.mock.calls[0][0]).toMatchObject({ cursor, limit: 25 });
   });
 });
 
 describe('isChallengeUsable', () => {
   it('rejects a missing or empty challenge', () => {
     expect(isChallengeUsable(null, NOW)).toBe(false);
-    expect(isChallengeUsable({ challenge: '', expiresAtMs: NOW + 300_000 }, NOW)).toBe(false);
+    expect(isChallengeUsable({ contextKey, challenge: '', expiresAtMs: NOW + 300_000 }, NOW)).toBe(false);
   });
 
   it('accepts one with room to spare and rejects one without', () => {
-    expect(isChallengeUsable({ challenge: 'C', expiresAtMs: NOW + 300_000 }, NOW)).toBe(true);
-    expect(isChallengeUsable({ challenge: 'C', expiresAtMs: NOW + 1_000 }, NOW)).toBe(false);
+    expect(isChallengeUsable({ contextKey, challenge: 'C', expiresAtMs: NOW + 300_000 }, NOW)).toBe(true);
+    expect(isChallengeUsable({ contextKey, challenge: 'C', expiresAtMs: NOW + 1_000 }, NOW)).toBe(false);
   });
 });
 

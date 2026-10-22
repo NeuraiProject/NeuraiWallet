@@ -1,11 +1,11 @@
 /**
  * Background "new messages" indicator for the DePIN chat.
  *
- * Polls only `depinpoolstats`, the one DePIN RPC that is not privacy-wrapped:
+ * Polls a verified RPC 5 bootstrap and reads its signed admission high water:
  * it needs no identity, no session and no device, so the check never asks the
  * owner to approve anything and never touches the hardware wallet. One small
- * request a minute is enough to notice that the channel moved; the actual
- * decryption (and the device round-trips it costs) still happens only when the
+ * request every 15 seconds is enough to notice that the channel moved; the actual
+ * decryption still happens only when the
  * user opens the chat.
  *
  * The wallet list renders one card per wallet and they all watch the same node,
@@ -15,6 +15,8 @@
  * The marker means "the channel has new traffic" — whether a given message is
  * addressed to this wallet can only be known by decrypting it.
  */
+import { getVerifiedPool, summarizeVerifiedPool } from '../blue_modules/neurai/depinPool';
+import { getDepinRpcConfig } from '../blue_modules/neurai/depinRpcOverrides';
 import { useCallback, useEffect, useState } from 'react';
 
 import { getDepinRpcBackend, loadDepinRpcOverrides, type NeuraiNetwork } from '../blue_modules/neurai';
@@ -48,9 +50,16 @@ async function refreshLatest(network: NeuraiNetwork): Promise<void> {
   const request = (async () => {
     try {
       await loadDepinRpcOverrides();
-      const stats = await getDepinRpcBackend(network).rpc<{ total_messages?: unknown; newest_message?: unknown }>('depinpoolstats', []);
+      const backend = getDepinRpcBackend(network);
+      const pool = await getVerifiedPool({
+        call: (method, params) => backend.rpc(method, params),
+        network,
+        url: getDepinRpcConfig(network).url,
+        persistPin: false,
+      });
+      const stats = summarizeVerifiedPool(pool);
       latest.set(network, { signature: poolSignature(stats), at: Date.now() });
-      watchers.forEach(notify => notify());
+      watchers.forEach((notify) => notify());
     } catch {
       // Node unreachable: keep the previous state rather than clearing markers.
     }

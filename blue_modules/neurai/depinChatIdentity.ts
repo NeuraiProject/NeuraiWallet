@@ -1,33 +1,23 @@
-/**
- * Derivation of the dedicated "DePIN chat" identity for a Neurai wallet.
- *
- * The DePIN chat uses a dedicated BIP44 address at account 100
- * (`m/44'/{coinType}'/100'/0/0`) — separate from the wallet's spending
- * addresses. Holding the gating DePIN token at THIS address is what unlocks the
- * chat, and its private key signs/decrypts messages. This mirrors the Neurai
- * web wallet's `deriveDepinChatIdentity` so addresses match across both apps.
- *
- * IMPORTANT — Legacy only. DePIN chat is supported exclusively on Legacy
- * networks (`xna` / `xna-test`). Post-quantum networks (`xna-pq` /
- * `xna-pq-test`) use NIP-022 PQ-HD derivation with no BIP44 path, so there is
- * no chat identity there and the DePIN tab is hidden.
+/** Dedicated account-100 chat identity: Legacy m/44 or strict ECDSA m/84.
+ * Keys and addresses follow the selected wallet family. PQ messaging and the
+ * separate ESP32 protocol migration remain deferred.
  */
 
 import { getAddressByPath, getCoinType, getHDKey } from '@neuraiproject/neurai-key';
 
-import { requireLegacyKeyNetwork } from './keyNetwork';
+import { requireLegacyKeyNetwork, ecdsaKeyNetworkFor } from './keyNetwork';
 import type { NeuraiChainType } from './networkConfig';
 
-/** Neurai networks that support the BIP44-derived DePIN chat identity. */
-export type DepinChatNetwork = Extract<NeuraiChainType, 'xna' | 'xna-test'>;
+/** Neurai networks that support the dedicated DePIN chat identity. */
+export type DepinChatNetwork = Extract<NeuraiChainType, 'xna' | 'xna-test' | 'xna-ecdsa' | 'xna-ecdsa-test'>;
 
 export interface DepinChatIdentity {
-  /** DePIN chat address (Base58 `N…` mainnet / `t…` testnet). */
+  /** DePIN chat address: Legacy Base58 or strict ECDSA `nq1r…` / `tnq1r…`. */
   address: string;
   /**
    * Private key in WIF format (used to sign/decrypt DePIN messages locally).
    * **Empty for device-backed identities** (hardware wallets never expose it):
-   * signing/decryption is routed to the device instead. Gate local-crypto paths
+   * RPC 5 signing/decryption requires the deferred hardware update. Gate local-crypto paths
    * on a truthy `wif` (or on `!deviceBacked`).
    */
   wif: string;
@@ -46,11 +36,11 @@ export interface DepinChatIdentity {
 }
 
 /**
- * Type guard: is this chain a Legacy network that supports DePIN chat?
+ * Type guard for Legacy and strict ECDSA chat networks.
  * Returns false for PQ chains (`xna-pq` / `xna-pq-test`).
  */
 export function isDepinChatSupportedNetwork(network: string): network is DepinChatNetwork {
-  return network === 'xna' || network === 'xna-test';
+  return ['xna', 'xna-test', 'xna-ecdsa', 'xna-ecdsa-test'].includes(network);
 }
 
 /** Normalize any pubkey hex to compressed form (33 bytes / 66 hex chars). */
@@ -91,11 +81,12 @@ function deriveDepinChatIdentityUncached(params: {
   const passphrase = params.passphrase ?? '';
 
   // neurai-key 5 names the 4.x Legacy derivation `xna-legacy[-test]`.
-  const keyNetwork = requireLegacyKeyNetwork(params.network);
+  const keyNetwork = ecdsaKeyNetworkFor(params.network) ?? requireLegacyKeyNetwork(params.network);
   const hdKey = getHDKey(keyNetwork, mnemonic, passphrase);
   const coinType = getCoinType(keyNetwork);
 
-  const path = `m/44'/${coinType}'/${account}'/0/${index}`;
+  const purpose = ecdsaKeyNetworkFor(params.network) ? 84 : 44;
+  const path = `m/${purpose}'/${coinType}'/${account}'/0/${index}`;
   const addrObj = getAddressByPath(keyNetwork, hdKey, path);
 
   const wif = String(addrObj?.WIF ?? '').trim();
@@ -119,7 +110,7 @@ function deriveDepinChatIdentityUncached(params: {
 const identityCache = new Map<string, DepinChatIdentity>();
 
 /**
- * Derive the DePIN chat identity for a Legacy Neurai network. Throws if the
+ * Derive the DePIN chat identity for a supported Neurai network. Throws if the
  * derivation fails or the network is unsupported.
  */
 export function deriveDepinChatIdentity(params: {
@@ -154,7 +145,7 @@ export function deviceDepinChatIdentity(params: {
   const address = (params.address ?? '').trim();
   const publicKey = compressPubKeyHex(params.publicKey ?? '');
   const path = (params.path ?? '').trim();
-  const coinType = getCoinType(requireLegacyKeyNetwork(params.network));
+  const coinType = getCoinType(ecdsaKeyNetworkFor(params.network) ?? requireLegacyKeyNetwork(params.network));
 
   if (!address) throw new Error('Device returned no DePIN chat address');
   if (publicKey.length !== 66) throw new Error('Device returned an invalid DePIN chat public key');

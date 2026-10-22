@@ -51,8 +51,7 @@ discarded on load (`AbstractNeuraiWallet.fromJson`, `blue_modules/neurai/testnet
 
 ECDSA and PQ wallets can only be created on testnet for now: the node accepts witness v3 and v2
 outputs only where those families are active, so the mainnet options stay disabled until then.
-ECDSA wallets use ordinary compressed secp256k1 keys, like Legacy, but the node's DePIN service
-only knows Legacy P2PKH addresses, so DePIN messaging stays a Legacy-wallet feature.
+ECDSA wallets use ordinary compressed secp256k1 keys. DePIN RPC 5 supports both Legacy and strict ECDSA chat identities; PQ messaging remains deferred.
 
 Balances, history, UTXOs and broadcast go through `neurai-wallet-services` over WSS by default
 (`blue_modules/neurai/WssBackend.ts`), with a JSON-RPC backend as an explicit fallback
@@ -62,14 +61,17 @@ Balances, history, UTXOs and broadcast go through `neurai-wallet-services` over 
 
 Neurai's DePIN assets (`&NAME`) carry a chat: holders of the same token can message each other
 end to end encrypted, relayed by a DePIN-enabled Neurai node rather than by a server of ours.
-The app derives a dedicated chat identity on its own BIP44 account (`m/44'/{coin}'/100'/0/0`,
-see `blue_modules/neurai/depinChatIdentity.ts` and `components/DePINChat.tsx`), lists the DePIN
-tokens held at that address and opens a group or private conversation per token. Messages are
-built, encrypted (ECIES over secp256k1 + AES-256-GCM) and signed by
-`@neuraiproject/neurai-depin-msg`, and are wire compatible with the node's `depinsubmitmsg` / `depinreceivemsg` and with the Neurai web wallet.
-Group messages need the address's public key to be visible on chain, so the app offers a
-one-tap "reveal" that spends a small amount from the chat address. The DePIN node the chat
-talks to is configurable from the gear button in the chat (the `DepinRpcEdit` screen).
+The app derives a dedicated account-100 chat identity: `m/44'/coin'/100'/0/0` for Legacy wallets and `m/84'/coin'/100'/0/0` for ECDSA wallets. The selected exact address is passed to neurai-depin-msg 4.x; a key is not silently changed to its Legacy alias.
+
+Requests use RPC 5 through the selected HTTP/WSS backend. Bootstrap pins the expected genesis, pool key and root. Every addressed call signs all arguments and the verified instance/membership context; replies are authenticated against the locally computed request hash before decryption. The WSS backend includes `depin.receive_seq` and serializes cursor integers exactly.
+
+Reads use admission sequences instead of sender timestamps/hashes. The full cursor is kept with its decrypted history in memory, scoped to the endpoint/address/token. Nonces cannot cross an instance/revision, address or scope. Membership changes refresh recipients and renew challenges; a read has one bounded recovery attempt. A changed stream restarts pagination with hash deduplication. Late messages with old sender timestamps are not skipped, and bounded page loops continue on the next poll.
+
+The recipient picker reads a verified directory. Private messages select the exact recipient plus the sender, including ECDSA destinations, even if the complete group is larger than a single message allows. Group limits and complete-directory requirements are enforced locally. The existing independent recipient audit remains advisory; a pool signature is not independent proof of asset ownership.
+
+A one-tap reveal spends from the chat identity to publish its key. Settings select the wallet service endpoint. PQ messaging is not enabled. ESP32 firmware and its separate SDK are explicitly deferred: hardware messaging reports the missing RPC 5 support instead of attempting old unsigned/legacy reads or opening an obsolete authentication session.
+
+The published `@neuraiproject/neurai-rpc@0.8.0` and `@neuraiproject/neurai-depin-msg@4.0.0` are installed from npm. Exact versions and registry integrity are pinned in `package-lock.json`.
 
 ## Neurai Connect
 
@@ -205,3 +207,5 @@ in [`FAQ.md`](FAQ.md).
 ## Licence
 
 MIT. See [`LICENSE`](LICENSE). NeuraiWallet derives from BlueWallet, which is also MIT licensed.
+
+Run `npm ci` to install the published RPC 5 dependencies from the registry using `package-lock.json`. No local package archives are required. Group sends rebuild once only after an authenticated membership/recipient rejection; an ambiguous submission result is never retried automatically.

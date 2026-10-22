@@ -160,7 +160,7 @@
     "iot_test_badge": "TEST",
     "iot_placeholder": "Send messages to IoT devices over the DePIN network. Test area — not functional yet.",
     "config": "Chat settings",
-    "not_supported_pq": "DePIN chat is only available on Legacy wallets.",
+    "not_supported_pq": "DePIN chat supports Legacy and ECDSA wallets. PQ messaging is not available yet.",
     "device_connect_hint": "Connect your NeuraiHW device to load its DePIN chat identity.",
     "device_connect_button": "Connect device",
     "device_connecting": "Connecting to the device…",

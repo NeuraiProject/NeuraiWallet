@@ -1,116 +1,168 @@
-// Sending under protocol 2.
-//
-// The value of this path is what it refuses. The old assembly asked the
-// messaging server for each recipient's key with `getpubkey` and used the
-// answer unchecked, so a hostile endpoint could return its own key for a real
-// holder's address. `buildDepinMessageForPool` resolves the set itself and
-// enforces the key-to-address binding, which is why the send goes through it.
-//
-// The cryptography is already proven by the library's own regtest e2e; what is
-// tested here is the app's composition: that a truncated recipient list stops
-// the send, and that the message is submitted through the verifying helper
-// rather than a raw RPC.
-
+import { fakePool, sdk } from './helpers/depin-rpc5';
 import { sendDepinGroupMessage, softwareIdentity } from '../../blue_modules/neurai/depinSend';
-
-const buildDepinMessageForPool = jest.fn();
-const submitDepinMessage = jest.fn();
-const createSoftwareIdentity = jest.fn();
-
-jest.mock('../../blue_modules/neurai/depinMsg', () => ({
-  __esModule: true,
-  buildDepinMessageForPool: (...a: unknown[]) => buildDepinMessageForPool(...a),
-  submitDepinMessage: (...a: unknown[]) => submitDepinMessage(...a),
-  createSoftwareIdentity: (...a: unknown[]) => createSoftwareIdentity(...a),
-  normalizeDepinToken: (t: string) => (t.startsWith('&') ? t : `&${t}`),
-}));
-
-const POOL_KEY = '02' + 'a'.repeat(64);
-const POOL = {
-  info: { token: '&DEPINTESTING', maxrecipients: 20, depinpoolpkey: POOL_KEY },
-  firstContact: false,
-  fingerprint: 'ab…cd',
-} as never;
-
-const identity = { address: 'tSENDER', publicKey: '02' + 'b'.repeat(64) } as never;
-const call = jest.fn();
-
-const send = () =>
-  sendDepinGroupMessage({
-    call,
-    pool: POOL,
-    identity,
-    token: 'DEPINTESTING',
+test('group send resolves, encrypts for every exact identity and returns the authenticated receipt', async () => {
+  const node = await fakePool({ maxRecipients: 20, complete: true }),
+    pool = await node.verified();
+  const sent = await sendDepinGroupMessage({
+    call: node.call,
+    pool,
+    identity: node.legacy,
+    token: 'TEST/NEWS',
     message: 'hola',
-    timestamp: 1_700_000_000,
-    network: 'xna-test',
+    timestamp: 1700000000,
+    network: 'testnet',
   });
-
-beforeEach(() => {
-  buildDepinMessageForPool.mockReset();
-  submitDepinMessage.mockReset();
-  submitDepinMessage.mockResolvedValue({ messageHash: 'from-pool' });
+  expect(sent.recipientCount).toBe(3);
+  expect(sent.messageHash).toBe(node.messages[0].hash);
+  for (const [actor, key] of [
+    [node.legacy, '77'],
+    [node.strict, '88'],
+    [node.other, '99'],
+  ] as const)
+    expect(await sdk.decryptDepinReceiveEncryptedPayload(node.messages[0].encrypted_payload_hex, key.repeat(32))).toBe('hola');
+});
+test('incomplete skip accounting prevents submission even if the directory entries were complete', async () => {
+  const node = await fakePool({ maxRecipients: 20, complete: false }),
+    pool = await node.verified();
+  await expect(
+    sendDepinGroupMessage({
+      call: node.call,
+      pool,
+      identity: node.legacy,
+      token: 'TEST/NEWS',
+      message: 'hola',
+      timestamp: 1700000000,
+      network: 'testnet',
+    }),
+  ).rejects.toThrow(/truncated/);
+  expect(node.call.mock.calls.some(([m]) => m === 'depinsubmitmsg')).toBe(false);
+});
+test('a group above the pool limit fails before submitting', async () => {
+  const node = await fakePool(),
+    pool = await node.verified();
+  await expect(
+    sendDepinGroupMessage({
+      call: node.call,
+      pool,
+      identity: node.legacy,
+      token: 'TEST/NEWS',
+      message: 'hola',
+      timestamp: 1700000000,
+      network: 'testnet',
+    }),
+  ).rejects.toThrow(/recipient map/);
+  expect(node.messages).toEqual([]);
+});
+test('software identity can explicitly sign for Legacy or strict ECDSA', async () => {
+  const node = await fakePool();
+  expect((await softwareIdentity('77'.repeat(32), 'testnet', node.legacy.address)).address).toBe(node.legacy.address);
+  expect((await softwareIdentity('88'.repeat(32), 'testnet', node.strict.address)).address).toBe(node.strict.address);
 });
 
-describe('sendDepinGroupMessage', () => {
-  it('builds through the pool so the key-to-address binding is enforced', async () => {
-    buildDepinMessageForPool.mockResolvedValue({ hex: 'aabb', messageHash: 'h', recipientCount: 3 });
-    await send();
-
-    const args = buildDepinMessageForPool.mock.calls[0][0];
-    expect(args.token).toBe('&DEPINTESTING');
-    expect(args.poolRoot).toBe('&DEPINTESTING');
-    expect(args.maxRecipients).toBe(20);
-    expect(args.identity).toBe(identity);
-    // No recipient list is passed in: the library resolves and validates it.
-    expect(args.recipientPubKeys).toBeUndefined();
+test('one authenticated membership rejection refreshes recipients, encrypts again and signs a fresh request', async () => {
+  const node = await fakePool({ maxRecipients: 20, complete: true }),
+    pool = await node.verified();
+  let submits = 0;
+  const call = jest.fn(async (method: string, params: unknown[]) => {
+    if (method === 'depinsubmitmsg' && ++submits === 1) {
+      node.changeMembership();
+      node.actors.splice(2, 1);
+    }
+    return node.call(method, params);
   });
-
-  it('submits through the verifying helper, not a raw RPC', async () => {
-    buildDepinMessageForPool.mockResolvedValue({ hex: 'aabb', messageHash: 'h', recipientCount: 1 });
-    const result = await send();
-
-    expect(submitDepinMessage).toHaveBeenCalledWith(expect.objectContaining({ messageHex: 'aabb', identity, poolPublicKey: POOL_KEY }));
-    expect(result.messageHash).toBe('from-pool');
+  const sent = await sendDepinGroupMessage({
+    call,
+    pool,
+    identity: node.legacy,
+    token: 'TEST/NEWS',
+    message: 'fresh group',
+    timestamp: 1700000000,
+    network: 'testnet',
   });
-
-  it('REFUSES to send when the recipient list was truncated', async () => {
-    // A truncated list is not a smaller group, it is an unknown one: holders
-    // who should have received the message would silently miss it.
-    buildDepinMessageForPool.mockResolvedValue({
-      hex: 'aabb',
-      messageHash: 'h',
-      resolution: { recipientPubKeys: [], skipped: { noPubKeyComplete: false } },
-    });
-
-    await expect(send()).rejects.toThrow(/truncated/i);
-    expect(submitDepinMessage).not.toHaveBeenCalled();
-  });
-
-  it('also refuses when the restricted list was cut short', async () => {
-    buildDepinMessageForPool.mockResolvedValue({
-      hex: 'aabb',
-      messageHash: 'h',
-      resolution: { recipientPubKeys: [], skipped: { restrictedComplete: false } },
-    });
-    await expect(send()).rejects.toThrow(/truncated/i);
-  });
-
-  it('a complete list sends normally', async () => {
-    buildDepinMessageForPool.mockResolvedValue({
-      hex: 'aabb',
-      messageHash: 'h',
-      recipientCount: 2,
-      resolution: { recipientPubKeys: ['a', 'b'], skipped: { noPubKeyComplete: true, restrictedComplete: true } },
-    });
-    await expect(send()).resolves.toMatchObject({ recipientCount: 2, truncated: false });
-  });
+  expect(submits).toBe(2);
+  expect(node.messages).toHaveLength(1);
+  expect(sent.recipientCount).toBe(2);
+  expect(await sdk.decryptDepinReceiveEncryptedPayload(node.messages[0].encrypted_payload_hex, '99'.repeat(32))).toBeNull();
+  const attempts = call.mock.calls.filter(([m]) => m === 'depinsubmitmsg').map(([, p]) => (p as any[])[0]);
+  expect(attempts[0].request_id).not.toBe(attempts[1].request_id);
+  expect(attempts[0].membership_revision).not.toBe(attempts[1].membership_revision);
 });
 
-describe('softwareIdentity', () => {
-  it('is built from the wallet key and typed as the shared identity', async () => {
-    createSoftwareIdentity.mockResolvedValue(identity);
-    await softwareIdentity('cWIF', 'xna-test');
-    expect(createSoftwareIdentity).toHaveBeenCalledWith({ privateKey: 'cWIF', network: 'xna-test' });
-  });
+test('membership churn permits at most one rebuilt send', async () => {
+  const node = await fakePool({ maxRecipients: 20, complete: true }),
+    pool = await node.verified();
+  let submits = 0;
+  const call = async (method: string, params: unknown[]) => {
+    if (method === 'depinsubmitmsg') {
+      submits++;
+      node.changeMembership();
+    }
+    return node.call(method, params);
+  };
+  await expect(
+    sendDepinGroupMessage({
+      call,
+      pool,
+      identity: node.legacy,
+      token: 'TEST/NEWS',
+      message: 'churn',
+      timestamp: 1700000000,
+      network: 'testnet',
+    }),
+  ).rejects.toThrow(/Membership/);
+  expect(submits).toBe(2);
+  expect(node.messages).toHaveLength(0);
+});
+
+test('an ambiguous failure after admission never replays the write', async () => {
+  const node = await fakePool({ maxRecipients: 20, complete: true }),
+    pool = await node.verified();
+  let submits = 0;
+  const call = async (method: string, params: unknown[]) => {
+    const result = await node.call(method, params);
+    if (method === 'depinsubmitmsg') {
+      submits++;
+      throw new Error('Response timeout');
+    }
+    return result;
+  };
+  await expect(
+    sendDepinGroupMessage({
+      call,
+      pool,
+      identity: node.legacy,
+      token: 'TEST/NEWS',
+      message: 'ambiguous',
+      timestamp: 1700000000,
+      network: 'testnet',
+    }),
+  ).rejects.toThrow(/timeout/);
+  expect(submits).toBe(1);
+  expect(node.messages).toHaveLength(1);
+});
+
+test('an unsigned transport error claiming code -26 cannot trigger a write retry', async () => {
+  const node = await fakePool({ maxRecipients: 20, complete: true }),
+    pool = await node.verified();
+  let submits = 0;
+  const call = async (method: string, params: unknown[]) => {
+    if (method === 'depinsubmitmsg') {
+      submits++;
+      throw { code: -26, message: 'Recipient not authorized' };
+    }
+    return node.call(method, params);
+  };
+  await expect(
+    sendDepinGroupMessage({
+      call,
+      pool,
+      identity: node.legacy,
+      token: 'TEST/NEWS',
+      message: 'unsigned',
+      timestamp: 1700000000,
+      network: 'testnet',
+    }),
+  ).rejects.toMatchObject({ code: -26 });
+  expect(submits).toBe(1);
+  expect(node.messages).toHaveLength(0);
 });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { InteractionManager } from 'react-native';
 
-import { deriveDepinChatIdentity, type DepinChatIdentity } from '../blue_modules/neurai/depinChatIdentity';
+import { deriveDepinChatIdentity, type DepinChatIdentity, type DepinChatNetwork } from '../blue_modules/neurai/depinChatIdentity';
 
 interface UseDepinChatIdentityParams {
   chainType: 'xna' | 'xna-test' | string;
@@ -26,7 +26,7 @@ const useDepinChatIdentity = ({ chainType, passphrase, secret, supported }: UseD
     let cancelled = false;
     const task = InteractionManager.runAfterInteractions(() => {
       try {
-        const derived = deriveDepinChatIdentity({ network: chainType as 'xna' | 'xna-test', mnemonic: secret, passphrase });
+        const derived = deriveDepinChatIdentity({ network: chainType as DepinChatNetwork, mnemonic: secret, passphrase });
         if (!cancelled) setIdentity(derived);
       } catch (error) {
         console.debug('DePINChat: failed to derive chat identity', error);
