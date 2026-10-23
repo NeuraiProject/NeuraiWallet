@@ -1,6 +1,6 @@
 /**
- * Privacy tab of a testnet wallet (C6 TEST pools), laid out like the DePIN
- * section: a header card (status badge, pool chips, private balance and
+ * Privacy tab of a testnet wallet (C7 and C6 TEST pools, C7 first), laid out
+ * like the DePIN section: a header card (status badge, pool chips, private balance and
  * address, gear for the advanced settings), folder tabs for the operations
  * and a short activity list. The proving engine (hidden WebView) lives only
  * while this tab is open.
@@ -12,7 +12,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { formatXna } from '@neuraiproject/neurai-privacy/client';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { C6_RUNTIMES, type C6PoolKind, type C6Runtime } from '../../blue_modules/neurai/privacy/deployment';
+import { DEFAULT_PRIVACY_POOL, PRIVACY_POOLS, type C6Runtime, type PrivacyPoolId } from '../../blue_modules/neurai/privacy/deployment';
 import type { PrivacyWallet } from '../../blue_modules/neurai/privacy/wallet';
 import { useC6Operations, SPONSOR_BUDGET_ATOMIC } from '../../hooks/useC6Operations';
 import { useC6PrivateWallet } from '../../hooks/useC6PrivateWallet';
@@ -40,9 +40,10 @@ import {
 } from './C6UI';
 import { PrivacyHostProvider } from './PrivacyHost';
 
-const KINDS: C6PoolKind[] = ['xna', 'asset'];
 /** The asset pool is shown but cannot be selected until it works on the phone. */
 const ASSET_POOL_ENABLED = false;
+
+const poolLabel = (id: PrivacyPoolId) => (id === 'c7' ? 'C7 · XNA' : id === 'c6' ? 'C6 · XNA' : `C6 · ${loc.privacy.pool_assets}`);
 
 /** Seconds since `busy` turned on. */
 function useElapsed(busy: boolean): number {
@@ -60,18 +61,19 @@ function useElapsed(busy: boolean): number {
 function PoolView({
   wallet,
   runtime,
-  kind,
-  onKind,
+  poolId,
+  onPool,
   hidden,
 }: {
   wallet: PrivacyWallet;
   runtime: C6Runtime;
-  kind: C6PoolKind;
-  onKind: (kind: C6PoolKind) => void;
+  poolId: PrivacyPoolId;
+  onPool: (id: PrivacyPoolId) => void;
   hidden: boolean;
 }) {
   const t = usePrivacyTheme();
   const insets = useSafeAreaInsets();
+  const kind = runtime.kind;
   const pool = useC6PrivateWallet(wallet, runtime, hidden);
   const ops = useC6Operations(wallet, runtime, pool);
   const deployments = useMemo(() => [runtime.config.deployment as never], [runtime]);
@@ -138,19 +140,19 @@ function PoolView({
       <Card badge={<Badge label={badge.label} tone={badge.tone} />}>
         <View style={styles.titleRow}>
           <Text style={[styles.title, t.text]}>{loc.privacy.title}</Text>
-          <Text style={[styles.subtitle, t.subtext]}>{' — C6'}</Text>
+          <Text style={[styles.subtitle, t.subtext]}>{` — ${runtime.generation}`}</Text>
           <TestBadge label="TEST" />
         </View>
 
         <ChipRow>
-          {KINDS.map(k => (
+          {PRIVACY_POOLS.filter(p => p.runtime).map(p => (
             <Chip
-              key={k}
-              label={k === 'xna' ? 'XNA' : loc.privacy.pool_assets}
-              active={k === kind}
-              disabled={busy || pending || (k === 'asset' && !ASSET_POOL_ENABLED)}
-              onPress={() => onKind(k)}
-              testID={`PrivacyPool-${k}`}
+              key={p.id}
+              label={poolLabel(p.id)}
+              active={p.id === poolId}
+              disabled={busy || pending || (p.id === 'c6-asset' && !ASSET_POOL_ENABLED)}
+              onPress={() => onPool(p.id)}
+              testID={`PrivacyPool-${p.id}`}
             />
           ))}
         </ChipRow>
@@ -278,7 +280,9 @@ function PoolView({
         zkPassphrase={zkPassphrase}
         onZkPassphrase={setZkPassphrase}
         onLock={lock}
-        backupName={kind === 'asset' ? `${unit}-c6-private.encrypted.json` : 'neurai-c6-private.encrypted.json'}
+        backupName={
+          kind === 'asset' ? `${unit}-c6-private.encrypted.json` : `neurai-${runtime.generation.toLowerCase()}-private.encrypted.json`
+        }
       />
     </ScrollView>
   );
@@ -294,12 +298,12 @@ export default function PrivacySection({ walletID, hidden = false }: { walletID:
   const { wallets } = useStorage();
   const found = wallets.find(w => w.getID() === walletID);
   const wallet = isNeuraiWallet(found) ? (found as unknown as PrivacyWallet) : undefined;
-  const [kind, setKind] = useState<C6PoolKind>('xna');
-  const runtime = C6_RUNTIMES[kind];
+  const [poolId, setPoolId] = useState<PrivacyPoolId>(DEFAULT_PRIVACY_POOL);
+  const runtime = PRIVACY_POOLS.find(p => p.id === poolId)?.runtime;
   return (
     <PrivacyHostProvider>
       {runtime && wallet ? (
-        <PoolView key={`${walletID}:${runtime.id}`} wallet={wallet} runtime={runtime} kind={kind} onKind={setKind} hidden={hidden} />
+        <PoolView key={`${walletID}:${runtime.id}`} wallet={wallet} runtime={runtime} poolId={poolId} onPool={setPoolId} hidden={hidden} />
       ) : null}
     </PrivacyHostProvider>
   );

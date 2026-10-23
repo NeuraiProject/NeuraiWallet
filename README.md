@@ -20,8 +20,8 @@ the wallet, transaction, asset and messaging layers are Neurai's own and are bui
   qualifier and DePIN assets) are listed per wallet and can be sent from the Send screen.
 * **DePIN messaging** — a token-gated chat tab (see below).
 * **Neurai Connect** — QR login and dApp sessions (see below).
-* **Privacy pool (C6, testnet)** — private XNA and asset notes with zero-knowledge proofs built on
-  the phone (see below).
+* **Privacy pool (C7 and C6, testnet)** — private XNA and asset notes with zero-knowledge proofs
+  built on the phone (see below).
 * Inherited from BlueWallet and still in use: encrypted storage with plausible deniability,
   biometric unlock on the sensitive screens, "is it my address?" verification, raw transaction
   broadcast, fiat rates and 50+ UI languages.
@@ -97,13 +97,20 @@ per-domain identities) with the approval screens in `screen/connect/`, and pairi
 `nc:` URIs from the scanner or as `neuraiwallet://connect?uri=…` deep links, recognised by
 `class/neurai-uri-match.ts`.
 
-## Privacy pool (C6, testnet)
+## Privacy pool (C7 and C6, testnet)
 
 Testnet Legacy and PQ wallets with their words get a **Privacy** button next to the wallet tabs.
-It opens the C6 TEST pools pinned in `blue_modules/neurai/privacy/c6-*.json` (the same instances
-as the web wallet): one for XNA and one for an ordinary asset, each with its own private balance.
-Deposit, assign to `tnzk1…` addresses, withdraw and join two notes; asset operations pay the
-miner fee with a separate XNA sponsor coin.
+It opens the TEST pools pinned in `blue_modules/neurai/privacy/c7-testnet.json` and `c6-*.json`
+(the same instances as the web wallet), each with its own private balance and encrypted history:
+
+* **C7 · XNA** (default): NeuraiZK/v3. One private wallet with any number of unlinkable `tnzk1…`
+  version 3 addresses and fast recovery (one curve multiplication per published note, no address
+  gap). Same circuits and proving files as C6; the instance is checked against its verifiable
+  birth (its domain must derive from the genesis, the UNIQUE emission and the pool name).
+* **C6 · XNA** and **C6 · asset** (an ordinary asset; asset operations pay the miner fee with a
+  separate XNA sponsor coin).
+
+Deposit, assign to `tnzk1…` addresses, withdraw and join two notes.
 
 Hermes has no WebAssembly, so the proving side of `@neuraiproject/neurai-privacy` (snarkjs,
 Argon2id, pool scanning) runs in a hidden WebView (`components/privacy/PrivacyHost.tsx`). Its
@@ -115,10 +122,12 @@ and signing (`privacy/wallet.ts`); `privacy/bridge.ts` relays the worker's messa
 The proving files (~88 MB per instance) are downloaded on first use and kept only if their size
 and SHA-256 match the pins in the app, so any HTTPS host will do. By default they come from the
 testnet web wallet, which deploys the same pinned files (`https://webwallet-testnet.neurai.org`
-plus the manifest's `artifactBaseUrl`, e.g. `/privacy-c6/`); the URL can be changed per pool in
-the privacy screen. To mirror them to a GitHub release (`c6-test-<commitment[0:12]>`) instead:
+plus the manifest's `artifactBaseUrl`: `/privacy-c7/` for C7, `/privacy-c6/` for C6); the URL can
+be changed per pool in the privacy screen. To mirror them to a GitHub release
+(`c7-test-<commitment[0:12]>` / `c6-test-<commitment[0:12]>`) instead:
 
 ```bash
+node scripts/privacy-artifacts-release.mjs c7    ../neurai-webwallet/public/privacy-c7
 node scripts/privacy-artifacts-release.mjs xna   ../neurai-webwallet/public/privacy-c6
 node scripts/privacy-artifacts-release.mjs asset ../neurai-webwallet/public/privacy-c6-assets/C6ASSET261004A
 # verified? add --publish (needs an authenticated GitHub CLI)

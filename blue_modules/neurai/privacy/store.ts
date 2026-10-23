@@ -1,5 +1,5 @@
 /**
- * Durable compare-and-swap string store for the C6 journals.
+ * Durable compare-and-swap string store for the C6/C7 journals.
  *
  * Replaces the web wallet's `IndexedDbSponsorStore`: same `read` /
  * `compareAndSwap` contract, one file per key under the app's documents
@@ -22,7 +22,7 @@ export class FileCasStore {
   private readonly dir: string;
   private tail: Promise<unknown> = Promise.resolve();
 
-  constructor(name: 'c6-private-journal-v1' | 'c6-sponsor-journal-v1') {
+  constructor(name: 'c6-private-journal-v1' | 'c7-private-journal-v1' | 'c6-sponsor-journal-v1') {
     this.dir = `${ROOT}/${name}`;
   }
 

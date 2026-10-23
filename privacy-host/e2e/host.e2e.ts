@@ -13,7 +13,8 @@
  * stops where it must: the fake funding coin does not exist on chain.
  *
  * Run (see privacy-host/e2e/run.sh):
- *   PRIVACY_ARTIFACTS=/path/to/privacy-c6 node dist/host.e2e.mjs
+ *   PRIVACY_ARTIFACTS=/path/to/privacy-c7 node dist/host.e2e.mjs
+ * PRIVACY_POOL=c6 checks the C6 XNA pool instead of C7 (both use the same files).
  */
 
 import { readFileSync, openSync, readSync, closeSync } from 'node:fs';
@@ -22,7 +23,8 @@ import { chromium } from 'playwright-core';
 import { C6WorkerClient } from '@neuraiproject/neurai-privacy/client';
 
 import { PrivacyHostBridge } from '../../blue_modules/neurai/privacy/bridge';
-import xnaFile from '../../blue_modules/neurai/privacy/c6-testnet.json';
+import c6File from '../../blue_modules/neurai/privacy/c6-testnet.json';
+import c7File from '../../blue_modules/neurai/privacy/c7-testnet.json';
 
 const RPC_URL = process.env.PRIVACY_RPC ?? 'https://rpc-testnet.neurai.org/rpc';
 const ARTIFACTS = process.env.PRIVACY_ARTIFACTS ?? '';
@@ -30,7 +32,8 @@ const HOST_HTML = process.env.PRIVACY_HOST_HTML ?? 'privacy-host/dist/privacy-ho
 const ORIGIN = 'https://privacy-host.neurai.invalid/';
 const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
-const config = (xnaFile as { config: Record<string, any> }).config;
+const POOL = process.env.PRIVACY_POOL === 'c6' ? 'c6' : 'c7';
+const config = ((POOL === 'c6' ? c6File : c7File) as { config: Record<string, any> }).config;
 
 function check(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error('CHECK FAILED: ' + message);
@@ -75,7 +78,8 @@ const memoryStore = () => {
 };
 
 async function main() {
-  check(ARTIFACTS, 'set PRIVACY_ARTIFACTS to the directory with the C6 XNA proving files');
+  check(ARTIFACTS, 'set PRIVACY_ARTIFACTS to the directory with the pinned XNA proving files');
+  console.log(`pool ${POOL}: ${config.manifest.profile} ${config.manifest.identity}`);
   const html = readFileSync(HOST_HTML, 'utf8');
   const browser = await chromium.launch();
   const page = await browser.newPage();

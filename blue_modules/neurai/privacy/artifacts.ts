@@ -1,5 +1,5 @@
 /**
- * C6 proving files (circuit .wasm, .zkey and verifying keys) on the device.
+ * C6/C7 proving files (circuit .wasm, .zkey and verifying keys) on the device.
  *
  * About 88 MB per pool instance, too much for the APK, so they are downloaded
  * on first use from a configurable HTTPS location and kept in the app's
@@ -13,7 +13,7 @@ import RNFS from 'react-native-fs';
 
 import type { C6Runtime } from './deployment';
 
-const ROOT = `${RNFS.DocumentDirectoryPath}/neurai-privacy/c6`;
+const ROOT = `${RNFS.DocumentDirectoryPath}/neurai-privacy`;
 const URL_KEY_PREFIX = 'neurai_privacy_c6_files_url_';
 
 export interface ArtifactFile {
@@ -57,7 +57,7 @@ export class C6ArtifactStore {
   private readonly inFlight = new Map<string, Promise<string>>();
 
   constructor(private readonly runtime: C6Runtime) {
-    this.dir = `${ROOT}/${runtime.id}`;
+    this.dir = `${ROOT}/${runtime.generation.toLowerCase()}/${runtime.id}`;
   }
 
   files(): ArtifactFile[] {

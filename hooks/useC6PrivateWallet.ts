@@ -1,5 +1,5 @@
 /**
- * Private C6 wallet session of one pool (XNA or asset).
+ * Private wallet session of one pool (C7 XNA, C6 XNA or C6 asset).
  *
  * Port of the web wallet's C6 components: one `C6WorkerClient` per opened
  * private wallet, its proving worker running in the privacy WebView, its
@@ -14,7 +14,7 @@ import { C6WorkerClient, type ReceivingInfo } from '@neuraiproject/neurai-privac
 
 import { usePrivacyHost } from '../components/privacy/PrivacyHost';
 import { C6ArtifactStore } from '../blue_modules/neurai/privacy/artifacts';
-import type { C6Runtime } from '../blue_modules/neurai/privacy/deployment';
+import type { C6Runtime, PoolGeneration } from '../blue_modules/neurai/privacy/deployment';
 import { shortStage, type StageLabels } from '../blue_modules/neurai/privacy/stages';
 import { FileCasStore } from '../blue_modules/neurai/privacy/store';
 import { privacyTxKind, tagPrivacyTxs } from '../blue_modules/neurai/privacy/txTags';
@@ -40,9 +40,13 @@ export type C6Operation = {
   confirmedBy?: string | null;
 };
 
-/** One journal store for both pools, as on the web (keys carry the pool identity). */
-let journalStore: FileCasStore | null = null;
-const privateJournal = () => (journalStore ??= new FileCasStore('c6-private-journal-v1'));
+/**
+ * One journal store per generation, as on the web: both C6 pools share theirs
+ * (keys carry the pool identity) and C7 keeps its encrypted history apart.
+ */
+const journalStores: Partial<Record<PoolGeneration, FileCasStore>> = {};
+const privateJournal = (generation: PoolGeneration) =>
+  (journalStores[generation] ??= new FileCasStore(generation === 'C7' ? 'c7-private-journal-v1' : 'c6-private-journal-v1'));
 
 const MISSING_JOURNAL = 'C6 private journal missing';
 
@@ -211,7 +215,7 @@ export function useC6PrivateWallet(wallet: PrivacyWallet | undefined, runtime: C
       );
       const c = new C6WorkerClient({
         worker,
-        store: privateJournal(),
+        store: privateJournal(runtime.generation),
         rpc: async (method: string, params?: unknown[]) => {
           live(token);
           const result = await rpc(method, params ?? []);

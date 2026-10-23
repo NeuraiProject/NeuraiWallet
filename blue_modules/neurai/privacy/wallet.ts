@@ -1,5 +1,5 @@
 /**
- * What the C6 pool needs from a transparent wallet: whether it can be used,
+ * What the C6/C7 pools need from a transparent wallet: whether it can be used,
  * a read/admission RPC through the wallet's own service, and local signing of
  * the transparent inputs the pool transaction spends.
  */
@@ -54,13 +54,13 @@ export function c6Family(wallet: PrivacyWallet): NzkFamily | null {
   return null;
 }
 
-/** Why C6 cannot be opened for this wallet, or null when it can. */
+/** Why the privacy pool (C6 or C7) cannot be opened for this wallet, or null when it can. */
 export function c6BlockedReason(wallet: PrivacyWallet | undefined): string | null {
   if (!wallet) return 'Open a testnet wallet first.';
-  if (!isTestnetChain(wallet.network)) return 'C6 is a testnet pool. Switch to a testnet wallet to use it.';
+  if (!isTestnetChain(wallet.network)) return 'The privacy pool is testnet only. Switch to a testnet wallet to use it.';
   if (!wallet.secret)
     return 'This wallet has no recovery words on this device (hardware or watch-only), so it cannot open a private wallet.';
-  if (!c6Family(wallet)) return 'This wallet type cannot use C6.';
+  if (!c6Family(wallet)) return 'This wallet type cannot use the privacy pool.';
   return null;
 }
 

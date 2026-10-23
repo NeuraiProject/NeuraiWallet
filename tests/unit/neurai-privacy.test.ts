@@ -1,5 +1,5 @@
-// C6 privacy pool plumbing: the WebView bridge and its codec, the file CAS
-// store and local locks, the pinned proving-file store, and the wallet adapter.
+// C6/C7 privacy pool plumbing: the WebView bridge and its codec, the file CAS
+// store and local locks, the pinned pools and proving-file store, and the wallet adapter.
 // The proving worker itself runs in a browser; see privacy-host/e2e.
 
 import { createHash } from 'crypto';
@@ -8,7 +8,13 @@ import { C6WorkerClient } from '@neuraiproject/neurai-privacy/client';
 import { decodeBridgeMessage, encodeBridgeMessage } from '../../blue_modules/neurai/privacy/codec';
 import { PrivacyHostBridge } from '../../blue_modules/neurai/privacy/bridge';
 import { shortStage } from '../../blue_modules/neurai/privacy/stages';
-import { C6_ASSET_TESTNET, C6_XNA_TESTNET } from '../../blue_modules/neurai/privacy/deployment';
+import {
+  C6_ASSET_TESTNET,
+  C6_XNA_TESTNET,
+  C7_XNA_TESTNET,
+  DEFAULT_PRIVACY_POOL,
+  PRIVACY_POOLS,
+} from '../../blue_modules/neurai/privacy/deployment';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
 import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
@@ -277,6 +283,40 @@ describe('pinned proving files', () => {
     expect(C6_ASSET_TESTNET!.defaultArtifactUrl).toBe('https://webwallet-testnet.neurai.org/privacy-c6-assets/C6ASSET261004A/');
   });
 
+  it('pins the C7 XNA instance and opens it by default', () => {
+    const c7 = C7_XNA_TESTNET!;
+    expect(c7.generation).toBe('C7');
+    expect(c7.kind).toBe('xna');
+    expect(c7.config.manifest.profile).toBe('C7-XNA-TEST-v1');
+    expect((c7.config.manifest as { identity?: string }).identity).toBe('C7TEST1023A#POOL');
+    expect(c7.id).toBe(c7.config.manifest.commitment);
+    expect(c7.id).not.toBe(C6_XNA_TESTNET!.id);
+    // The verifiable birth: the UNIQUE emission the worker derives the domain from.
+    expect(c7.config.deployment).toHaveProperty('emission');
+    // Same circuits and proving files as C6, served from their own folder.
+    expect(c7.config.artifacts).toEqual(C6_XNA_TESTNET!.config.artifacts);
+    expect(c7.defaultArtifactUrl).toBe('https://webwallet-testnet.neurai.org/privacy-c7/');
+    expect(PRIVACY_POOLS.map(pool => [pool.id, pool.runtime?.generation, pool.runtime?.kind])).toEqual([
+      ['c7', 'C7', 'xna'],
+      ['c6', 'C6', 'xna'],
+      ['c6-asset', 'C6', 'asset'],
+    ]);
+    expect(DEFAULT_PRIVACY_POOL).toBe('c7');
+  });
+
+  it('keeps the C7 files apart from the C6 ones and downloads them from the C7 folder', async () => {
+    const c7 = C7_XNA_TESTNET!;
+    const store = new C6ArtifactStore(c7);
+    served = { [name]: Buffer.alloc(meta.bytes, 1) };
+    await expect(store.ensure(name)).rejects.toThrow('pinned hash');
+    expect(downloads[0].fromUrl).toBe('https://webwallet-testnet.neurai.org/privacy-c7/' + name);
+    expect(downloads[0].toFile).toBe(`/docs/neurai-privacy/c7/${c7.id}/${name}.download`);
+    // A verified C6 copy is not a C7 file.
+    files.set(`/docs/neurai-privacy/c6/${runtime.id}/${name}`, Buffer.alloc(meta.bytes, 3));
+    expect((await store.status()).present).toBe(0);
+    expect((await new C6ArtifactStore(runtime).status()).present).toBe(1);
+  });
+
   it('keeps a downloaded file only when its size and SHA-256 match the pin', async () => {
     const store = new C6ArtifactStore(runtime);
     // A host serving other bytes of the right size is rejected and nothing is kept.
@@ -339,6 +379,10 @@ describe('progress labels', () => {
     expect(shortStage('Checking pool operation at block 22127 (chain snapshot 25340)', labels)).toBe('Syncing 22127/25340');
     expect(shortStage('Reading C6 block 9 / 25340', labels)).toBe('Syncing 9/25340');
     expect(shortStage('C6 synchronized through block 25483', labels)).toBe('Synced to 25483');
+    expect(shortStage('Reading C7 block 75836 / 76000', labels)).toBe('Syncing 75836/76000');
+    expect(shortStage('Resumed saved C7 state through block 75900; checking snapshot 76000', labels)).toBe('Syncing 75900');
+    expect(shortStage('Reading confirmed C7 pool history', labels)).toBe('Syncing');
+    expect(shortStage('C7 synchronized through block 76001', labels)).toBe('Synced to 76001');
     expect(shortStage('Loading J2.zkey · 45%', labels)).toBe('Loading J2 45%');
     expect(shortStage('Generate D proof', labels)).toBe('Building proof D');
     expect(shortStage('Something new', labels)).toBe('Something new');

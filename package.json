@@ -105,7 +105,7 @@
     "@neuraiproject/neurai-jswallet": "0.17.1",
     "@neuraiproject/neurai-key": "5.0.3",
     "@neuraiproject/neurai-message": "0.11.0",
-    "@neuraiproject/neurai-privacy": "0.2.1",
+    "@neuraiproject/neurai-privacy": "0.3.1",
     "@neuraiproject/neurai-rpc": "0.8.0",
     "@neuraiproject/neurai-scripts": "0.10.0",
     "@neuraiproject/neurai-sign-esp32": "0.8.1",
