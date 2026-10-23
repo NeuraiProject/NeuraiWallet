@@ -2,8 +2,8 @@
  * Privacy tab of a testnet wallet (C7 and C6 TEST pools, C7 first), laid out
  * like the DePIN section: a header card (status badge, pool chips, private balance and
  * address, gear for the advanced settings), folder tabs for the operations
- * and a short activity list. The proving engine (hidden WebView) lives only
- * while this tab is open.
+ * and a short activity list. Switching pools keeps the others' sessions open.
+ * The proving engine (hidden WebView) lives only while this tab is open.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -299,18 +299,30 @@ export default function PrivacySection({ walletID, hidden = false }: { walletID:
   const found = wallets.find(w => w.getID() === walletID);
   const wallet = isNeuraiWallet(found) ? (found as unknown as PrivacyWallet) : undefined;
   const [poolId, setPoolId] = useState<PrivacyPoolId>(DEFAULT_PRIVACY_POOL);
-  const runtime = PRIVACY_POOLS.find(p => p.id === poolId)?.runtime;
+  // Every pool shown in this tab stays mounted behind the selected one, so a
+  // private wallet opened there stays open; its background scans wait.
+  const [visited, setVisited] = useState<PrivacyPoolId[]>([DEFAULT_PRIVACY_POOL]);
+  const selectPool = useCallback((id: PrivacyPoolId) => {
+    setPoolId(id);
+    setVisited(current => (current.includes(id) ? current : [...current, id]));
+  }, []);
+  const pools = PRIVACY_POOLS.flatMap(p => (p.runtime && visited.includes(p.id) ? [{ id: p.id, runtime: p.runtime }] : []));
   return (
     <PrivacyHostProvider>
-      {runtime && wallet ? (
-        <PoolView key={`${walletID}:${runtime.id}`} wallet={wallet} runtime={runtime} poolId={poolId} onPool={setPoolId} hidden={hidden} />
-      ) : null}
+      {wallet
+        ? pools.map(p => (
+            <View key={`${walletID}:${p.runtime.id}`} style={p.id === poolId ? styles.flex : styles.hidden}>
+              <PoolView wallet={wallet} runtime={p.runtime} poolId={p.id} onPool={selectPool} hidden={hidden || p.id !== poolId} />
+            </View>
+          ))
+        : null}
     </PrivacyHostProvider>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  hidden: { display: 'none' },
   content: { padding: 16 },
   section: { marginTop: 14 },
   titleRow: { flexDirection: 'row', alignItems: 'center', columnGap: 4, marginBottom: 12, paddingRight: 70 },
