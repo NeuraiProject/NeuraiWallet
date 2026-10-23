@@ -730,6 +730,7 @@
     "action_join": "Join",
     "amount": "Amount",
     "fee": "Fee",
+    "fee_auto": "Auto",
     "fee_xna": "Network fee",
     "fee_coin": "Pay fee with",
     "no_fee_coin": "No confirmed XNA coin to pay the fee.",

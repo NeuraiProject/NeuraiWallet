@@ -8,6 +8,7 @@ import { C6WorkerClient } from '@neuraiproject/neurai-privacy/client';
 import { decodeBridgeMessage, encodeBridgeMessage } from '../../blue_modules/neurai/privacy/codec';
 import { PrivacyHostBridge } from '../../blue_modules/neurai/privacy/bridge';
 import { shortStage } from '../../blue_modules/neurai/privacy/stages';
+import { autoPoolFee, requiredPoolFee } from '../../blue_modules/neurai/privacy/fees';
 import {
   C6_ASSET_TESTNET,
   C6_XNA_TESTNET,
@@ -422,5 +423,26 @@ describe('privacy transaction tags', () => {
     await AsyncStorage.setItem(PRIVACY_TX_TAGS_PREFIX + 'w4', '{damaged');
     await tagPrivacyTxs('w4', [[A, 'other']]);
     expect(await stored('w4')).toEqual({ [A]: 'other' });
+  });
+});
+
+describe('automatic pool fee', () => {
+  const levels = ['10000000', '20000000', '50000000'];
+
+  it('picks the lowest pinned level that covers the form at the relay rate', () => {
+    // The largest TEST pool transaction (T3, about 6,100 vbytes) needs well under 0.1 XNA.
+    for (const form of ['D', 'T1', 'T2', 'T3', 'W', 'J2']) {
+      expect(requiredPoolFee(form) < 10000000n).toBe(true);
+      expect(autoPoolFee(form, levels)).toBe('10000000');
+    }
+    expect(requiredPoolFee('T3')).toBe(8400000n); // 7,000 vbytes at 0.012 XNA per 1,000
+  });
+
+  it('moves up when a lower level would not cover the size, and never invents a level', () => {
+    expect(autoPoolFee('T3', ['1000000', '5000000', '9000000'])).toBe('9000000');
+    expect(autoPoolFee('D', ['9000000', '1000000', '5000000'])).toBe('9000000');
+    expect(autoPoolFee('T3', ['1000000', '2000000'])).toBe('2000000');
+    expect(autoPoolFee('unknown', levels)).toBe('10000000');
+    expect(autoPoolFee('D', [])).toBe('');
   });
 });

@@ -25,6 +25,7 @@ import {
 import { hexToBytes } from '@noble/hashes/utils';
 
 import type { C6Runtime } from '../blue_modules/neurai/privacy/deployment';
+import { AUTO_FEE, autoPoolFee } from '../blue_modules/neurai/privacy/fees';
 import { tagPrivacyTxs } from '../blue_modules/neurai/privacy/txTags';
 import { c6FundingAddresses, signPoolInputs, type PrivacyWallet } from '../blue_modules/neurai/privacy/wallet';
 import { useSettings } from './context/useSettings';
@@ -65,7 +66,8 @@ export function useC6Operations(wallet: PrivacyWallet, runtime: C6Runtime, pool:
 
   const [action, setAction] = useState<C6Action>('deposit');
   const [amount, setAmount] = useState('');
-  const [fee, setFee] = useState('');
+  // AUTO_FEE or one of the form's pinned levels.
+  const [feeChoice, setFee] = useState(AUTO_FEE);
   const [notes, setNotes] = useState<string[]>([]);
   const [destination, setDestination] = useState('');
   const [recipients, setRecipients] = useState([{ recipient: '', amount: '' }]);
@@ -90,7 +92,13 @@ export function useC6Operations(wallet: PrivacyWallet, runtime: C6Runtime, pool:
     () => (isAsset ? sponsorFees : ((runtime.config.manifest.fees as Record<string, string[]>)[form] ?? []).map(String)),
     [isAsset, sponsorFees, runtime, form],
   );
-  useEffect(() => setFee(levels[0] ?? ''), [levels]);
+  // XNA pools offer Auto (the lowest level that covers the transaction's size).
+  // Asset pools pay with a separate sponsor coin and keep their own levels.
+  const autoFee = useMemo(() => (isAsset ? (levels[0] ?? '') : autoPoolFee(form, levels)), [isAsset, form, levels]);
+  const manual = feeChoice !== AUTO_FEE && levels.includes(feeChoice);
+  const fee = manual ? feeChoice : autoFee;
+  const feeOptions = useMemo(() => (isAsset ? levels : [AUTO_FEE, ...levels]), [isAsset, levels]);
+  const feeSelection = manual || isAsset ? fee : AUTO_FEE;
 
   // Locking or switching discards everything captured for review.
   useEffect(() => {
@@ -521,6 +529,9 @@ export function useC6Operations(wallet: PrivacyWallet, runtime: C6Runtime, pool:
     setAmount,
     fee,
     setFee,
+    autoFee,
+    feeOptions,
+    feeSelection,
     notes,
     setNotes,
     destination,

@@ -9,11 +9,26 @@ import { StyleSheet, Text, View } from 'react-native';
 import { formatXna } from '@neuraiproject/neurai-privacy/client';
 
 import type { PrivacyWallet } from '../../blue_modules/neurai/privacy/wallet';
+import { AUTO_FEE } from '../../blue_modules/neurai/privacy/fees';
 import type { C6Action, C6Operations, TxPreview } from '../../hooks/useC6Operations';
 import type { C6PrivateWallet } from '../../hooks/useC6PrivateWallet';
 import type { C6Sponsor } from '../../hooks/useC6Sponsor';
 import loc from '../../loc';
-import { Card, Chip, ChipRow, Field, FolderTabs, Hint, InfoRow, Label, OutlineButton, PrimaryButton, usePrivacyTheme } from './C6UI';
+import {
+  Card,
+  Chip,
+  ChipRow,
+  Field,
+  FolderTabs,
+  Hint,
+  InfoRow,
+  Label,
+  OutlineButton,
+  PrimaryButton,
+  Segmented,
+  StepSlider,
+  usePrivacyTheme,
+} from './C6UI';
 
 export function actionLabel(action: string): string {
   switch (action) {
@@ -52,6 +67,9 @@ function Review(props: { title: string; preview: TxPreview; unit: string; busy: 
     </View>
   );
 }
+
+/** Quick deposit amounts in XNA (private payments use multiples of 100 XNA). */
+const QUICK_DEPOSITS = ['100', '200', '500'];
 
 export function C6OperationsPanel({
   wallet,
@@ -110,20 +128,16 @@ export function C6OperationsPanel({
     );
 
   const feeChips = (
-    <View>
-      <Label>{ops.isAsset ? loc.privacy.fee_xna : loc.privacy.fee}</Label>
-      <ChipRow>
-        {ops.levels.map(level => (
-          <Chip
-            key={level}
-            label={`${formatXna(level)} XNA`}
-            active={level === ops.fee}
-            disabled={locked}
-            onPress={() => ops.setFee(level)}
-          />
-        ))}
-      </ChipRow>
-    </View>
+    <StepSlider
+      label={ops.isAsset ? loc.privacy.fee_xna : loc.privacy.fee}
+      levels={ops.feeOptions}
+      value={ops.feeSelection}
+      onChange={ops.setFee}
+      format={level => (level === AUTO_FEE ? `${loc.privacy.fee_auto} · ${formatXna(ops.autoFee)} XNA` : `${formatXna(level)} XNA`)}
+      formatStop={level => (level === AUTO_FEE ? loc.privacy.fee_auto : formatXna(level))}
+      disabled={locked}
+      testID="PrivacyFee"
+    />
   );
 
   const sponsorChips = ops.isAsset ? (
@@ -157,14 +171,6 @@ export function C6OperationsPanel({
     ops.setAmount(value);
     if (pool.error) pool.setError('');
   };
-  const quickAmounts = (values: Array<{ label: string; value: string }>) =>
-    ops.isAsset ? null : (
-      <ChipRow>
-        {values.map(v => (
-          <Chip key={v.label} label={v.label} active={ops.amount === v.value} disabled={locked} onPress={() => setAmount(v.value)} />
-        ))}
-      </ChipRow>
-    );
 
   let body: React.ReactNode;
   if (ops.action === 'deposit') {
@@ -185,7 +191,15 @@ export function C6OperationsPanel({
           suffix={unit}
           testID="PrivacyAmount"
         />
-        {quickAmounts(['100', '200', '500'].map(v => ({ label: `${v} XNA`, value: v })))}
+        {ops.isAsset ? null : (
+          <Segmented
+            options={QUICK_DEPOSITS.map(v => ({ label: v, value: v }))}
+            value={ops.amount}
+            onChange={setAmount}
+            disabled={locked}
+            testID="PrivacyQuickAmount"
+          />
+        )}
         {issue ? <Hint>{issue}</Hint> : null}
         {ops.isAsset ? sponsorChips : null}
         {feeChips}
@@ -267,7 +281,7 @@ export function C6OperationsPanel({
     const note = spendable.find(n => n.cm === ops.notes[0]);
     const issue = ops.amountIssue(ops.amount, 'withdraw', note?.amountAtomic);
     const all =
-      note && BigInt(note.amountAtomic) > BigInt(ops.fee || '0')
+      !ops.isAsset && note && BigInt(note.amountAtomic) > BigInt(ops.fee || '0')
         ? formatXna(String(BigInt(note.amountAtomic) - BigInt(ops.fee || '0')))
         : null;
     body = (
@@ -281,8 +295,9 @@ export function C6OperationsPanel({
           keyboardType="decimal-pad"
           placeholder="0"
           suffix={unit}
+          labelRight={all ? `${loc.privacy.available} ${all} ${unit}` : undefined}
+          action={all ? { label: loc.privacy.all, onPress: () => setAmount(all), disabled: locked } : undefined}
         />
-        {all ? quickAmounts([{ label: `${loc.privacy.all} · ${all} XNA`, value: all }]) : null}
         {issue ? <Hint>{issue}</Hint> : null}
         <Field
           label={loc.privacy.to_address}

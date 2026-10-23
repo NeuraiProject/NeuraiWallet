@@ -1,12 +1,24 @@
 /**
  * Building blocks of the privacy tab, in the DePIN section's visual language:
  * cards with a corner badge, rounded chips, folder tabs over a panel, the
- * orange primary button and outlined secondary buttons.
+ * orange primary button and outlined secondary buttons, a stepped slider and a
+ * segmented control for quick values.
  */
 
-import React, { useMemo } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View, type KeyboardTypeOptions } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type KeyboardTypeOptions,
+} from 'react-native';
 
+import { triggerSelectionHapticFeedback } from '../../blue_modules/hapticFeedback';
 import Icon from '../Icon';
 import { useTheme } from '../themes';
 
@@ -28,6 +40,10 @@ export function usePrivacyTheme() {
       error: { color: colors.failedColor },
       errorBox: { borderColor: colors.failedColor, backgroundColor: colors.redBG },
       placeholder: colors.placeholderTextColor,
+      track: { backgroundColor: colors.formBorder },
+      stopIdle: { backgroundColor: colors.elevated, borderColor: colors.formBorder },
+      segmented: { backgroundColor: colors.inputBackgroundColor, borderColor: colors.formBorder },
+      segmentHighlight: { backgroundColor: colors.elevated, borderColor: colors.formBorder },
     }),
     [colors],
   );
@@ -208,12 +224,25 @@ export function Field(props: {
   placeholder?: string;
   keyboardType?: KeyboardTypeOptions;
   suffix?: string;
+  /** Short note on the right of the label (e.g. the available amount). */
+  labelRight?: string;
+  /** Small action inside the field, after the suffix (e.g. fill the maximum). */
+  action?: { label: string; onPress: () => void; disabled?: boolean };
   testID?: string;
 }) {
   const t = usePrivacyTheme();
   return (
     <View style={styles.field}>
-      <Label>{props.label}</Label>
+      {props.labelRight ? (
+        <View style={styles.labelRow}>
+          <Text style={[styles.labelInline, t.subtext]}>{props.label}</Text>
+          <Text style={[styles.labelInline, t.subtext]} numberOfLines={1}>
+            {props.labelRight}
+          </Text>
+        </View>
+      ) : (
+        <Label>{props.label}</Label>
+      )}
       <View style={[styles.inputRow, t.input]}>
         <TextInput
           style={[styles.input, t.text]}
@@ -229,7 +258,200 @@ export function Field(props: {
           testID={props.testID}
         />
         {props.suffix ? <Text style={[styles.suffix, t.subtext]}>{props.suffix}</Text> : null}
+        {props.action ? (
+          <Pressable
+            onPress={props.action.onPress}
+            disabled={props.action.disabled}
+            style={[styles.fieldAction, props.action.disabled && styles.muted]}
+            accessibilityRole="button"
+            hitSlop={6}
+          >
+            <Text style={styles.fieldActionText}>{props.action.label}</Text>
+          </Pressable>
+        ) : null}
       </View>
+    </View>
+  );
+}
+
+const THUMB = 22;
+const STOP = 10;
+const SLIDER_HEIGHT = 30;
+const SEGMENT_PAD = 3;
+
+/**
+ * Stepped slider for a few levels (the network fee): a thin track with one
+ * stop per level and a thumb that snaps to the nearest stop on tap or drag.
+ * The selected value sits on the right of the label.
+ */
+export function StepSlider(props: {
+  label: string;
+  levels: string[];
+  value: string;
+  onChange: (value: string) => void;
+  /** Selected value, next to the label. */
+  format: (value: string) => string;
+  /** Labels under the stops (defaults to `format`). */
+  formatStop?: (value: string) => string;
+  disabled?: boolean;
+  testID?: string;
+}) {
+  const t = usePrivacyTheme();
+  const { levels, value, onChange, disabled } = props;
+  const formatStop = props.formatStop ?? props.format;
+  const selected = levels.indexOf(value);
+  const index = Math.max(0, selected);
+  const [width, setWidth] = useState(0);
+  const step = levels.length > 1 ? Math.max(0, width - THUMB) / (levels.length - 1) : 0;
+  const position = useRef(new Animated.Value(index)).current;
+  useEffect(() => {
+    Animated.spring(position, { toValue: index, useNativeDriver: false, speed: 22, bounciness: 5 }).start();
+  }, [index, position]);
+
+  // The responder is created once and reads the latest props from here.
+  const live = useRef({ step, levels, value, onChange, disabled });
+  live.current = { step, levels, value, onChange, disabled };
+  const responder = useMemo(() => {
+    let startX = 0;
+    const pick = (x: number) => {
+      const l = live.current;
+      if (l.disabled || !l.step) return;
+      const next = l.levels[Math.min(l.levels.length - 1, Math.max(0, Math.round((x - THUMB / 2) / l.step)))];
+      if (next === l.value) return;
+      l.value = next;
+      triggerSelectionHapticFeedback();
+      l.onChange(next);
+    };
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => !live.current.disabled,
+      onMoveShouldSetPanResponder: () => !live.current.disabled,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: event => {
+        startX = event.nativeEvent.locationX;
+        pick(startX);
+      },
+      onPanResponderMove: (_event, gesture) => pick(startX + gesture.dx),
+    });
+  }, []);
+
+  const offset = Animated.multiply(position, step);
+  const valueText = selected >= 0 ? props.format(value) : '—';
+  return (
+    <View style={disabled && styles.muted}>
+      <View style={styles.labelRow}>
+        <Text style={[styles.labelInline, t.subtext]}>{props.label}</Text>
+        <Text style={styles.sliderValue}>{valueText}</Text>
+      </View>
+      {levels.length > 1 ? (
+        <>
+          <View
+            style={styles.sliderArea}
+            onLayout={event => setWidth(event.nativeEvent.layout.width)}
+            {...responder.panHandlers}
+            accessible
+            accessibilityRole="adjustable"
+            accessibilityLabel={props.label}
+            accessibilityValue={{ text: valueText }}
+            accessibilityState={{ disabled: !!disabled }}
+            accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+            onAccessibilityAction={event => {
+              const next = levels[index + (event.nativeEvent.actionName === 'increment' ? 1 : -1)];
+              if (!disabled && next) onChange(next);
+            }}
+            testID={props.testID}
+          >
+            <View pointerEvents="none" style={[styles.sliderTrack, t.track]} />
+            <Animated.View pointerEvents="none" style={[styles.sliderFill, { width: offset }]} />
+            {width > 0
+              ? levels.map((level, i) => (
+                  <View
+                    key={level}
+                    pointerEvents="none"
+                    style={[styles.sliderStop, i <= index ? styles.sliderStopOn : t.stopIdle, { left: THUMB / 2 + i * step - STOP / 2 }]}
+                  />
+                ))
+              : null}
+            <Animated.View pointerEvents="none" style={[styles.sliderThumb, { transform: [{ translateX: offset }] }]} />
+          </View>
+          <View style={styles.sliderLabels}>
+            {levels.map((level, i) => (
+              <Text
+                key={level}
+                style={[
+                  styles.sliderLabel,
+                  i === index ? [styles.sliderLabelOn, t.text] : t.subtext,
+                  i === 0
+                    ? styles.sliderLabelFirst
+                    : i === levels.length - 1
+                      ? styles.sliderLabelLast
+                      : { left: THUMB / 2 + i * step - 32 },
+                ]}
+                numberOfLines={1}
+              >
+                {formatStop(level)}
+              </Text>
+            ))}
+          </View>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * Quick values in one segmented control. The highlight slides to the selected
+ * option and fades out while the value is one of the user's own.
+ */
+export function Segmented(props: {
+  options: Array<{ label: string; value: string }>;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  testID?: string;
+}) {
+  const t = usePrivacyTheme();
+  const index = props.options.findIndex(o => o.value === props.value);
+  const [width, setWidth] = useState(0);
+  const segment = props.options.length ? Math.max(0, width - 2 * SEGMENT_PAD) / props.options.length : 0;
+  const position = useRef(new Animated.Value(Math.max(0, index))).current;
+  const shown = useRef(new Animated.Value(index >= 0 ? 1 : 0)).current;
+  useEffect(() => {
+    if (index >= 0) Animated.spring(position, { toValue: index, useNativeDriver: true, speed: 22, bounciness: 5 }).start();
+    Animated.timing(shown, { toValue: index >= 0 ? 1 : 0, duration: 150, useNativeDriver: true }).start();
+  }, [index, position, shown]);
+  return (
+    <View
+      style={[styles.segmented, t.segmented, props.disabled && styles.muted]}
+      onLayout={event => setWidth(event.nativeEvent.layout.width)}
+      testID={props.testID}
+    >
+      {segment > 0 ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.segmentHighlight,
+            t.segmentHighlight,
+            { width: segment, opacity: shown, transform: [{ translateX: Animated.multiply(position, segment) }] },
+          ]}
+        />
+      ) : null}
+      {props.options.map((option, i) => (
+        <Pressable
+          key={option.value}
+          style={styles.segment}
+          disabled={props.disabled}
+          onPress={() => {
+            if (option.value !== props.value) triggerSelectionHapticFeedback();
+            props.onChange(option.value);
+          }}
+          accessibilityRole="button"
+          accessibilityState={{ selected: i === index, disabled: !!props.disabled }}
+        >
+          <Text style={[styles.segmentText, i === index ? styles.segmentTextOn : t.subtext]} numberOfLines={1}>
+            {option.label}
+          </Text>
+        </Pressable>
+      ))}
     </View>
   );
 }
@@ -306,6 +528,8 @@ const styles = StyleSheet.create({
   testBadge: { backgroundColor: '#f59e0b', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1 },
   testBadgeText: { color: '#ffffff', fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   label: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
+  labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', columnGap: 12, marginBottom: 4 },
+  labelInline: { fontSize: 12, fontWeight: '600', flexShrink: 1 },
   hint: { fontSize: 12, lineHeight: 17 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
@@ -358,6 +582,52 @@ const styles = StyleSheet.create({
   inputRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 10, paddingHorizontal: 12 },
   input: { flex: 1, fontSize: 15, paddingVertical: 9 },
   suffix: { fontSize: 13, fontWeight: '600', marginLeft: 8 },
+  fieldAction: { marginLeft: 10, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(249, 115, 22, 0.14)' },
+  fieldActionText: { color: ACCENT, fontSize: 12, fontWeight: '700' },
+  sliderValue: { color: ACCENT, fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  sliderArea: { height: SLIDER_HEIGHT, justifyContent: 'center' },
+  sliderTrack: { position: 'absolute', left: THUMB / 2, right: THUMB / 2, top: (SLIDER_HEIGHT - 4) / 2, height: 4, borderRadius: 2 },
+  sliderFill: { position: 'absolute', left: THUMB / 2, top: (SLIDER_HEIGHT - 4) / 2, height: 4, borderRadius: 2, backgroundColor: ACCENT },
+  sliderStop: { position: 'absolute', top: (SLIDER_HEIGHT - STOP) / 2, width: STOP, height: STOP, borderRadius: STOP / 2, borderWidth: 2 },
+  sliderStopOn: { backgroundColor: ACCENT, borderColor: ACCENT },
+  sliderThumb: {
+    position: 'absolute',
+    left: 0,
+    top: (SLIDER_HEIGHT - THUMB) / 2,
+    width: THUMB,
+    height: THUMB,
+    borderRadius: THUMB / 2,
+    backgroundColor: '#ffffff',
+    borderWidth: 2,
+    borderColor: ACCENT,
+    elevation: 3,
+    shadowColor: '#000000',
+    shadowOpacity: 0.18,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  sliderLabels: { height: 18, marginTop: 2 },
+  sliderLabel: { position: 'absolute', top: 0, width: 64, fontSize: 12, textAlign: 'center', fontVariant: ['tabular-nums'] },
+  sliderLabelOn: { fontWeight: '700' },
+  sliderLabelFirst: { left: 0, textAlign: 'left' },
+  sliderLabelLast: { right: 0, textAlign: 'right' },
+  segmented: { flexDirection: 'row', borderWidth: 1, borderRadius: 10, padding: SEGMENT_PAD },
+  segmentHighlight: {
+    position: 'absolute',
+    top: SEGMENT_PAD,
+    bottom: SEGMENT_PAD,
+    left: SEGMENT_PAD,
+    borderRadius: 8,
+    borderWidth: 1,
+    elevation: 1,
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  segment: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 7 },
+  segmentText: { fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  segmentTextOn: { color: ACCENT, fontWeight: '700' },
   progress: { flexDirection: 'row', alignItems: 'center', columnGap: 8, marginTop: 10 },
   progressText: { flex: 1, fontSize: 13, fontWeight: '600' },
   progressSeconds: { fontSize: 12, fontVariant: ['tabular-nums'] },
