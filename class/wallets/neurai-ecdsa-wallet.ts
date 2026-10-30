@@ -11,8 +11,12 @@
  * for now.
  */
 
-import { chainFor, NeuraiNetwork, WalletKind } from '../../blue_modules/neurai';
+import { deriveKeysFromMnemonic } from '@neuraiproject/neurai-silent-payments';
+import { chainFor, NeuraiChainType, NeuraiNetwork, WalletKind } from '../../blue_modules/neurai';
+import { silentPaymentNetworkFor } from '../../blue_modules/neurai/silentPayments';
 import { AbstractNeuraiWallet } from './abstract-neurai-wallet';
+
+type SilentPaymentCodeCache = { network: NeuraiChainType; secret: string; passphrase: string; code: string };
 
 export class NeuraiECDSAWallet extends AbstractNeuraiWallet {
   static readonly type = 'NeuraiECDSA';
@@ -22,13 +26,37 @@ export class NeuraiECDSAWallet extends AbstractNeuraiWallet {
   // @ts-ignore: override
   public readonly typeReadable = NeuraiECDSAWallet.typeReadable;
 
+  /** Derived payment code and what it was derived from. Not persisted. */
+  private _silentPaymentCode: SilentPaymentCodeCache | null;
+
   constructor() {
     super();
     this.network = chainFor('testnet', 'ecdsa');
+    this._silentPaymentCode = null;
+    Object.defineProperty(this, '_silentPaymentCode', { writable: true, enumerable: false, value: null });
   }
 
   get walletKind(): WalletKind {
     return 'ecdsa';
+  }
+
+  /**
+   * NIP-047 silent payment code (`nsp1…` / `tnsp1…`) of this wallet's words
+   * and passphrase: the same code the node's `-addresstype=ecdsa` wallet shows
+   * for that seed. Every payment to it arrives at a new strict ECDSA v3
+   * address. The derivation runs PBKDF2 on the JS thread, so the result is
+   * kept for the session.
+   */
+  getSilentPaymentCode(): string {
+    const cached = this._silentPaymentCode;
+    if (cached && cached.network === this.network && cached.secret === this.secret && cached.passphrase === this.passphrase) {
+      return cached.code;
+    }
+    const keys = deriveKeysFromMnemonic(this.secret, this.passphrase, silentPaymentNetworkFor(this.network));
+    keys.scanPrivateKey.fill(0);
+    keys.spendPrivateKey.fill(0);
+    this._silentPaymentCode = { network: this.network, secret: this.secret, passphrase: this.passphrase, code: keys.code };
+    return keys.code;
   }
 
   /**

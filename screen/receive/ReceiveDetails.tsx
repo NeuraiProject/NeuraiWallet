@@ -22,6 +22,7 @@ import { majorTomToGroundControl, tryToObtainPermissions } from '../../blue_modu
 import { BlueButtonLink, BlueCard, BlueText } from '../../BlueComponents';
 import DeeplinkSchemaMatch from '../../class/deeplink-schema-match';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
+import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
 import { isTestnetChain } from '../../blue_modules/neurai/networkConfig';
 import presentAlert from '../../components/Alert';
 import Button from '../../components/Button';
@@ -61,6 +62,10 @@ const QR_SCROLL_RESERVED_WIDTH = (CARD_HORIZONTAL_MARGIN + CARD_INTERNAL_PADDING
 const QR_PORTRAIT_HEIGHT_FRACTION = 0.44;
 const QR_LANDSCAPE_HEIGHT_FRACTION = 0.52;
 const QR_WIDTH_USE_FRACTION = 0.92;
+
+/** Silent payment code card: a colored frame inside the same QR tile size, so the layout does not jump. */
+const SILENT_PAYMENT_ACCENT = '#7C3AED';
+const SILENT_PAYMENT_FRAME_WIDTH = 4;
 
 /** Staggered “reveal” for the QR: white tiles fade out in random order */
 const QR_STAGGER_GRID = 5;
@@ -206,8 +211,14 @@ const ReceiveDetails = () => {
   const [initialUnconfirmed, setInitialUnconfirmed] = useState(0);
   const [displayBalance, setDisplayBalance] = useState('');
   const [qrCodeSize, setQRCodeSize] = useState(90);
+  const [silentPaymentCode, setSilentPaymentCode] = useState('');
+  const [showSilentPayment, setShowSilentPayment] = useState(false);
+  const [isSilentPaymentLoading, setIsSilentPaymentLoading] = useState(false);
 
   const wallet = walletID ? wallets.find(w => w.getID() === walletID) : undefined;
+  // NIP-047: like the node, only strict ECDSA wallets have a silent payment identity.
+  const silentPaymentWallet = wallet instanceof NeuraiECDSAWallet ? wallet : undefined;
+  const isSilentPaymentShown = showSilentPayment && silentPaymentCode.length > 0;
   // BIP47 was Bitcoin-only; Neurai wallets do not publish payment codes.
   const isBIP47Enabled = false;
 
@@ -582,11 +593,15 @@ const ReceiveDetails = () => {
     [recomputeQrCodeSize],
   );
 
-  const toBalancedMultilineText = useCallback((value: string) => {
+  const toBalancedMultilineText = useCallback((value: string, lines = 2) => {
     const normalized = value.replace(/\n/g, '');
     if (normalized.length <= 1) return normalized;
-    const midpoint = Math.ceil(normalized.length / 2);
-    return `${normalized.slice(0, midpoint)}\n${normalized.slice(midpoint)}`;
+    const lineLength = Math.ceil(normalized.length / lines);
+    const chunks: string[] = [];
+    for (let i = 0; i < normalized.length; i += lineLength) {
+      chunks.push(normalized.slice(i, i + lineLength));
+    }
+    return chunks.join('\n');
   }, []);
 
   const showReceiveSkeleton = !showAddress && !showPendingBalance && !showConfirmedBalance && Boolean(wallet ?? route.params.address);
@@ -619,7 +634,10 @@ const ReceiveDetails = () => {
     let qrValue: string | undefined;
     let copyText: string | undefined;
 
-    if (isAddressTab) {
+    if (isSilentPaymentShown) {
+      qrValue = silentPaymentURI;
+      copyText = silentPaymentCode;
+    } else if (isAddressTab) {
       if (!address) return null;
       qrValue = bip21encoded;
       copyText = isCustom ? bip21encoded : address;
@@ -628,10 +646,12 @@ const ReceiveDetails = () => {
       copyText = paymentCodeString || undefined;
     }
 
-    const showTabs = Boolean(wallet && isBIP47Enabled);
+    const showTabs = Boolean(wallet && isBIP47Enabled) && !isSilentPaymentShown;
     const showTip = !isAddressTab && Boolean(qrValue);
-    const showCustomAmount = isAddressTab && isCustom;
-    const displayCopyText = copyText && isAddressTab ? toBalancedMultilineText(copyText) : undefined;
+    const showCustomAmount = isAddressTab && isCustom && !isSilentPaymentShown;
+    // A payment code is about twice as long as an address: four lines keep the same width.
+    const displayCopyText = copyText && isAddressTab ? toBalancedMultilineText(copyText, isSilentPaymentShown ? 4 : 2) : undefined;
+    const qrSize = isSilentPaymentShown ? qrCodeSize - SILENT_PAYMENT_FRAME_WIDTH * 2 : qrCodeSize;
 
     return (
       <Pressable
@@ -660,6 +680,12 @@ const ReceiveDetails = () => {
             </View>
           )}
 
+          {isSilentPaymentShown && (
+            <View style={styles.silentPaymentBadge} testID="SilentPaymentBadge">
+              <Text style={styles.silentPaymentBadgeText}>{loc.receive.silent_payments}</Text>
+            </View>
+          )}
+
           {showTip && <BlueText style={[styles.paymentCodeDescription, stylesHook.label]}>{loc.receive.bip47_explanation}</BlueText>}
 
           {showCustomAmount && (
@@ -678,9 +704,9 @@ const ReceiveDetails = () => {
           )}
 
           {qrValue ? (
-            <View style={styles.qrCardWrapper}>
-              <QrStaggerReveal size={qrCodeSize} maskColor="#FFFFFF" runKey={`${currentTab}|${qrValue}`}>
-                <QRCode value={qrValue} size={qrCodeSize} />
+            <View style={[styles.qrCardWrapper, isSilentPaymentShown && styles.silentPaymentQrFrame]} testID="ReceiveQrCard">
+              <QrStaggerReveal size={qrSize} maskColor="#FFFFFF" runKey={`${currentTab}|${qrValue}`}>
+                <QRCode value={qrValue} size={qrSize} />
               </QrStaggerReveal>
             </View>
           ) : (
@@ -750,6 +776,31 @@ const ReceiveDetails = () => {
     });
   }, [address, customAmount, customLabel, customUnit, navigate, wallet]);
 
+  const silentPaymentURI = useMemo(
+    () => (silentPaymentCode ? DeeplinkSchemaMatch.bip21encode(silentPaymentCode, undefined, 'xna') : ''),
+    [silentPaymentCode],
+  );
+
+  const toggleSilentPayment = useCallback(() => {
+    if (showSilentPayment || !silentPaymentWallet) {
+      setShowSilentPayment(false);
+      return;
+    }
+    triggerHapticFeedback(HapticFeedbackTypes.ImpactLight);
+    setIsSilentPaymentLoading(true);
+    // The first derivation blocks the JS thread for a moment: let the button show its spinner first.
+    setTimeout(() => {
+      try {
+        setSilentPaymentCode(silentPaymentWallet.getSilentPaymentCode());
+        setShowSilentPayment(true);
+      } catch (error) {
+        presentAlert({ title: loc.errors.error, message: (error as Error).message });
+      } finally {
+        setIsSilentPaymentLoading(false);
+      }
+    }, 0);
+  }, [showSilentPayment, silentPaymentWallet]);
+
   useEffect(() => {
     const {
       customLabel: incomingLabel,
@@ -817,7 +868,8 @@ const ReceiveDetails = () => {
   };
 
   const handleShareButtonPressed = () => {
-    const message = currentTab === segmentControlValues[0] ? bip21encoded : paymentCodeString;
+    // The bare code, which is what a sender pastes into its pay-to field.
+    const message = isSilentPaymentShown ? silentPaymentCode : currentTab === segmentControlValues[0] ? bip21encoded : paymentCodeString;
 
     if (!message) {
       presentAlert({ title: loc.errors.error, message: loc.bip47.not_found });
@@ -856,13 +908,26 @@ const ReceiveDetails = () => {
 
         <View style={styles.share}>
           <BlueCard>
-            {showAddress && currentTab === loc.wallets.details_address && (
+            {showAddress && currentTab === loc.wallets.details_address && !isSilentPaymentShown && (
               <BlueButtonLink
                 style={styles.link}
                 testID="SetCustomAmountButton"
                 title={loc.receive.details_setAmount}
                 onPress={showCustomAmountModal}
               />
+            )}
+            {showAddress && silentPaymentWallet && (
+              <>
+                <Button
+                  onPress={toggleSilentPayment}
+                  testID="SilentPaymentsButton"
+                  title={isSilentPaymentShown ? loc.receive.show_address : loc.receive.silent_payments}
+                  backgroundColor={SILENT_PAYMENT_ACCENT}
+                  showActivityIndicator={isSilentPaymentLoading}
+                  disabled={isSilentPaymentLoading}
+                />
+                <View style={styles.buttonSpacer} />
+              </>
             )}
             <Button
               onPress={handleShareButtonPressed}
@@ -951,6 +1016,26 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 12,
     elevation: 4,
+  },
+  silentPaymentQrFrame: {
+    borderWidth: SILENT_PAYMENT_FRAME_WIDTH,
+    borderColor: SILENT_PAYMENT_ACCENT,
+  },
+  silentPaymentBadge: {
+    backgroundColor: SILENT_PAYMENT_ACCENT,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginTop: 6,
+    marginBottom: 12,
+  },
+  silentPaymentBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  buttonSpacer: {
+    height: 12,
   },
   qrPlaceholder: {
     borderRadius: 4,

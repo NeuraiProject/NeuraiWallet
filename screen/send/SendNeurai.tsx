@@ -42,6 +42,7 @@ import loc from '../../loc';
 import type { DetailViewStackParamList } from '../../navigation/DetailViewStackParamList';
 import type { NeuraiBuildTransactionResult, NeuraiTransactionTarget } from '../../class/wallets/abstract-neurai-wallet';
 import { formatAssetAmount, type NeuraiAssetType, type NeuraiHeldAsset } from '../../blue_modules/neurai/assetUtils';
+import { looksLikeSilentPaymentCode } from '../../blue_modules/neurai/silentPayments';
 
 /** Human label for an asset type, for the picker rows. */
 function assetTypeLabel(type: NeuraiAssetType): string {
@@ -213,7 +214,18 @@ const SendNeurai: React.FC = () => {
       presentAlert({ message: loc.send.details_address_field_is_not_valid });
       return;
     }
-    if (!wallet.isAddressValid(address.trim())) {
+    // NIP-047 payment code: the wallet derives the one-time address from the inputs it spends.
+    const isSilentPayment = looksLikeSilentPaymentCode(address);
+    if (isSilentPayment) {
+      if (hwWallet || wallet.walletKind !== 'ecdsa') {
+        presentAlert({ message: loc.send.silent_payment_ecdsa_only });
+        return;
+      }
+      if (isAssetMode) {
+        presentAlert({ message: loc.send.silent_payment_no_assets });
+        return;
+      }
+    } else if (!wallet.isAddressValid(address.trim())) {
       presentAlert({ message: loc.send.details_address_field_is_not_valid });
       return;
     }
@@ -263,7 +275,9 @@ const SendNeurai: React.FC = () => {
         const receiveAddr = await wallet.getStaticReceiveAddress();
         if (receiveAddr !== address.trim()) forcedChangeAddress = receiveAddr;
       }
-      if (isAssetMode && selectedAsset) {
+      if (isSilentPayment) {
+        result = await wallet.buildSilentPaymentTransaction(address.trim(), isSendMax ? null : xna);
+      } else if (isAssetMode && selectedAsset) {
         // Asset transfer: amount is in the asset's units; the fee is paid in XNA
         // and selected by the engine.
         const targets: NeuraiTransactionTarget[] = [{ address: address.trim(), amount: xna }];

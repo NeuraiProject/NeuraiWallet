@@ -28,6 +28,7 @@ import {
 
 import { markerForChain } from '../../blue_modules/neurai/assetMarker';
 import { sign as signNeuraiTransaction } from '@neuraiproject/neurai-sign-transaction';
+import { checkCode, createOutputs, decodeWIF, type DerivedOutput } from '@neuraiproject/neurai-silent-payments';
 import type { NeuraiESP32 } from '@neuraiproject/neurai-sign-esp32/react-native';
 import * as bitcoin from 'bitcoinjs-lib';
 import { Buffer } from 'buffer';
@@ -49,6 +50,7 @@ import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
 import { LOCAL_FEE_RATE_RPC, LOCAL_FEE_RATE_XNA_PER_KB } from '../../blue_modules/neurai/feePolicy';
 import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
 import { dustThresholdSats } from '../../blue_modules/neurai/dust';
+import { silentPaymentNetworkFor } from '../../blue_modules/neurai/silentPayments';
 import {
   ecdsaKeyNetworkFor,
   engineNetworkFor,
@@ -1448,6 +1450,113 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   }
 
   /**
+   * Build + sign a payment to a NIP-047 silent payment code (`tnsp1…`). The
+   * output address is derived from the inputs, so they are chosen first and
+   * never change afterwards. Receivers only find payments whose inputs are all
+   * strict ECDSA v3 coins spent with the default template, in a version 2
+   * transaction: only ECDSA wallets can send them. `amount` null spends every
+   * coin with the fee deducted, like {@link buildSendMaxTransaction}.
+   */
+  async buildSilentPaymentTransaction(code: string, amount: string | null): Promise<NeuraiBuildTransactionResult> {
+    if (this.walletKind !== 'ecdsa') throw new Error('Silent payments can only be sent from an ECDSA wallet');
+    if (this.amountsStale) throw new Error('Refresh this wallet before sending');
+    const network = silentPaymentNetworkFor(this.network);
+    const check = checkCode(code, network);
+    if (!check.valid) throw new Error(`Invalid silent payment code (${check.reason})`);
+
+    const engine = await this.ensureEngine();
+    const [utxosRaw, mempool] = await Promise.all([engine.getUTXOs(), engine.getMempool()]);
+    const spentInMempool = new Set(mempool.map(m => `${m.prevtxid}:${m.prevout}`));
+    const utxos: SpendableUtxo[] = utxosRaw
+      .map(u => ({ ...u, satoshis: rawToSats(u.satoshis) }))
+      .filter(u => (u.assetName === 'XNA' || !u.assetName) && u.satoshis > 0 && !spentInMempool.has(`${u.txid}:${u.outputIndex}`));
+    if (utxos.length === 0) throw new Error('No spendable XNA to send');
+
+    const feeRate = await this.estimateFeeRate();
+    const changeAddress = await engine.getChangeAddress();
+    const changeDust = dustThresholdSats(changeAddress);
+    const total = (coins: SpendableUtxo[]) => coins.reduce((sum, u) => sum + u.satoshis, 0n);
+    // The payment is a strict v3 output like the change, so the change address sizes it.
+    const feeFor = (coins: SpendableUtxo[], withChange: boolean) =>
+      estimateNeuraiFeeSats(
+        coins.map(u => u.script),
+        withChange ? [changeAddress, changeAddress] : [changeAddress],
+        feeRate,
+      );
+
+    let inputs: SpendableUtxo[];
+    let amountSats: bigint;
+    let feeSats: bigint;
+    let changeSats = 0n;
+    if (amount === null) {
+      inputs = utxos;
+      feeSats = feeFor(inputs, false);
+      amountSats = total(inputs) - feeSats;
+      if (amountSats < changeDust) throw new Error('Balance too low to cover the network fee');
+    } else {
+      amountSats = decimalToSats(amountFromInput(amount));
+      if (amountSats <= 0n) throw new Error('Invalid amount');
+      inputs = selectUtxosForSats(utxos, amountSats + feeFor([utxos[0]], true));
+      // Every extra input raises the fee: select again until the coins cover it.
+      for (;;) {
+        feeSats = feeFor(inputs, true);
+        if (total(inputs) >= amountSats + feeSats) break;
+        inputs = selectUtxosForSats(utxos, amountSats + feeSats);
+      }
+      changeSats = total(inputs) - amountSats - feeSats;
+      // Fold a sub-dust change into the fee rather than emitting an unspendable output.
+      if (changeSats > 0 && changeSats < changeDust) {
+        feeSats += changeSats;
+        changeSats = 0n;
+      }
+    }
+
+    const wifs: Record<string, string> = {};
+    for (const u of inputs) {
+      const material = engine.getPrivateKeyByAddress(u.address);
+      if (typeof material !== 'string') throw new Error(`No ECDSA key for ${u.address}`);
+      wifs[u.address] = material;
+    }
+    // `script` makes the library refuse any input a receiver would not accept.
+    const senderInputs = inputs.map(u => ({
+      txid: u.txid,
+      vout: u.outputIndex,
+      privateKey: decodeWIF(wifs[u.address], network),
+      script: u.script,
+    }));
+    let payment: DerivedOutput;
+    try {
+      [payment] = createOutputs(senderInputs, [{ code }], { network });
+    } finally {
+      for (const input of senderInputs) input.privateKey.fill(0);
+    }
+
+    const payments = [{ address: payment.address, valueSats: amountSats }];
+    if (changeSats > 0) payments.push({ address: changeAddress, valueSats: changeSats });
+    const { rawTx } = createPaymentTransaction({
+      version: 2,
+      inputs: inputs.map(u => ({ txid: u.txid, vout: u.outputIndex })),
+      payments,
+    });
+    const signedHex = signNeuraiTransaction(
+      signerNetworkFor(this.getEngineNetwork()),
+      rawTx,
+      inputs as unknown as Parameters<typeof signNeuraiTransaction>[2],
+      wifs as Parameters<typeof signNeuraiTransaction>[3],
+    );
+    if (!signedHex) throw new Error('Failed to sign the silent payment');
+
+    return {
+      signedHex,
+      unsignedHex: rawTx,
+      feeSats,
+      sentAmountSats: amountSats,
+      netDebitSats: amountSats + feeSats,
+      debug: { silentPayment: { code, address: payment.address, k: payment.k }, inputs: inputs.length, changeSats },
+    };
+  }
+
+  /**
    * Build + sign a "reveal public key" transaction for the dedicated DePIN chat
    * address (account 100, `m/44'/coin'/100'/0/0`). That address lives OUTSIDE
    * the wallet's normal derivation window, so the engine doesn't hold its key —
@@ -1631,10 +1740,6 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   allowReceive(): boolean {
     return true;
-  }
-
-  allowRBF(): boolean {
-    return false;
   }
 
   allowPayJoin(): boolean {

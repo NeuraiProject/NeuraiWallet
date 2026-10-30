@@ -4,6 +4,8 @@ import fixtures from './fixtures/neurai-key4-addresses.json';
 import { RpcBackend } from '../../blue_modules/neurai/RpcBackend';
 
 import { getAddressPair } from '@neuraiproject/neurai-key';
+import { checkCode, deriveKeysFromMnemonic, scanTransaction } from '@neuraiproject/neurai-silent-payments';
+import { computeTxid, parseTransaction } from '@neuraiproject/neurai-create-transaction';
 import * as bitcoin from 'bitcoinjs-lib';
 import { CHAIN_PARAMS, chainFor, createDefaultBackend, isKindAvailable, isTestnetChain, kindOfChain } from '../../blue_modules/neurai';
 import { signerNetworkFor } from '../../blue_modules/neurai/keyNetwork';
@@ -134,6 +136,101 @@ describe('Neurai wallets', () => {
       assert.throws(() => w.setNetwork('xna-test'), /Wallet kind mismatch/);
       assert.throws(() => w.setNetwork('xna-pq-test'), /Wallet kind mismatch/);
       assert.throws(() => new NeuraiHDWallet().setNetwork('xna-ecdsa-test'), /Wallet kind mismatch/);
+    });
+
+    it('derives the NIP-047 silent payment code of its words and passphrase', () => {
+      const w = NeuraiECDSAWallet.forNetwork('testnet', KNOWN_MNEMONIC);
+      const code = w.getSilentPaymentCode();
+      assert.strictEqual(code, deriveKeysFromMnemonic(KNOWN_MNEMONIC, '', 'test').code);
+      assert.ok(checkCode(code, 'test').valid);
+      assert.strictEqual(w.getSilentPaymentCode(), code);
+      // The cached code is not persisted.
+      assert.ok(!JSON.stringify(w).includes(code));
+
+      w.setPassphrase('25th word');
+      const withPassphrase = w.getSilentPaymentCode();
+      assert.notStrictEqual(withPassphrase, code);
+      assert.strictEqual(withPassphrase, deriveKeysFromMnemonic(KNOWN_MNEMONIC, '25th word', 'test').code);
+
+      w.setNetwork('xna-ecdsa');
+      assert.ok(w.getSilentPaymentCode().startsWith('nsp1'));
+    });
+
+    describe('sending to a silent payment code', () => {
+      const RECEIVER_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+      const receiver = deriveKeysFromMnemonic(RECEIVER_MNEMONIC, '', 'test');
+      const coins = [
+        { txid: 'aa'.repeat(32), outputIndex: 0, satoshis: 100000000, key: ecdsaPair('xna-test', 0).external },
+        { txid: 'bb'.repeat(32), outputIndex: 1, satoshis: 50000000, key: ecdsaPair('xna-test', 1).external },
+      ].map(c => ({
+        txid: c.txid,
+        outputIndex: c.outputIndex,
+        satoshis: c.satoshis,
+        address: c.key.address,
+        assetName: 'XNA',
+        script: `5320${c.key.commitment}`,
+        height: 100,
+      }));
+
+      const senderWallet = () => {
+        const w = NeuraiECDSAWallet.forNetwork('testnet', KNOWN_MNEMONIC);
+        const rpc = jest.fn(async (method: string) => {
+          if (method === 'getaddressutxos') return coins;
+          if (method === 'getaddressmempool') return [];
+          throw new Error(`unexpected rpc ${method}`);
+        });
+        jest.spyOn(w, 'getBackend').mockReturnValue({ chain: 'xna-ecdsa-test', rpc } as never);
+        return w;
+      };
+
+      // What a receiver scans: the signed transaction plus the scripts its inputs spend.
+      const receivedBy = (signedHex: string) => {
+        const tx = parseTransaction(signedHex);
+        assert.strictEqual(tx.version, 2);
+        const scanTx = {
+          txid: computeTxid(signedHex),
+          version: tx.version,
+          inputs: tx.inputs.map(i => ({
+            txid: i.txid,
+            vout: i.vout,
+            witness: i.witness ?? [],
+            prevoutScript: coins.find(c => c.txid === i.txid && c.outputIndex === i.vout)?.script,
+          })),
+          outputs: tx.outputs.map(o => ({ script: o.scriptPubKeyHex, valueSat: o.valueSats })),
+        };
+        return { tx, payments: scanTransaction(scanTx, receiver, { network: 'test' }) };
+      };
+
+      it('pays a one-time address that the receiver finds by scanning', async () => {
+        const result = await senderWallet().buildSilentPaymentTransaction(receiver.code, '1.2');
+        const { tx, payments } = receivedBy(result.signedHex);
+        assert.strictEqual(tx.inputs.length, 2);
+        assert.strictEqual(tx.outputs.length, 2);
+        assert.strictEqual(payments.length, 1);
+        assert.strictEqual(payments[0].valueSat, 120000000n);
+        assert.strictEqual(payments[0].address, (result.debug as { silentPayment: { address: string } }).silentPayment.address);
+        assert.strictEqual(result.sentAmountSats, 120000000n);
+        assert.strictEqual(result.netDebitSats, 120000000n + result.feeSats);
+        const change = tx.outputs.find(o => o.scriptPubKeyHex !== Buffer.from(payments[0].script).toString('hex'));
+        assert.strictEqual(change?.valueSats, 150000000n - 120000000n - result.feeSats);
+      });
+
+      it('spends every coin without change when sending the whole balance', async () => {
+        const result = await senderWallet().buildSilentPaymentTransaction(receiver.code, null);
+        const { tx, payments } = receivedBy(result.signedHex);
+        assert.strictEqual(tx.outputs.length, 1);
+        assert.strictEqual(payments.length, 1);
+        assert.strictEqual(payments[0].valueSat, 150000000n - result.feeSats);
+      });
+
+      it('refuses codes of another network and wallets that cannot send them', async () => {
+        const mainnetCode = deriveKeysFromMnemonic(RECEIVER_MNEMONIC, '', 'main').code;
+        await assert.rejects(senderWallet().buildSilentPaymentTransaction(mainnetCode, '1'), /Invalid silent payment code \(network\)/);
+        await assert.rejects(
+          NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC).buildSilentPaymentTransaction(receiver.code, '1'),
+          /only be sent from an ECDSA wallet/,
+        );
+      });
     });
 
     it("derives the node's witness v3 addresses under m/84'", async () => {

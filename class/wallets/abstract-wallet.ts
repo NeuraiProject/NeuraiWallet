@@ -171,10 +171,6 @@ export class AbstractWallet {
     return true;
   }
 
-  allowRBF(): boolean {
-    return false;
-  }
-
   allowSignVerifyMessage(): boolean {
     return false;
   }

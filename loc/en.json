@@ -230,6 +230,8 @@
     "header": "Receive",
     "reset": "Reset",
     "qrcode_for_the_address": "QR Code for the address",
+    "silent_payments": "Silent Payments",
+    "show_address": "Show Address",
     "bip47_explanation": "Payment codes are a universal address that avoids disclosing your wallet addresses. Not all services will support them."
   },
   "send": {
@@ -248,7 +250,8 @@
     "details_add_rec_rem_all": "Remove All Recipients",
     "details_address": "Address",
     "details_address_field_is_not_valid": "The address is not valid.",
-    "details_adv_fee_bump": "Allow Fee Bump",
+    "silent_payment_ecdsa_only": "Silent payments can only be sent from an ECDSA wallet.",
+    "silent_payment_no_assets": "Silent payments can only send XNA, not assets.",
     "details_adv_full": "Use Full Balance",
     "details_adv_import": "Import Transaction",
     "details_adv_import_qr": "Import Transaction (QR)",
