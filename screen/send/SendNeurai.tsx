@@ -217,8 +217,8 @@ const SendNeurai: React.FC = () => {
     // NIP-047 payment code: the wallet derives the one-time address from the inputs it spends.
     const isSilentPayment = looksLikeSilentPaymentCode(address);
     if (isSilentPayment) {
-      if (hwWallet || wallet.walletKind !== 'ecdsa') {
-        presentAlert({ message: loc.send.silent_payment_ecdsa_only });
+      if (hwWallet) {
+        presentAlert({ message: loc.send.silent_payment_hardware });
         return;
       }
       if (isAssetMode) {
@@ -276,7 +276,7 @@ const SendNeurai: React.FC = () => {
         if (receiveAddr !== address.trim()) forcedChangeAddress = receiveAddr;
       }
       if (isSilentPayment) {
-        result = await wallet.buildSilentPaymentTransaction(address.trim(), isSendMax ? null : xna);
+        result = await wallet.buildSilentPaymentTransaction(address.trim(), isSendMax ? null : xna, { forcedChangeAddress });
       } else if (isAssetMode && selectedAsset) {
         // Asset transfer: amount is in the asset's units; the fee is paid in XNA
         // and selected by the engine.
@@ -302,12 +302,23 @@ const SendNeurai: React.FC = () => {
     if (!draft || !wallet) return;
     setIsBroadcasting(true);
     try {
-      const txid = await wallet.broadcastTx(draft.signedHex);
+      let txid = await wallet.broadcastTx(draft.signedHex);
+      // Show the send immediately as a 0-conf pending entry and subtract it
+      // from the balance; it is reconciled away once the tx confirms. A retry
+      // of a silent payment's second transaction debits nothing more.
+      if (draft.netDebitSats > 0n) wallet.addPendingTx(txid, -draft.netDebitSats, draft.asset);
+      if (draft.chainedHex) {
+        try {
+          txid = await wallet.broadcastTx(draft.chainedHex);
+        } catch (err: any) {
+          // The coins already left: Send again only retries the second transaction.
+          setDraft({ ...draft, signedHex: draft.chainedHex, chainedHex: undefined, netDebitSats: 0n });
+          presentAlert({ message: loc.formatString(loc.send.silent_payment_retry, { reason: err?.message ?? String(err) }) });
+          return;
+        }
+      }
       triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
       presentAlert({ message: `${loc.send.broadcastSuccess}: ${txid}` });
-      // Show the send immediately as a 0-conf pending entry and subtract it
-      // from the balance; it is reconciled away once the tx confirms.
-      wallet.addPendingTx(txid, -draft.netDebitSats, draft.asset);
       // Pull mempool + balance straight away so the wallet list reflects the
       // pending tx by the time we land on it. Failures here are non-fatal —
       // the WalletTransactions auto-poller will catch up within 10 s.

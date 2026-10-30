@@ -5,7 +5,7 @@ import { RpcBackend } from '../../blue_modules/neurai/RpcBackend';
 
 import { getAddressPair } from '@neuraiproject/neurai-key';
 import { checkCode, deriveKeysFromMnemonic, scanTransaction } from '@neuraiproject/neurai-silent-payments';
-import { computeTxid, parseTransaction } from '@neuraiproject/neurai-create-transaction';
+import { computeTxid, encodeDestinationScript, parseTransaction } from '@neuraiproject/neurai-create-transaction';
 import * as bitcoin from 'bitcoinjs-lib';
 import { CHAIN_PARAMS, chainFor, createDefaultBackend, isKindAvailable, isTestnetChain, kindOfChain } from '../../blue_modules/neurai';
 import { signerNetworkFor } from '../../blue_modules/neurai/keyNetwork';
@@ -184,7 +184,7 @@ describe('Neurai wallets', () => {
       };
 
       // What a receiver scans: the signed transaction plus the scripts its inputs spend.
-      const receivedBy = (signedHex: string) => {
+      const receivedBy = (signedHex: string, prevouts: { txid: string; outputIndex: number; script: string }[] = coins) => {
         const tx = parseTransaction(signedHex);
         assert.strictEqual(tx.version, 2);
         const scanTx = {
@@ -194,7 +194,7 @@ describe('Neurai wallets', () => {
             txid: i.txid,
             vout: i.vout,
             witness: i.witness ?? [],
-            prevoutScript: coins.find(c => c.txid === i.txid && c.outputIndex === i.vout)?.script,
+            prevoutScript: prevouts.find(c => c.txid === i.txid && c.outputIndex === i.vout)?.script,
           })),
           outputs: tx.outputs.map(o => ({ script: o.scriptPubKeyHex, valueSat: o.valueSats })),
         };
@@ -223,13 +223,76 @@ describe('Neurai wallets', () => {
         assert.strictEqual(payments[0].valueSat, 150000000n - result.feeSats);
       });
 
-      it('refuses codes of another network and wallets that cannot send them', async () => {
+      it('refuses codes of another network and networks without witness v3', async () => {
         const mainnetCode = deriveKeysFromMnemonic(RECEIVER_MNEMONIC, '', 'main').code;
         await assert.rejects(senderWallet().buildSilentPaymentTransaction(mainnetCode, '1'), /Invalid silent payment code \(network\)/);
         await assert.rejects(
-          NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC).buildSilentPaymentTransaction(receiver.code, '1'),
-          /only be sent from an ECDSA wallet/,
+          NeuraiHDWallet.forNetwork('mainnet', KNOWN_MNEMONIC).buildSilentPaymentTransaction(mainnetCode, '1'),
+          /not active on this network/,
         );
+      });
+
+      describe('from Legacy and PQ wallets', () => {
+        // First ECDSA change address of the same words: the coin between both transactions.
+        const bridgeAddress = ecdsaPair('xna-test', 0).internal.address;
+
+        /** `wallet` holding one 5 XNA coin on its first address. */
+        const funded = async (wallet: NeuraiHDWallet | NeuraiPQWallet) => {
+          const [own] = await wallet.listOwnAddresses();
+          const script = Buffer.from(encodeDestinationScript(own)).toString('hex');
+          const rpc = jest.fn(async (method: string) => {
+            if (method === 'getaddressutxos') {
+              return [
+                { address: own, assetName: 'XNA', txid: 'cd'.repeat(32), outputIndex: 0, script, satoshis: 500_000_000, height: 100 },
+              ];
+            }
+            if (method === 'getaddressmempool') return [];
+            if (method === 'gettxout') return { value: 5, scriptPubKey: { hex: script } };
+            throw new Error(`unexpected rpc ${method}`);
+          });
+          wallet.setBackend({ chain: wallet.network, rpc } as never);
+          return wallet;
+        };
+
+        // The second transaction spends the first one's coin on the ECDSA address and pays the code.
+        const bridged = (result: { signedHex: string; chainedHex?: string }) => {
+          assert.ok(result.chainedHex, 'a second transaction');
+          const bridgeScript = Buffer.from(encodeDestinationScript(bridgeAddress)).toString('hex');
+          const first = parseTransaction(result.signedHex);
+          const vout = first.outputs.findIndex(o => o.scriptPubKeyHex === bridgeScript);
+          assert.ok(vout >= 0, 'the first transaction pays the ECDSA address');
+          const bridgeCoin = { txid: computeTxid(result.signedHex), outputIndex: vout, script: bridgeScript };
+          const second = receivedBy(result.chainedHex!, [bridgeCoin]);
+          assert.deepStrictEqual(
+            second.tx.inputs.map(i => `${i.txid}:${i.vout}`),
+            [`${bridgeCoin.txid}:${vout}`],
+          );
+          assert.strictEqual(second.tx.outputs.length, 1);
+          return { first, bridgeSats: first.outputs[vout].valueSats, payments: second.payments };
+        };
+
+        it('pays from a Legacy wallet through the ECDSA address of its words', async () => {
+          const wallet = await funded(NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC));
+          const result = await wallet.buildSilentPaymentTransaction(receiver.code, '1.2');
+          const { first, bridgeSats, payments } = bridged(result);
+          assert.strictEqual(payments.length, 1);
+          assert.strictEqual(payments[0].valueSat, 120000000n);
+          assert.strictEqual(first.outputs.length, 2, 'the change stays in the Legacy wallet');
+          assert.strictEqual(result.sentAmountSats, 120000000n);
+          assert.strictEqual(result.netDebitSats, 120000000n + result.feeSats);
+          assert.ok(bridgeSats > 120000000n && bridgeSats < 120000000n + result.feeSats, 'the bridge carries the second fee');
+          assert.strictEqual((result.debug as { bridge: { address: string } }).bridge.address, bridgeAddress);
+        }, 60_000);
+
+        it('sends the whole balance of a PQ wallet', async () => {
+          const wallet = await funded(NeuraiPQWallet.forNetwork('testnet', KNOWN_MNEMONIC));
+          const result = await wallet.buildSilentPaymentTransaction(receiver.code, null);
+          const { first, payments } = bridged(result);
+          assert.strictEqual(first.outputs.length, 1);
+          assert.strictEqual(payments.length, 1);
+          assert.strictEqual(payments[0].valueSat, 500000000n - result.feeSats);
+          assert.strictEqual(result.netDebitSats, 500000000n);
+        }, 60_000);
       });
     });
 
