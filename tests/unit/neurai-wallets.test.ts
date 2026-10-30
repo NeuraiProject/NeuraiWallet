@@ -4,7 +4,14 @@ import fixtures from './fixtures/neurai-key4-addresses.json';
 import { RpcBackend } from '../../blue_modules/neurai/RpcBackend';
 
 import { getAddressPair } from '@neuraiproject/neurai-key';
-import { checkCode, deriveKeysFromMnemonic, scanTransaction } from '@neuraiproject/neurai-silent-payments';
+import {
+  checkCode,
+  computeIndexEntry,
+  deriveKeysFromMnemonic,
+  getContext,
+  scanTransaction,
+  type IndexEntry,
+} from '@neuraiproject/neurai-silent-payments';
 import { computeTxid, encodeDestinationScript, parseTransaction } from '@neuraiproject/neurai-create-transaction';
 import * as bitcoin from 'bitcoinjs-lib';
 import { CHAIN_PARAMS, chainFor, createDefaultBackend, isKindAvailable, isTestnetChain, kindOfChain } from '../../blue_modules/neurai';
@@ -156,7 +163,7 @@ describe('Neurai wallets', () => {
       assert.ok(w.getSilentPaymentCode().startsWith('nsp1'));
     });
 
-    describe('sending to a silent payment code', () => {
+    describe('silent payments', () => {
       const RECEIVER_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
       const receiver = deriveKeysFromMnemonic(RECEIVER_MNEMONIC, '', 'test');
       const coins = [
@@ -184,10 +191,10 @@ describe('Neurai wallets', () => {
       };
 
       // What a receiver scans: the signed transaction plus the scripts its inputs spend.
-      const receivedBy = (signedHex: string, prevouts: { txid: string; outputIndex: number; script: string }[] = coins) => {
+      const scanTxOf = (signedHex: string, prevouts: { txid: string; outputIndex: number; script: string }[] = coins) => {
         const tx = parseTransaction(signedHex);
         assert.strictEqual(tx.version, 2);
-        const scanTx = {
+        return {
           txid: computeTxid(signedHex),
           version: tx.version,
           inputs: tx.inputs.map(i => ({
@@ -198,8 +205,11 @@ describe('Neurai wallets', () => {
           })),
           outputs: tx.outputs.map(o => ({ script: o.scriptPubKeyHex, valueSat: o.valueSats })),
         };
-        return { tx, payments: scanTransaction(scanTx, receiver, { network: 'test' }) };
       };
+      const receivedBy = (signedHex: string, prevouts: { txid: string; outputIndex: number; script: string }[] = coins) => ({
+        tx: parseTransaction(signedHex),
+        payments: scanTransaction(scanTxOf(signedHex, prevouts), receiver, { network: 'test' }),
+      });
 
       it('pays a one-time address that the receiver finds by scanning', async () => {
         const result = await senderWallet().buildSilentPaymentTransaction(receiver.code, '1.2');
@@ -293,6 +303,127 @@ describe('Neurai wallets', () => {
           assert.strictEqual(payments[0].valueSat, 500000000n - result.feeSats);
           assert.strictEqual(result.netDebitSats, 500000000n);
         }, 60_000);
+      });
+
+      describe('receiving', () => {
+        const chain = { network: 'test' as const };
+        const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
+        const hash = (height: number) => height.toString(16).padStart(64, '0');
+        const indexBlock = (height: number, entries: IndexEntry[] = []) => ({
+          height,
+          hash: hash(height),
+          prev: hash(height - 1),
+          entries: entries.map(e => ({
+            txid: e.txid,
+            tweak: hex(e.tweak),
+            outputs: e.outputs.map(o => ({ vout: o.vout, commitment: hex(o.commitment), value_sat: o.valueSat.toString() })),
+          })),
+          spent: [],
+        });
+        const indexRange = (blocks: ReturnType<typeof indexBlock>[], tip: number) => ({
+          format: 1,
+          context: hex(getContext(chain)),
+          snapshot: { height: tip, hash: hash(tip) },
+          synced_height: tip,
+          blocks,
+          next_height: tip + 1,
+          status: 'tip',
+        });
+
+        /** A payment of 1.2 XNA to the receiver, mined in block 11 of an index that ends at block 12. */
+        const paidIndex = async () => {
+          const sent = await senderWallet().buildSilentPaymentTransaction(receiver.code, '1.2');
+          const entry = computeIndexEntry(scanTxOf(sent.signedHex), chain);
+          assert.ok(entry);
+          const [paid] = receivedBy(sent.signedHex).payments;
+          const range = (from: number) =>
+            indexRange(
+              [10, 11, 12].filter(h => h >= from).map(h => indexBlock(h, h === 11 ? [entry] : [])),
+              12,
+            );
+          return { paid, range };
+        };
+
+        const receiverWallet = (rpc: (method: string, params: unknown[]) => Promise<unknown>) => {
+          const w = NeuraiECDSAWallet.forNetwork('testnet', RECEIVER_MNEMONIC);
+          const mock = jest.fn(rpc);
+          w.setBackend({ chain: w.network, rpc: mock } as never);
+          return { w, rpc: mock };
+        };
+        const indexInfo = { enabled: true, start_height: 10, synced_height: 12, synced_hash: hash(12) };
+
+        it('finds payments to its code in the index and spends them like its own coins', async () => {
+          const { paid, range } = await paidIndex();
+          const coin = { address: paid.address, assetName: 'XNA', txid: paid.txid, outputIndex: paid.vout, script: hex(paid.script) };
+          const { w, rpc } = receiverWallet(async (method, params) => {
+            if (method === 'getsilentpaymentindexinfo') return indexInfo;
+            if (method === 'getsilentpaymenttweaksrange') return range(params[0] as number);
+            if (method === 'getaddressutxos') return [{ ...coin, satoshis: 120000000, height: 11 }];
+            if (method === 'getaddressmempool') return [];
+            if (method === 'gettxout') return { value: 1.2, scriptPubKey: { hex: coin.script } };
+            throw new Error(`unexpected rpc ${method}`);
+          });
+
+          assert.strictEqual(await w.syncSilentPayments(), true);
+          assert.deepStrictEqual(
+            w._silentPayments.map(p => [p.txid, p.vout, p.address, p.height]),
+            [[paid.txid, paid.vout, paid.address, 11]],
+          );
+          assert.deepStrictEqual(w._silentPaymentScan, { height: 12, hash: hash(12) });
+          assert.ok((await w.getAddressesAsync()).includes(paid.address), 'the payment is one of the wallet addresses');
+
+          // The next scan continues after the last block, anchored on its hash.
+          assert.strictEqual(await w.syncSilentPayments(), false);
+          expect(rpc.mock.calls.at(-1)).toEqual(['getsilentpaymenttweaksrange', [13, 1000, hash(12), 'hex']]);
+
+          const built = await w.buildSendTransaction([{ address: ecdsaPair('xna-test', 0).external.address, amount: '1' }]);
+          const spend = bitcoin.Transaction.fromHex(built.signedHex);
+          assert.deepStrictEqual(
+            spend.ins.map(i => `${Buffer.from(i.hash).reverse().toString('hex')}:${i.index}`),
+            [`${paid.txid}:${paid.vout}`],
+          );
+          assert.strictEqual(Buffer.from(spend.ins[0].witness[2]).toString('hex'), hex(paid.publicKey), 'signed with the payment key');
+
+          // Saved and loaded again, a fresh engine gets the payment's key.
+          const restored = NeuraiECDSAWallet.fromJson(JSON.stringify(w)) as unknown as NeuraiECDSAWallet;
+          assert.deepStrictEqual(restored._silentPayments, w._silentPayments);
+          assert.ok((await restored.getAddressesAsync()).includes(paid.address));
+
+          w.setPassphrase('other identity');
+          assert.deepStrictEqual(w._silentPayments, []);
+          assert.strictEqual(w._silentPaymentScan, null);
+        });
+
+        it('forgets payments above a reorganisation and scans again from the fork', async () => {
+          const { paid, range } = await paidIndex();
+          let reorged = false;
+          const { w } = receiverWallet(async (method, params) => {
+            if (method === 'getsilentpaymentindexinfo') return indexInfo;
+            if (method !== 'getsilentpaymenttweaksrange') throw new Error(`unexpected rpc ${method}`);
+            if (!reorged) return range(params[0] as number);
+            // Block 11 left the chain: the anchored request reports the fork, the next one gets the new blocks.
+            if (params[2] === hash(12)) return { reorg: true, fork_height: 10 };
+            return indexRange([indexBlock(11), indexBlock(12)], 12);
+          });
+          assert.strictEqual(await w.syncSilentPayments(), true);
+          assert.strictEqual(w._silentPayments[0].txid, paid.txid);
+          reorged = true;
+          assert.strictEqual(await w.syncSilentPayments(), true);
+          assert.deepStrictEqual(w._silentPayments, []);
+        });
+
+        it('starts at the tip on a wallet created here', async () => {
+          const w = new NeuraiECDSAWallet();
+          w.generate();
+          const rpc = jest.fn(async (method: string) => {
+            if (method === 'getsilentpaymentindexinfo') return indexInfo;
+            throw new Error(`unexpected rpc ${method}`);
+          });
+          w.setBackend({ chain: w.network, rpc } as never);
+          assert.strictEqual(await w.syncSilentPayments(), false);
+          assert.deepStrictEqual(w._silentPaymentScan, { height: 12, hash: hash(12) });
+          expect(rpc.mock.calls.map(c => c[0])).toEqual(['getsilentpaymentindexinfo']);
+        });
       });
     });
 

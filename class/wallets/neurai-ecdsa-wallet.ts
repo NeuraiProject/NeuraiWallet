@@ -11,12 +11,27 @@
  * for now.
  */
 
-import { deriveKeysFromMnemonic } from '@neuraiproject/neurai-silent-payments';
-import { chainFor, NeuraiChainType, NeuraiNetwork, WalletKind } from '../../blue_modules/neurai';
+import { Buffer } from 'buffer';
+import {
+  decodeIndexMessage,
+  deriveKeysFromMnemonic,
+  parseIndexResponse,
+  paymentPrivateKeyWIF,
+  scanTweaks,
+  type SilentPaymentKeys,
+} from '@neuraiproject/neurai-silent-payments';
+import { chainFor, isKindAvailable, NeuraiChainType, NeuraiNetwork, WalletKind } from '../../blue_modules/neurai';
 import { silentPaymentNetworkFor } from '../../blue_modules/neurai/silentPayments';
-import { AbstractNeuraiWallet } from './abstract-neurai-wallet';
+import { AbstractNeuraiWallet, type NeuraiEngine } from './abstract-neurai-wallet';
 
-type SilentPaymentCodeCache = { network: NeuraiChainType; secret: string; passphrase: string; code: string };
+type SilentPaymentKeysCache = { network: NeuraiChainType; secret: string; passphrase: string; keys: SilentPaymentKeys };
+
+/** A payment to the wallet's silent payment code. `tweak` is secret: with
+ * the spend key it gives the private key of the output. */
+export type ReceivedSilentPayment = { txid: string; vout: number; address: string; tweak: string; height: number };
+
+/** Index blocks per request, the most the node serves at once. */
+const SILENT_PAYMENT_PAGE = 1000;
 
 export class NeuraiECDSAWallet extends AbstractNeuraiWallet {
   static readonly type = 'NeuraiECDSA';
@@ -26,37 +41,220 @@ export class NeuraiECDSAWallet extends AbstractNeuraiWallet {
   // @ts-ignore: override
   public readonly typeReadable = NeuraiECDSAWallet.typeReadable;
 
-  /** Derived payment code and what it was derived from. Not persisted. */
-  private _silentPaymentCode: SilentPaymentCodeCache | null;
+  /** Payments to the silent payment code found so far. Persisted. */
+  _silentPayments: ReceivedSilentPayment[];
+  /** Last index block scanned, the anchor of the next request; null before
+   * the first scan. Persisted. */
+  _silentPaymentScan: { height: number; hash: string } | null;
+  /** Set on wallets created here: nothing paid their code before, so the
+   * first scan starts at the tip instead of reading the whole index. Persisted. */
+  _silentPaymentScanFromTip: boolean;
+  /** Identity keys and what they were derived from. Not persisted. */
+  private _silentPaymentKeys: SilentPaymentKeysCache | null;
+  /** Scan in flight, shared by concurrent callers. */
+  private _silentPaymentSync: Promise<boolean> | null;
+  /** Bumped when the identity changes, so a scan started before stops. */
+  private _silentPaymentEpoch: number;
 
   constructor() {
     super();
     this.network = chainFor('testnet', 'ecdsa');
-    this._silentPaymentCode = null;
-    Object.defineProperty(this, '_silentPaymentCode', { writable: true, enumerable: false, value: null });
+    this._silentPayments = [];
+    this._silentPaymentScan = null;
+    this._silentPaymentScanFromTip = false;
+    this._silentPaymentKeys = null;
+    this._silentPaymentSync = null;
+    this._silentPaymentEpoch = 0;
+    Object.defineProperty(this, '_silentPaymentKeys', { writable: true, enumerable: false, value: null });
+    Object.defineProperty(this, '_silentPaymentSync', { writable: true, enumerable: false, value: null });
+    Object.defineProperty(this, '_silentPaymentEpoch', { writable: true, enumerable: false, value: 0 });
   }
 
   get walletKind(): WalletKind {
     return 'ecdsa';
   }
 
+  generate(): string {
+    const mnemonic = super.generate();
+    this._silentPaymentScanFromTip = true;
+    return mnemonic;
+  }
+
+  setSecret(newSecret: string): this {
+    super.setSecret(newSecret);
+    this._forgetSilentPayments();
+    return this;
+  }
+
+  setPassphrase(passphrase: string): void {
+    super.setPassphrase(passphrase);
+    this._forgetSilentPayments();
+  }
+
+  setNetwork(network: NeuraiChainType): void {
+    if (network === this.network) return;
+    super.setNetwork(network);
+    this._forgetSilentPayments();
+  }
+
+  protected discardTestnetChainState(): void {
+    super.discardTestnetChainState();
+    this._forgetSilentPayments();
+  }
+
+  private _forgetSilentPayments(): void {
+    this._silentPayments = [];
+    this._silentPaymentScan = null;
+    this._silentPaymentScanFromTip = false;
+    this._silentPaymentSync = null;
+    this._silentPaymentEpoch++;
+  }
+
   /**
-   * NIP-047 silent payment code (`nsp1…` / `tnsp1…`) of this wallet's words
-   * and passphrase: the same code the node's `-addresstype=ecdsa` wallet shows
-   * for that seed. Every payment to it arrives at a new strict ECDSA v3
-   * address. The derivation runs PBKDF2 on the JS thread, so the result is
-   * kept for the session.
+   * NIP-047 keys of this wallet's words and passphrase: the identity the
+   * node's `-addresstype=ecdsa` wallet has for that seed. The derivation runs
+   * PBKDF2 on the JS thread, so the keys are kept for the session, like the
+   * engine keeps the wallet's other keys.
    */
-  getSilentPaymentCode(): string {
-    const cached = this._silentPaymentCode;
+  private _getSilentPaymentKeys(): SilentPaymentKeys {
+    const cached = this._silentPaymentKeys;
     if (cached && cached.network === this.network && cached.secret === this.secret && cached.passphrase === this.passphrase) {
-      return cached.code;
+      return cached.keys;
     }
     const keys = deriveKeysFromMnemonic(this.secret, this.passphrase, silentPaymentNetworkFor(this.network));
-    keys.scanPrivateKey.fill(0);
-    keys.spendPrivateKey.fill(0);
-    this._silentPaymentCode = { network: this.network, secret: this.secret, passphrase: this.passphrase, code: keys.code };
-    return keys.code;
+    this._silentPaymentKeys = { network: this.network, secret: this.secret, passphrase: this.passphrase, keys };
+    return keys;
+  }
+
+  /** Silent payment code (`nsp1…` / `tnsp1…`). Every payment to it arrives at a new strict ECDSA v3 address. */
+  getSilentPaymentCode(): string {
+    return this._getSilentPaymentKeys().code;
+  }
+
+  /**
+   * Scan the node's NIP-047 index from the last block seen up to the tip.
+   * Payments found join the wallet's addresses, with their keys in the
+   * engine, so balance, history and sends include them like any other coin.
+   * Resolves to true when the payments changed. Never rejects: a failed scan
+   * is logged and resumed on the next one. Concurrent callers share a scan.
+   */
+  syncSilentPayments(): Promise<boolean> {
+    if (!isKindAvailable(this.getNeuraiNetwork(), 'ecdsa') || !this.secret) return Promise.resolve(false);
+    if (!this._silentPaymentSync) {
+      const sync = this._scanSilentPayments()
+        .catch(err => {
+          console.debug('NeuraiECDSAWallet: silent payment scan failed', err);
+          return false;
+        })
+        .finally(() => {
+          if (this._silentPaymentSync === sync) this._silentPaymentSync = null;
+        });
+      this._silentPaymentSync = sync;
+    }
+    return this._silentPaymentSync;
+  }
+
+  private async _scanSilentPayments(): Promise<boolean> {
+    const epoch = this._silentPaymentEpoch;
+    const backend = this.getBackend();
+    const chain = { network: silentPaymentNetworkFor(this.network) };
+    let next: number;
+    let anchor = '';
+    if (this._silentPaymentScan) {
+      next = this._silentPaymentScan.height + 1;
+      anchor = this._silentPaymentScan.hash;
+    } else {
+      const info = await backend.rpc<{ enabled?: boolean; start_height: number; synced_height: number; synced_hash: string }>(
+        'getsilentpaymentindexinfo',
+        [],
+      );
+      if (epoch !== this._silentPaymentEpoch || !info?.enabled) return false;
+      if (this._silentPaymentScanFromTip) {
+        this._silentPaymentScan = { height: info.synced_height, hash: info.synced_hash };
+        return false;
+      }
+      next = info.start_height;
+    }
+
+    const keys = this._getSilentPaymentKeys();
+    let changed = false;
+    for (;;) {
+      const raw = await backend.rpc<unknown>('getsilentpaymenttweaksrange', [next, SILENT_PAYMENT_PAGE, anchor, 'hex']);
+      if (epoch !== this._silentPaymentEpoch) return false;
+      // A reorganisation is answered in JSON even when hex was asked for.
+      const page = typeof raw === 'string' ? decodeIndexMessage(raw, chain) : parseIndexResponse(raw, chain);
+      if (page.type === 'reorg') {
+        // Payments above the fork may be gone: forget them and scan again from there.
+        const kept = this._silentPayments.filter(p => p.height <= page.forkHeight);
+        changed = changed || kept.length !== this._silentPayments.length;
+        this._silentPayments = kept;
+        next = page.forkHeight + 1;
+        anchor = '';
+        continue;
+      }
+      if (page.type !== 'range') throw new Error('Unexpected silent payment index answer');
+      for (const p of scanTweaks(page.blocks, keys, chain)) {
+        if (this._silentPayments.some(q => q.txid === p.txid && q.vout === p.vout)) continue;
+        this._silentPayments.push({
+          txid: p.txid,
+          vout: p.vout,
+          address: p.address,
+          tweak: Buffer.from(p.tweak).toString('hex'),
+          height: p.height ?? 0,
+        });
+        changed = true;
+      }
+      const last = page.blocks[page.blocks.length - 1];
+      if (last) {
+        this._silentPaymentScan = { height: last.height, hash: last.hash };
+        anchor = last.hash;
+      }
+      next = page.nextHeight;
+      if (page.status !== 'more' || page.blocks.length === 0) break;
+    }
+    if (changed) this._attachSilentPayments(await this.ensureEngine());
+    return changed;
+  }
+
+  /** Give the engine the payments' addresses and private keys, so its coin
+   * selection and signing treat them as the wallet's own. */
+  private _attachSilentPayments(engine: NeuraiEngine): void {
+    const known = new Set(engine.getAddresses());
+    const missing = this._silentPayments.filter(p => !known.has(p.address));
+    if (missing.length === 0) return;
+    const { spendPrivateKey, network } = this._getSilentPaymentKeys();
+    for (const p of missing) {
+      engine.addressObjects.push({
+        address: p.address,
+        WIF: paymentPrivateKeyWIF(spendPrivateKey, p.tweak, network),
+        path: `nip47/${p.txid}:${p.vout}`,
+        privateKey: '',
+        keyType: 'ecdsa',
+      });
+    }
+  }
+
+  protected async _prepareEngine(engine: NeuraiEngine): Promise<void> {
+    this._attachSilentPayments(engine);
+  }
+
+  /**
+   * Scan without making the caller wait: the first scan reads the whole index
+   * (seconds), later ones a few blocks. Balance and history are fetched again
+   * when it finds something.
+   */
+  private _syncSilentPaymentsInBackground(): void {
+    this.syncSilentPayments().then(changed => changed && this._refetchInBackground());
+  }
+
+  protected async _walletAddresses(): Promise<string[]> {
+    this._syncSilentPaymentsInBackground();
+    return super._walletAddresses();
+  }
+
+  /** Payments to the code have new addresses, so no `address.changed` announces them: look at every block. */
+  protected _onNewBlock(): void {
+    this._syncSilentPaymentsInBackground();
   }
 
   /**

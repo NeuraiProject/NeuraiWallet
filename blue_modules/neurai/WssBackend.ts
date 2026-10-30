@@ -214,6 +214,8 @@ export class WssBackend implements NeuraiBackend {
   /** Listeners notified when the server pushes `address.changed`. The wallet
    * uses this to drive re-fetches without periodic client polling. */
   private addressChangedListeners = new Set<AddressChangedListener>();
+  /** Listeners notified when the server pushes `chain.tip` (a new block). */
+  private chainTipListeners = new Set<(height: number) => void>();
 
   constructor(config: Omit<BackendConfig, 'kind'>) {
     this.chain = config.chain;
@@ -316,6 +318,13 @@ export class WssBackend implements NeuraiBackend {
   onAddressChanged(listener: AddressChangedListener): () => void {
     this.addressChangedListeners.add(listener);
     return () => this.addressChangedListeners.delete(listener);
+  }
+
+  /** Register a listener for server-pushed `chain.tip` events, one per new
+   * block. Returns an unsubscribe function. */
+  onChainTip(listener: (height: number) => void): () => void {
+    this.chainTipListeners.add(listener);
+    return () => this.chainTipListeners.delete(listener);
   }
 
   /**
@@ -698,7 +707,15 @@ export class WssBackend implements NeuraiBackend {
     }
     if (method === 'chain.tip') {
       const tip = params as { height?: unknown };
-      if (typeof tip.height === 'number') this.tipHeight = tip.height;
+      if (typeof tip.height !== 'number') return;
+      this.tipHeight = tip.height;
+      for (const listener of this.chainTipListeners) {
+        try {
+          listener(tip.height);
+        } catch (err) {
+          console.debug('WssBackend chain.tip listener threw', err);
+        }
+      }
       return;
     }
     if (method === 'address.changed') {

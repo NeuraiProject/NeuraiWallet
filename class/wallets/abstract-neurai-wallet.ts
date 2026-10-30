@@ -75,7 +75,7 @@ type IHistoryItem = {
   transactionId: string;
 };
 
-type NeuraiEngine = Awaited<ReturnType<typeof NeuraiJsWallet.createInstance>>;
+export type NeuraiEngine = Awaited<ReturnType<typeof NeuraiJsWallet.createInstance>>;
 
 const decimalToSats = (value: DecimalAmount): bigint => decimalToSatoshis(value);
 const rawToSats = parseRawSats;
@@ -502,8 +502,12 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     // serialized outputs and calculates the exact fee. No node fee quote.
     engine.rpc = (method, params = []) =>
       method === 'estimatesmartfee' ? Promise.resolve({ feerate: LOCAL_FEE_RATE_RPC }) : this.getBackend().rpc(method, params);
+    await this._prepareEngine(engine);
     return engine;
   }
+
+  /** Last step of every engine bootstrap, before anyone uses the engine. */
+  protected async _prepareEngine(_engine: NeuraiEngine): Promise<void> {}
 
   setBackend(backend: NeuraiBackend): void {
     if (backend.chain !== this.network) {
@@ -630,48 +634,62 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
         return;
       }
 
-      if (this._pushFetchInFlight) {
-        this._pushFetchPending = true;
-        return;
-      }
-      this._pushFetchInFlight = true;
-      // Defer the heavy refetch until any current UI interaction (screen
-      // transitions, taps, FlatList batches) settles. Without this the
-      // synchronous tx-parse chunks compete with the user's first tap on
-      // Send/Receive and the JS thread block makes the buttons feel dead.
-      InteractionManager.runAfterInteractions(async () => {
-        try {
-          do {
-            this._pushFetchPending = false;
-            // Skip fetchBalance: `_applyPushEvent` above already updated
-            // `this.balance` from the server's pushed payload for the wallet
-            // kinds where that's safe; for HD wallets we still need the
-            // multi-address sum, so we keep fetching there.
-            if (this.walletKind !== 'pq') {
-              await this.fetchBalance();
-            }
-            await this.fetchTransactions();
-            console.log('[NeuraiWallet] push refresh done, balance=', this.balance, 'txs=', this._txCache.length);
-            // Notify the React state layer so `wallets`-consuming screens
-            // (WalletsList, etc.) re-render. Internal wallet mutations are
-            // invisible to React otherwise — useStorage hands out the same
-            // array identity until something calls setWallets.
-            emitWalletChanged(this.getID());
-          } while (this._pushFetchPending);
-        } catch (err) {
-          console.warn('AbstractNeuraiWallet: push-triggered refetch failed', err);
-        } finally {
-          this._pushFetchInFlight = false;
-        }
-      });
+      this._refetchInBackground();
     });
     const unsubscribeSync = (this._backend as { onSyncStatus?: (cb: () => void) => () => void }).onSyncStatus?.(() =>
       emitWalletChanged(this.getID()),
     );
+    const unsubscribeTip = (this._backend as { onChainTip?: (cb: () => void) => () => void }).onChainTip?.(() => this._onNewBlock());
     this._unsubscribeBackendPush = () => {
       unsubscribeChanged();
       unsubscribeSync?.();
+      unsubscribeTip?.();
     };
+  }
+
+  /** A new block was pushed by the backend. Nothing to do by default: a block
+   * that touches the wallet's addresses arrives as `address.changed`. */
+  protected _onNewBlock(): void {}
+
+  /**
+   * Re-fetch balance and history off the critical path and notify the UI.
+   * Calls that arrive while one runs are coalesced into one more pass.
+   */
+  protected _refetchInBackground(): void {
+    if (this._pushFetchInFlight) {
+      this._pushFetchPending = true;
+      return;
+    }
+    this._pushFetchInFlight = true;
+    // Defer the heavy refetch until any current UI interaction (screen
+    // transitions, taps, FlatList batches) settles. Without this the
+    // synchronous tx-parse chunks compete with the user's first tap on
+    // Send/Receive and the JS thread block makes the buttons feel dead.
+    InteractionManager.runAfterInteractions(async () => {
+      try {
+        do {
+          this._pushFetchPending = false;
+          // Skip fetchBalance: `_applyPushEvent` already updated
+          // `this.balance` from the server's pushed payload for the wallet
+          // kinds where that's safe; for HD wallets we still need the
+          // multi-address sum, so we keep fetching there.
+          if (this.walletKind !== 'pq') {
+            await this.fetchBalance();
+          }
+          await this.fetchTransactions();
+          console.log('[NeuraiWallet] push refresh done, balance=', this.balance, 'txs=', this._txCache.length);
+          // Notify the React state layer so `wallets`-consuming screens
+          // (WalletsList, etc.) re-render. Internal wallet mutations are
+          // invisible to React otherwise — useStorage hands out the same
+          // array identity until something calls setWallets.
+          emitWalletChanged(this.getID());
+        } while (this._pushFetchPending);
+      } catch (err) {
+        console.warn('AbstractNeuraiWallet: push-triggered refetch failed', err);
+      } finally {
+        this._pushFetchInFlight = false;
+      }
+    });
   }
 
   /**
