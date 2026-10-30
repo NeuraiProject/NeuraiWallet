@@ -344,54 +344,86 @@ describe('Neurai wallets', () => {
           return { paid, range };
         };
 
-        const receiverWallet = (rpc: (method: string, params: unknown[]) => Promise<unknown>) => {
+        const receiverWallet = (rpc: (method: string, params: unknown[]) => Promise<unknown>, backend: object = {}) => {
           const w = NeuraiECDSAWallet.forNetwork('testnet', RECEIVER_MNEMONIC);
           const mock = jest.fn(rpc);
-          w.setBackend({ chain: w.network, rpc: mock } as never);
+          w.setBackend({ chain: w.network, rpc: mock, ...backend } as never);
           return { w, rpc: mock };
         };
         const indexInfo = { enabled: true, start_height: 10, synced_height: 12, synced_hash: hash(12) };
 
-        it('finds payments to its code in the index and spends them like its own coins', async () => {
+        /** Receiver that found the payment, with a backend that serves its coin. */
+        const paidReceiver = async () => {
           const { paid, range } = await paidIndex();
           const coin = { address: paid.address, assetName: 'XNA', txid: paid.txid, outputIndex: paid.vout, script: hex(paid.script) };
-          const { w, rpc } = receiverWallet(async (method, params) => {
-            if (method === 'getsilentpaymentindexinfo') return indexInfo;
-            if (method === 'getsilentpaymenttweaksrange') return range(params[0] as number);
-            if (method === 'getaddressutxos') return [{ ...coin, satoshis: 120000000, height: 11 }];
-            if (method === 'getaddressmempool') return [];
-            if (method === 'gettxout') return { value: 1.2, scriptPubKey: { hex: coin.script } };
-            throw new Error(`unexpected rpc ${method}`);
-          });
-
+          const coinsOf = (addresses: string[]) =>
+            addresses.includes(coin.address) ? [{ ...coin, satoshis: 120000000n, height: 11 }] : [];
+          const { w, rpc } = receiverWallet(
+            async (method, params) => {
+              if (method === 'getsilentpaymentindexinfo') return indexInfo;
+              if (method === 'getsilentpaymenttweaksrange') return range(params[0] as number);
+              if (method === 'getaddressutxos') return coinsOf((params[0] as { addresses: string[] }).addresses);
+              if (method === 'getaddressmempool') return [];
+              throw new Error(`unexpected rpc ${method}`);
+            },
+            { getUtxos: async (addresses: string[]) => coinsOf(addresses), getMempool: async () => [] },
+          );
           assert.strictEqual(await w.syncSilentPayments(), true);
+          return { w, rpc, paid, coin };
+        };
+
+        it('finds payments to its code in the index and keeps them', async () => {
+          const { w, rpc, paid } = await paidReceiver();
           assert.deepStrictEqual(
             w._silentPayments.map(p => [p.txid, p.vout, p.address, p.height]),
             [[paid.txid, paid.vout, paid.address, 11]],
           );
           assert.deepStrictEqual(w._silentPaymentScan, { height: 12, hash: hash(12) });
-          assert.ok((await w.getAddressesAsync()).includes(paid.address), 'the payment is one of the wallet addresses');
+          // Balance and history include the payment; the engine, which builds the normal sends, does not.
+          const walletAddresses = await (w as unknown as { _walletAddresses(): Promise<string[]> })._walletAddresses();
+          assert.ok(walletAddresses.includes(paid.address));
+          assert.ok(!(await w.getAddressesAsync()).includes(paid.address));
 
           // The next scan continues after the last block, anchored on its hash.
           assert.strictEqual(await w.syncSilentPayments(), false);
           expect(rpc.mock.calls.at(-1)).toEqual(['getsilentpaymenttweaksrange', [13, 1000, hash(12), 'hex']]);
 
-          const built = await w.buildSendTransaction([{ address: ecdsaPair('xna-test', 0).external.address, amount: '1' }]);
-          const spend = bitcoin.Transaction.fromHex(built.signedHex);
-          assert.deepStrictEqual(
-            spend.ins.map(i => `${Buffer.from(i.hash).reverse().toString('hex')}:${i.index}`),
-            [`${paid.txid}:${paid.vout}`],
-          );
-          assert.strictEqual(Buffer.from(spend.ins[0].witness[2]).toString('hex'), hex(paid.publicKey), 'signed with the payment key');
-
-          // Saved and loaded again, a fresh engine gets the payment's key.
           const restored = NeuraiECDSAWallet.fromJson(JSON.stringify(w)) as unknown as NeuraiECDSAWallet;
           assert.deepStrictEqual(restored._silentPayments, w._silentPayments);
-          assert.ok((await restored.getAddressesAsync()).includes(paid.address));
+          assert.deepStrictEqual(restored._silentPaymentScan, w._silentPaymentScan);
 
           w.setPassphrase('other identity');
           assert.deepStrictEqual(w._silentPayments, []);
           assert.strictEqual(w._silentPaymentScan, null);
+        });
+
+        it('spends its payments apart from the other coins, with the change back to its own code', async () => {
+          const { w, paid, coin } = await paidReceiver();
+          const elsewhere = ecdsaPair('xna-test', 0).external.address;
+          await assert.rejects(w.buildSendTransaction([{ address: elsewhere, amount: '1' }]), 'a normal send does not see them');
+
+          const silentCoins = await w.listSilentPaymentCoins();
+          assert.deepStrictEqual(
+            silentCoins.map(c => [c.txid, c.outputIndex, c.satoshis]),
+            [[paid.txid, paid.vout, 120000000n]],
+          );
+
+          const built = await w.buildSilentPaymentCoinsTransaction(silentCoins, elsewhere, '0.5');
+          const { tx, payments } = receivedBy(built.signedHex, [coin]);
+          assert.deepStrictEqual(
+            tx.inputs.map(i => `${i.txid}:${i.vout}`),
+            [`${paid.txid}:${paid.vout}`],
+          );
+          assert.strictEqual(tx.outputs[0].valueSats, 50000000n);
+          assert.strictEqual(payments.length, 1, 'the change is a silent payment to its own code');
+          assert.strictEqual(payments[0].valueSat, 120000000n - 50000000n - built.feeSats);
+          assert.strictEqual(built.netDebitSats, 50000000n + built.feeSats);
+
+          const max = await w.buildSilentPaymentCoinsTransaction(silentCoins, elsewhere, null);
+          const all = receivedBy(max.signedHex, [coin]);
+          assert.strictEqual(all.tx.outputs.length, 1);
+          assert.strictEqual(all.tx.outputs[0].valueSats, 120000000n - max.feeSats);
+          assert.strictEqual(all.payments.length, 0);
         });
 
         it('forgets payments above a reorganisation and scans again from the fork', async () => {

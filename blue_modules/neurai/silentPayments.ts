@@ -6,6 +6,9 @@
 import type { NetworkName } from '@neuraiproject/neurai-silent-payments';
 import { isTestnetChain, type NeuraiChainType } from './networkConfig';
 
+/** Accent of everything silent payment in the UI, so it is told apart from the plain address flows. */
+export const SILENT_PAYMENT_ACCENT = '#7C3AED';
+
 /** Network of the payment codes of a wallet chain (`nsp1…` main, `tnsp1…` test). */
 export function silentPaymentNetworkFor(chain: NeuraiChainType): NetworkName {
   return isTestnetChain(chain) ? 'test' : 'main';

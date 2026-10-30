@@ -75,7 +75,7 @@ type IHistoryItem = {
   transactionId: string;
 };
 
-export type NeuraiEngine = Awaited<ReturnType<typeof NeuraiJsWallet.createInstance>>;
+type NeuraiEngine = Awaited<ReturnType<typeof NeuraiJsWallet.createInstance>>;
 
 const decimalToSats = (value: DecimalAmount): bigint => decimalToSatoshis(value);
 const rawToSats = parseRawSats;
@@ -93,7 +93,7 @@ const CURRENT_TESTNET_GENESIS = CHAIN_PARAMS['xna-test'].expectedGenesisHash ?? 
 const SEND_DUST_SATS = 546n;
 
 /** Minimal UTXO shape we need for selection / signing (matches engine `IUTXO`). */
-interface SpendableUtxo {
+export interface SpendableUtxo {
   txid: string;
   outputIndex: number;
   satoshis: bigint;
@@ -101,6 +101,10 @@ interface SpendableUtxo {
   assetName: string;
   script: string;
 }
+
+/** Output of a transaction that pays silent payment codes: a code, whose
+ * address the inputs derive, or a plain address. */
+export type SilentPaymentOutput = { code: string; valueSats: bigint } | { address: string; valueSats: bigint };
 
 /** Greedy UTXO selection: accumulate until `neededSats` is covered. Throws if the
  * pool can't cover it. */
@@ -502,12 +506,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     // serialized outputs and calculates the exact fee. No node fee quote.
     engine.rpc = (method, params = []) =>
       method === 'estimatesmartfee' ? Promise.resolve({ feerate: LOCAL_FEE_RATE_RPC }) : this.getBackend().rpc(method, params);
-    await this._prepareEngine(engine);
     return engine;
   }
-
-  /** Last step of every engine bootstrap, before anyone uses the engine. */
-  protected async _prepareEngine(_engine: NeuraiEngine): Promise<void> {}
 
   setBackend(backend: NeuraiBackend): void {
     if (backend.chain !== this.network) {
@@ -1548,8 +1548,13 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       if (typeof material !== 'string') throw new Error(`No ECDSA key for ${u.address}`);
       wifs[u.address] = material;
     }
-    const change = changeSats > 0 ? { address: changeAddress, valueSats: changeSats } : null;
-    const { signedHex, unsignedHex, payment } = this._signSilentPayment(code, inputs, wifs, amountSats, change, this.getEngineNetwork());
+    const outputs: SilentPaymentOutput[] = [{ code, valueSats: amountSats }];
+    if (changeSats > 0) outputs.push({ address: changeAddress, valueSats: changeSats });
+    const {
+      signedHex,
+      unsignedHex,
+      derived: [payment],
+    } = this._signSilentPayment(inputs, wifs, outputs, this.getEngineNetwork());
 
     return {
       signedHex,
@@ -1614,7 +1619,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     const amountSats = bridgeCoin.satoshis - secondFeeSats;
     if (amountSats < dustThresholdSats(bridgeAddress)) throw new Error('Balance too low to cover the network fee');
 
-    const second = this._signSilentPayment(code, [bridgeCoin], { [bridgeAddress]: bridgeWif }, amountSats, null, bridgeNetwork);
+    const second = this._signSilentPayment([bridgeCoin], { [bridgeAddress]: bridgeWif }, [{ code, valueSats: amountSats }], bridgeNetwork);
+    const [payment] = second.derived;
     return {
       signedHex: first.signedHex,
       unsignedHex: first.unsignedHex,
@@ -1623,7 +1629,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       sentAmountSats: amountSats,
       netDebitSats: first.netDebitSats,
       debug: {
-        silentPayment: { code, address: second.payment.address, k: second.payment.k },
+        silentPayment: { code, address: payment.address, k: payment.k },
         bridge: { address: bridgeAddress, txid: bridgeCoin.txid, vout },
         first: first.debug,
       },
@@ -1631,19 +1637,17 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   }
 
   /**
-   * Derive the payment output of `code` from `inputs` (strict v3 coins, all of
-   * them spent) and build + sign the version 2 transaction that pays it, plus
-   * `change` when given. The decoded private keys are wiped once the output is
-   * derived.
+   * Build + sign the version 2 transaction spending all of `inputs` (strict v3
+   * coins) to `outputs`, in that order. An output with a `code` pays a new
+   * address derived from the inputs, returned in `derived` in the same order.
+   * The decoded private keys are wiped once the addresses are derived.
    */
-  private _signSilentPayment(
-    code: string,
+  protected _signSilentPayment(
     inputs: SpendableUtxo[],
     wifs: Record<string, string>,
-    amountSats: bigint,
-    change: { address: string; valueSats: bigint } | null,
+    outputs: SilentPaymentOutput[],
     engineNetwork: EngineNetwork,
-  ): { signedHex: string; unsignedHex: string; payment: DerivedOutput } {
+  ): { signedHex: string; unsignedHex: string; derived: DerivedOutput[] } {
     const network = silentPaymentNetworkFor(this.network);
     // `script` makes the library refuse any input a receiver would not accept.
     const senderInputs = inputs.map(u => ({
@@ -1652,15 +1656,16 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       privateKey: decodeWIF(wifs[u.address], network),
       script: u.script,
     }));
-    let payment: DerivedOutput;
+    const recipients = outputs.flatMap(o => ('code' in o ? [{ code: o.code }] : []));
+    let derived: DerivedOutput[] = [];
     try {
-      [payment] = createOutputs(senderInputs, [{ code }], { network });
+      if (recipients.length > 0) derived = createOutputs(senderInputs, recipients, { network });
     } finally {
       for (const input of senderInputs) input.privateKey.fill(0);
     }
 
-    const payments = [{ address: payment.address, valueSats: amountSats }];
-    if (change) payments.push(change);
+    let next = 0;
+    const payments = outputs.map(o => ({ address: 'code' in o ? derived[next++].address : o.address, valueSats: o.valueSats }));
     const { rawTx } = createPaymentTransaction({
       version: 2,
       inputs: inputs.map(u => ({ txid: u.txid, vout: u.outputIndex })),
@@ -1673,7 +1678,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       wifs as Parameters<typeof signNeuraiTransaction>[3],
     );
     if (!signedHex) throw new Error('Failed to sign the silent payment');
-    return { signedHex, unsignedHex: rawTx, payment };
+    return { signedHex, unsignedHex: rawTx, derived };
   }
 
   /**

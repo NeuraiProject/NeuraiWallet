@@ -23,6 +23,7 @@ import { BlueButtonLink, BlueCard, BlueText } from '../../BlueComponents';
 import DeeplinkSchemaMatch from '../../class/deeplink-schema-match';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
+import { SILENT_PAYMENT_ACCENT } from '../../blue_modules/neurai/silentPayments';
 import { isTestnetChain } from '../../blue_modules/neurai/networkConfig';
 import presentAlert from '../../components/Alert';
 import Button from '../../components/Button';
@@ -64,7 +65,6 @@ const QR_LANDSCAPE_HEIGHT_FRACTION = 0.52;
 const QR_WIDTH_USE_FRACTION = 0.92;
 
 /** Silent payment code card: a colored frame inside the same QR tile size, so the layout does not jump. */
-const SILENT_PAYMENT_ACCENT = '#7C3AED';
 const SILENT_PAYMENT_FRAME_WIDTH = 4;
 
 /** Staggered “reveal” for the QR: white tiles fade out in random order */
