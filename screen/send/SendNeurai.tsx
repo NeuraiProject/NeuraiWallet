@@ -66,6 +66,13 @@ function assetTypeLabel(type: NeuraiAssetType): string {
   }
 }
 
+/**
+ * Resolves once the next frame is drawn. Creating the engine or signing blocks
+ * the JS thread; waiting first lets the spinner set just before show (it keeps
+ * spinning on the UI thread).
+ */
+const afterNextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+
 /** Coins a send picks by hand: the wallet's own, or its silent payments. */
 type CoinSource = 'wallet' | 'silent';
 
@@ -198,6 +205,7 @@ const SendNeurai: React.FC = () => {
       // Fetch again so the list leaves out what a previous send spent.
       setIsLoadingCoins(true);
       try {
+        await afterNextFrame();
         if (source === 'silent' && silentWallet) {
           const coins = await silentWallet.listSilentPaymentCoins();
           setSilentCoins(coins);
@@ -342,6 +350,7 @@ const SendNeurai: React.FC = () => {
 
     setIsBuilding(true);
     try {
+      await afterNextFrame();
       let result: NeuraiBuildTransactionResult;
       // PQ wallets with address reuse on should send change back to the static
       // receive address; otherwise the engine picks a fresh index and surprises
@@ -535,6 +544,7 @@ const SendNeurai: React.FC = () => {
           selected={selectedCoinKeys}
           onToggleCoin={onToggleCoin}
           isLoading={isLoadingCoins}
+          loadingText={loc.send.coins_loading}
           disabled={isBuilding || isBroadcasting || isLoadingCoins}
           emptyText={loc.send.coins_empty}
         />
@@ -551,6 +561,7 @@ const SendNeurai: React.FC = () => {
           selected={selectedCoinKeys}
           onToggleCoin={onToggleCoin}
           isLoading={isLoadingCoins}
+          loadingText={loc.send.coins_loading}
           disabled={isBuilding || isBroadcasting || isLoadingCoins}
           emptyText={loc.send.coins_empty}
         />

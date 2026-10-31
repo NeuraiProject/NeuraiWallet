@@ -27,6 +27,7 @@ interface CoinControlProps {
   selected: ReadonlySet<string>;
   onToggleCoin: (coin: WalletCoin) => void;
   isLoading?: boolean;
+  loadingText?: string;
   disabled?: boolean;
   emptyText?: string;
 }
@@ -41,6 +42,7 @@ const CoinControl: React.FC<CoinControlProps> = ({
   selected,
   onToggleCoin,
   isLoading = false,
+  loadingText,
   disabled = false,
   emptyText,
 }) => {
@@ -62,7 +64,10 @@ const CoinControl: React.FC<CoinControlProps> = ({
       {isOn && (
         <View style={[styles.list, stylesHook.list]}>
           {isLoading ? (
-            <ActivityIndicator style={styles.spinner} />
+            <View style={styles.loading}>
+              <ActivityIndicator color={accent} />
+              <Text style={[styles.loadingText, stylesHook.meta]}>{loadingText}</Text>
+            </View>
           ) : coins.length === 0 ? (
             <Text style={[styles.empty, stylesHook.meta]}>{emptyText}</Text>
           ) : (
@@ -109,7 +114,8 @@ const styles = StyleSheet.create({
   },
   switchLabel: { fontSize: 16, fontWeight: '600' },
   list: { marginHorizontal: 20, marginVertical: 12, borderLeftWidth: 3 },
-  spinner: { paddingVertical: 12 },
+  loading: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 12 },
+  loadingText: { fontSize: 13, marginLeft: 12 },
   empty: { fontSize: 13, paddingHorizontal: 12, paddingVertical: 10 },
   row: {
     flexDirection: 'row',

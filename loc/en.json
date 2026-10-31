@@ -254,6 +254,7 @@
     "silent_payment_no_assets": "Silent payments can only send XNA, not assets.",
     "select_coins": "Select the coins to spend.",
     "coins_empty": "No coins to spend.",
+    "coins_loading": "Loading coins…",
     "silent_payment_retry": "The coins left the wallet, but the payment to the code was not sent ({reason}). Tap Send to try again.",
     "details_adv_full": "Use Full Balance",
     "details_adv_import": "Import Transaction",
