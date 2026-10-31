@@ -12,6 +12,7 @@
  */
 
 import { Buffer } from 'buffer';
+import { encodeDestinationScript } from '@neuraiproject/neurai-create-transaction';
 import {
   checkCode,
   decodeIndexMessage,
@@ -240,7 +241,13 @@ export class NeuraiECDSAWallet extends AbstractNeuraiWallet {
     const heights = new Map(this._silentPayments.map(p => [p.address, p.height]));
     return utxos
       .filter(u => (u.assetName === 'XNA' || !u.assetName) && u.satoshis > 0n && !spentInMempool.has(`${u.txid}:${u.outputIndex}`))
-      .map(u => ({ ...u, assetName: 'XNA', height: u.height ?? heights.get(u.address) ?? 0 }))
+      .map(u => ({
+        ...u,
+        assetName: 'XNA',
+        // The wallet service sends no scripts; the signer needs the prevout's.
+        script: u.script || Buffer.from(encodeDestinationScript(u.address)).toString('hex'),
+        height: u.height ?? heights.get(u.address) ?? 0,
+      }))
       .sort((a, b) => (a.satoshis === b.satoshis ? 0 : a.satoshis < b.satoshis ? 1 : -1));
   }
 

@@ -366,7 +366,8 @@ describe('Neurai wallets', () => {
               if (method === 'getaddressmempool') return [];
               throw new Error(`unexpected rpc ${method}`);
             },
-            { getUtxos: async (addresses: string[]) => coinsOf(addresses), getMempool: async () => [] },
+            // Like the wallet service, the backend sends no scripts.
+            { getUtxos: async (addresses: string[]) => coinsOf(addresses).map(u => ({ ...u, script: '' })), getMempool: async () => [] },
           );
           assert.strictEqual(await w.syncSilentPayments(), true);
           return { w, rpc, paid, coin };
@@ -404,8 +405,8 @@ describe('Neurai wallets', () => {
 
           const silentCoins = await w.listSilentPaymentCoins();
           assert.deepStrictEqual(
-            silentCoins.map(c => [c.txid, c.outputIndex, c.satoshis]),
-            [[paid.txid, paid.vout, 120000000n]],
+            silentCoins.map(c => [c.txid, c.outputIndex, c.satoshis, c.script]),
+            [[paid.txid, paid.vout, 120000000n, coin.script]],
           );
 
           const built = await w.buildSilentPaymentCoinsTransaction(silentCoins, elsewhere, '0.5');
