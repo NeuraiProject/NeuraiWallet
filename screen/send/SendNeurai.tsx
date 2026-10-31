@@ -18,7 +18,7 @@ import { amountFromInput, xnaToSats, satsToXna } from '../../blue_modules/neurai
  * can be added later.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Keyboard, Modal, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -28,6 +28,7 @@ import { BlueFormLabel, BlueText } from '../../BlueComponents';
 import presentAlert from '../../components/Alert';
 import Button from '../../components/Button';
 import { BlueSpacing20, BlueSpacing40 } from '../../components/BlueSpacing';
+import CoinControl, { coinKey, sumSats } from '../../components/CoinControl';
 import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import { useTheme } from '../../components/themes';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
@@ -40,10 +41,10 @@ import { useStorage } from '../../hooks/context/useStorage';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
 import loc from '../../loc';
 import type { DetailViewStackParamList } from '../../navigation/DetailViewStackParamList';
-import type { NeuraiBuildTransactionResult, NeuraiTransactionTarget } from '../../class/wallets/abstract-neurai-wallet';
+import type { NeuraiBuildTransactionResult, NeuraiTransactionTarget, WalletCoin } from '../../class/wallets/abstract-neurai-wallet';
 import { formatAssetAmount, type NeuraiAssetType, type NeuraiHeldAsset } from '../../blue_modules/neurai/assetUtils';
 import { looksLikeSilentPaymentCode, SILENT_PAYMENT_ACCENT } from '../../blue_modules/neurai/silentPayments';
-import { NeuraiECDSAWallet, type SilentPaymentCoin } from '../../class/wallets/neurai-ecdsa-wallet';
+import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
 
 /** Human label for an asset type, for the picker rows. */
 function assetTypeLabel(type: NeuraiAssetType): string {
@@ -65,9 +66,8 @@ function assetTypeLabel(type: NeuraiAssetType): string {
   }
 }
 
-const coinKey = (coin: SilentPaymentCoin) => `${coin.txid}:${coin.outputIndex}`;
-const sumSats = (coins: SilentPaymentCoin[]) => coins.reduce((sum, c) => sum + c.satoshis, 0n);
-const SILENT_SWITCH_TRACK = { false: undefined, true: SILENT_PAYMENT_ACCENT };
+/** Coins a send picks by hand: the wallet's own, or its silent payments. */
+type CoinSource = 'wallet' | 'silent';
 
 type RouteProps = RouteProp<DetailViewStackParamList, 'SendNeurai'>;
 type NavigationProps = NativeStackNavigationProp<DetailViewStackParamList, 'SendNeurai'>;
@@ -103,13 +103,17 @@ const SendNeurai: React.FC = () => {
   const [selectedAsset, setSelectedAsset] = useState<NeuraiHeldAsset | null>(null);
   const [isLoadingAssets, setIsLoadingAssets] = useState(false);
   const [isAssetPickerOpen, setIsAssetPickerOpen] = useState(false);
-  // Silent payment coins (ECDSA wallets) stay apart from the other coins: a
-  // switch spends only the ones ticked in its list, and normal sends never
-  // touch them, so no transaction ties them to the rest of the wallet.
+  // Coin control: a switch lists the wallet's coins and the send spends only
+  // the ticked ones. Silent payment coins (ECDSA wallets) have a list of their
+  // own and normal sends never touch them, so no transaction ties them to the
+  // rest of the wallet. The hardware wallet builds its sends on its own.
+  const canControlCoins = !hwWallet;
   const silentWallet = wallet instanceof NeuraiECDSAWallet ? wallet : null;
-  const [silentCoins, setSilentCoins] = useState<SilentPaymentCoin[]>([]);
-  const [isSilentMode, setIsSilentMode] = useState(false);
-  const [silentSelected, setSilentSelected] = useState<ReadonlySet<string>>(new Set());
+  const [walletCoins, setWalletCoins] = useState<WalletCoin[]>([]);
+  const [silentCoins, setSilentCoins] = useState<WalletCoin[]>([]);
+  const [isLoadingCoins, setIsLoadingCoins] = useState(false);
+  const [coinSource, setCoinSource] = useState<CoinSource | null>(null);
+  const [selectedCoinKeys, setSelectedCoinKeys] = useState<ReadonlySet<string>>(new Set());
 
   const resetDrafts = useCallback(() => {
     setDraft(null);
@@ -138,14 +142,18 @@ const SendNeurai: React.FC = () => {
       .then(setSilentCoins)
       .catch(err => console.debug('SendNeurai: listSilentPaymentCoins failed', err));
   }, [silentWallet]);
-  const selectedSilentCoins = silentCoins.filter(c => silentSelected.has(coinKey(c)));
+  const sourceCoins = useMemo(
+    () => (coinSource === 'silent' ? silentCoins : coinSource === 'wallet' ? walletCoins : []),
+    [coinSource, silentCoins, walletCoins],
+  );
+  const selectedCoins = sourceCoins.filter(c => selectedCoinKeys.has(coinKey(c)));
 
   // Available balance is stored in sats on the wallet; convert to whole XNA
   // for display next to the amount field so the user knows the cap without
-  // backing out to the wallet view. Silent payment coins only count when
-  // they are the ones being spent.
+  // backing out to the wallet view. With coin control it is the ticked coins;
+  // silent payment coins only count when they are the ones being spent.
   const walletSats = (wallet?.getBalance() ?? 0n) - sumSats(silentCoins);
-  const availableSats = isSilentMode ? sumSats(selectedSilentCoins) : walletSats > 0n ? walletSats : 0n;
+  const availableSats = coinSource ? sumSats(selectedCoins) : walletSats > 0n ? walletSats : 0n;
   const availableXna = satsToXna(availableSats);
   const assetAvailable = selectedAsset?.amount ?? '0';
   const amountUnit = isAssetMode && selectedAsset ? selectedAsset.name : 'XNA';
@@ -153,7 +161,7 @@ const SendNeurai: React.FC = () => {
   const onToggleAssetMode = useCallback(
     async (on: boolean) => {
       setIsAssetMode(on);
-      if (on) setIsSilentMode(false);
+      if (on) setCoinSource(null);
       setIsSendMax(false);
       setSelectedAsset(null);
       setAmount('');
@@ -177,31 +185,46 @@ const SendNeurai: React.FC = () => {
     [wallet, resetDrafts],
   );
 
-  const onToggleSilentMode = useCallback(
-    (on: boolean) => {
-      setIsSilentMode(on);
+  const onSwitchCoinSource = useCallback(
+    async (source: CoinSource, on: boolean) => {
+      setCoinSource(on ? source : null);
+      setSelectedCoinKeys(new Set());
       setIsSendMax(false);
       setAmount('');
       resetDrafts();
-      if (!on) return;
+      if (!on || !wallet) return;
       setIsAssetMode(false);
       setSelectedAsset(null);
-      // A single coin is the only possible choice: tick it.
-      setSilentSelected(new Set(silentCoins.length === 1 ? [coinKey(silentCoins[0])] : []));
+      // Fetch again so the list leaves out what a previous send spent.
+      setIsLoadingCoins(true);
+      try {
+        if (source === 'silent' && silentWallet) {
+          const coins = await silentWallet.listSilentPaymentCoins();
+          setSilentCoins(coins);
+          // A single coin is the only possible choice: tick it.
+          if (coins.length === 1) setSelectedCoinKeys(new Set([coinKey(coins[0])]));
+        } else {
+          setWalletCoins(await wallet.listCoins());
+        }
+      } catch (err: any) {
+        presentAlert({ message: err?.message ?? String(err) });
+      } finally {
+        setIsLoadingCoins(false);
+      }
     },
-    [silentCoins, resetDrafts],
+    [wallet, silentWallet, resetDrafts],
   );
 
-  const onToggleSilentCoin = useCallback(
-    (coin: SilentPaymentCoin) => {
-      const next = new Set(silentSelected);
+  const onToggleCoin = useCallback(
+    (coin: WalletCoin) => {
+      const next = new Set(selectedCoinKeys);
       if (!next.delete(coinKey(coin))) next.add(coinKey(coin));
-      setSilentSelected(next);
+      setSelectedCoinKeys(next);
       // "Send max" follows the selection.
-      if (isSendMax) setAmount(satsToXna(sumSats(silentCoins.filter(c => next.has(coinKey(c))))));
+      if (isSendMax) setAmount(satsToXna(sumSats(sourceCoins.filter(c => next.has(coinKey(c))))));
       resetDrafts();
     },
-    [silentSelected, silentCoins, isSendMax, resetDrafts],
+    [selectedCoinKeys, sourceCoins, isSendMax, resetDrafts],
   );
 
   const onPickAsset = useCallback(
@@ -290,8 +313,8 @@ const SendNeurai: React.FC = () => {
       presentAlert({ message: loc.assets.send_select });
       return;
     }
-    if (isSilentMode && selectedSilentCoins.length === 0) {
-      presentAlert({ message: loc.send.silent_payment_select_coins });
+    if (coinSource && selectedCoins.length === 0) {
+      presentAlert({ message: loc.send.select_coins });
       return;
     }
 
@@ -329,8 +352,10 @@ const SendNeurai: React.FC = () => {
         const receiveAddr = await wallet.getStaticReceiveAddress();
         if (receiveAddr !== address.trim()) forcedChangeAddress = receiveAddr;
       }
-      if (isSilentMode && silentWallet) {
-        result = await silentWallet.buildSilentPaymentCoinsTransaction(selectedSilentCoins, address.trim(), isSendMax ? null : xna);
+      if (coinSource === 'silent' && silentWallet) {
+        result = await silentWallet.buildSilentPaymentCoinsTransaction(selectedCoins, address.trim(), isSendMax ? null : xna);
+      } else if (coinSource === 'wallet') {
+        result = await wallet.buildCoinControlTransaction(selectedCoins, address.trim(), isSendMax ? null : xna, { forcedChangeAddress });
       } else if (isSilentPayment) {
         result = await wallet.buildSilentPaymentTransaction(address.trim(), isSendMax ? null : xna, { forcedChangeAddress });
       } else if (isAssetMode && selectedAsset) {
@@ -361,8 +386,8 @@ const SendNeurai: React.FC = () => {
     isSendMax,
     isAssetMode,
     selectedAsset,
-    isSilentMode,
-    selectedSilentCoins,
+    coinSource,
+    selectedCoins,
     isPQAddressReuseEnabled,
     resetDrafts,
   ]);
@@ -499,49 +524,36 @@ const SendNeurai: React.FC = () => {
         </>
       )}
 
-      {silentWallet && silentCoins.length > 0 && (
-        <>
-          <View style={styles.assetToggleRow}>
-            <Text style={[styles.assetToggleLabel, stylesHook.assetToggleLabel]}>{loc.receive.silent_payments}</Text>
-            <Switch
-              testID="SendNeuraiSilentSwitch"
-              value={isSilentMode}
-              onValueChange={onToggleSilentMode}
-              trackColor={SILENT_SWITCH_TRACK}
-              disabled={isBuilding || isBroadcasting}
-            />
-          </View>
-          {isSilentMode && (
-            <View style={styles.silentCoins}>
-              {silentCoins.map(coin => {
-                const checked = silentSelected.has(coinKey(coin));
-                return (
-                  <Pressable
-                    key={coinKey(coin)}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked }}
-                    testID={`SilentCoin-${coinKey(coin)}`}
-                    onPress={() => onToggleSilentCoin(coin)}
-                    disabled={isBuilding || isBroadcasting}
-                    style={[styles.silentCoinRow, stylesHook.assetRow]}
-                  >
-                    <MaterialIcons
-                      name={checked ? 'check-box' : 'check-box-outline-blank'}
-                      size={22}
-                      color={checked ? SILENT_PAYMENT_ACCENT : colors.alternativeTextColor}
-                    />
-                    <View style={styles.silentCoinText}>
-                      <Text style={[styles.assetRowName, stylesHook.textInput]}>{`${satsToXna(coin.satoshis)} XNA`}</Text>
-                      <Text style={[styles.assetRowMeta, stylesHook.balanceHint]} numberOfLines={1} ellipsizeMode="middle">
-                        {coin.address}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-        </>
+      {canControlCoins && (
+        <CoinControl
+          label={loc.cc.header}
+          accent={colors.buttonBackgroundColor}
+          testID="SendNeuraiCoinControl"
+          coins={walletCoins}
+          isOn={coinSource === 'wallet'}
+          onSwitch={on => onSwitchCoinSource('wallet', on)}
+          selected={selectedCoinKeys}
+          onToggleCoin={onToggleCoin}
+          isLoading={isLoadingCoins}
+          disabled={isBuilding || isBroadcasting || isLoadingCoins}
+          emptyText={loc.send.coins_empty}
+        />
+      )}
+
+      {silentWallet && (silentCoins.length > 0 || coinSource === 'silent') && (
+        <CoinControl
+          label={loc.receive.silent_payments}
+          accent={SILENT_PAYMENT_ACCENT}
+          testID="SendNeuraiSilent"
+          coins={silentCoins}
+          isOn={coinSource === 'silent'}
+          onSwitch={on => onSwitchCoinSource('silent', on)}
+          selected={selectedCoinKeys}
+          onToggleCoin={onToggleCoin}
+          isLoading={isLoadingCoins}
+          disabled={isBuilding || isBroadcasting || isLoadingCoins}
+          emptyText={loc.send.coins_empty}
+        />
       )}
 
       <Modal visible={isAssetPickerOpen} transparent animationType="fade" onRequestClose={() => setIsAssetPickerOpen(false)}>
@@ -678,15 +690,6 @@ const styles = StyleSheet.create({
   assetRow: { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
   assetRowName: { fontSize: 16, fontWeight: '600' },
   assetRowMeta: { fontSize: 13, marginTop: 2 },
-  silentCoins: { marginHorizontal: 20, marginVertical: 12, borderLeftWidth: 3, borderLeftColor: SILENT_PAYMENT_ACCENT },
-  silentCoinRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  silentCoinText: { flex: 1, marginLeft: 12 },
   balanceHintRow: { marginHorizontal: 20, marginTop: -4, marginBottom: 8 },
   balanceHint: { fontSize: 12, textAlign: 'right' },
   scanButton: {

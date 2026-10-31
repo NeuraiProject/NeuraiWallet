@@ -54,7 +54,7 @@ import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
 import { LOCAL_FEE_RATE_RPC, LOCAL_FEE_RATE_XNA_PER_KB } from '../../blue_modules/neurai/feePolicy';
 import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
 import { dustThresholdSats } from '../../blue_modules/neurai/dust';
-import { silentPaymentNetworkFor } from '../../blue_modules/neurai/silentPayments';
+import { looksLikeSilentPaymentCode, silentPaymentNetworkFor } from '../../blue_modules/neurai/silentPayments';
 import {
   ecdsaKeyNetworkFor,
   engineNetworkFor,
@@ -102,9 +102,36 @@ export interface SpendableUtxo {
   script: string;
 }
 
-/** Output of a transaction that pays silent payment codes: a code, whose
- * address the inputs derive, or a plain address. */
-export type SilentPaymentOutput = { code: string; valueSats: bigint } | { address: string; valueSats: bigint };
+/** A coin the user can pick to spend (coin control). */
+export type WalletCoin = SpendableUtxo & { height: number };
+
+/** Where a payment goes: a silent payment code, whose address the inputs
+ * derive, or a plain address. */
+export type PaymentDestination = { code: string } | { address: string };
+
+/** Output of a transaction that pays silent payment codes. */
+export type SilentPaymentOutput = PaymentDestination & { valueSats: bigint };
+
+/**
+ * The XNA coins of `utxos` a send can use, largest first: neither empty nor
+ * spent by a transaction in `mempool`.
+ */
+export function spendableCoins(
+  utxos: Array<SpendableUtxo & { height?: number }>,
+  mempool: Array<{ prevtxid: string; prevout: number }>,
+): WalletCoin[] {
+  const spentInMempool = new Set(mempool.map(m => `${m.prevtxid}:${m.prevout}`));
+  return utxos
+    .filter(u => (u.assetName === 'XNA' || !u.assetName) && u.satoshis > 0n && !spentInMempool.has(`${u.txid}:${u.outputIndex}`))
+    .map(u => ({
+      ...u,
+      assetName: 'XNA',
+      // The wallet service sends no scripts; the signer needs the prevout's.
+      script: u.script || Buffer.from(encodeDestinationScript(u.address)).toString('hex'),
+      height: u.height ?? 0,
+    }))
+    .sort((a, b) => (a.satoshis === b.satoshis ? 0 : a.satoshis < b.satoshis ? 1 : -1));
+}
 
 /** Greedy UTXO selection: accumulate until `neededSats` is covered. Throws if the
  * pool can't cover it. */
@@ -1489,10 +1516,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     opts?: { forcedChangeAddress?: string },
   ): Promise<NeuraiBuildTransactionResult> {
     if (this.amountsStale) throw new Error('Refresh this wallet before sending');
-    const check = checkCode(code, silentPaymentNetworkFor(this.network));
-    if (!check.valid) throw new Error(`Invalid silent payment code (${check.reason})`);
-    // Strict v3 outputs are anyone-can-spend where witness v3 is not active.
-    if (!isKindAvailable(this.getNeuraiNetwork(), 'ecdsa')) throw new Error('Silent payments are not active on this network yet');
+    this._checkSilentPaymentCode(code);
     if (this.walletKind !== 'ecdsa') return this._buildSilentPaymentViaBridge(code, amount, opts?.forcedChangeAddress);
 
     const engine = await this.ensureEngine();
@@ -1554,7 +1578,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       signedHex,
       unsignedHex,
       derived: [payment],
-    } = this._signSilentPayment(inputs, wifs, outputs, this.getEngineNetwork());
+    } = this._signPayment(inputs, wifs, outputs, this.getEngineNetwork());
 
     return {
       signedHex,
@@ -1573,12 +1597,14 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * (`m/84'/coin'/0'/1/0`); the second spends that coin alone to the code.
    * Both are signed before anything is broadcast (`signedHex`, then
    * `chainedHex`). If the second never makes it, the coin is not lost:
-   * importing the words as an ECDSA wallet shows it.
+   * importing the words as an ECDSA wallet shows it. With `coins`, the first
+   * one spends exactly those (coin control).
    */
   private async _buildSilentPaymentViaBridge(
     code: string,
     amount: string | null,
     forcedChangeAddress?: string,
+    coins?: WalletCoin[],
   ): Promise<NeuraiBuildTransactionResult> {
     if (!this.secret) throw new Error('Silent payments need a wallet with recovery words');
     const bridgeNetwork = engineNetworkFor(chainFor(this.getNeuraiNetwork(), 'ecdsa'));
@@ -1597,13 +1623,12 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     // The payment is a strict v3 output like the bridge, so the bridge address sizes it.
     const secondFeeSats = estimateNeuraiFeeSats([bridgeScript], [bridgeAddress], await this.estimateFeeRate());
 
-    const first =
-      amount === null
+    const firstAmount = amount === null ? null : satsToXna(decimalToSats(amountFromInput(amount)) + secondFeeSats);
+    const first = coins
+      ? await this.buildCoinControlTransaction(coins, bridgeAddress, firstAmount, { forcedChangeAddress })
+      : firstAmount === null
         ? await this.buildSendMaxTransaction(bridgeAddress)
-        : await this.buildSendTransaction(
-            [{ address: bridgeAddress, amount: satsToXna(decimalToSats(amountFromInput(amount)) + secondFeeSats) }],
-            { forcedChangeAddress },
-          );
+        : await this.buildSendTransaction([{ address: bridgeAddress, amount: firstAmount }], { forcedChangeAddress });
     if (!first.signedHex) throw new Error('Failed to sign the transfer to the ECDSA address');
     const firstOutputs = parseTransaction(first.signedHex).outputs;
     const vout = firstOutputs.findIndex(o => o.scriptPubKeyHex === bridgeScript);
@@ -1619,7 +1644,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     const amountSats = bridgeCoin.satoshis - secondFeeSats;
     if (amountSats < dustThresholdSats(bridgeAddress)) throw new Error('Balance too low to cover the network fee');
 
-    const second = this._signSilentPayment([bridgeCoin], { [bridgeAddress]: bridgeWif }, [{ code, valueSats: amountSats }], bridgeNetwork);
+    const second = this._signPayment([bridgeCoin], { [bridgeAddress]: bridgeWif }, [{ code, valueSats: amountSats }], bridgeNetwork);
     const [payment] = second.derived;
     return {
       signedHex: first.signedHex,
@@ -1636,32 +1661,149 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     };
   }
 
+  /** Throws unless `code` is a payment code this wallet can pay. */
+  private _checkSilentPaymentCode(code: string): void {
+    const check = checkCode(code, silentPaymentNetworkFor(this.network));
+    if (!check.valid) throw new Error(`Invalid silent payment code (${check.reason})`);
+    // Strict v3 outputs are anyone-can-spend where witness v3 is not active.
+    if (!isKindAvailable(this.getNeuraiNetwork(), 'ecdsa')) throw new Error('Silent payments are not active on this network yet');
+  }
+
   /**
-   * Build + sign the version 2 transaction spending all of `inputs` (strict v3
-   * coins) to `outputs`, in that order. An output with a `code` pays a new
-   * address derived from the inputs, returned in `derived` in the same order.
-   * The decoded private keys are wiped once the addresses are derived.
+   * The wallet's XNA coins for coin control, largest first, without the ones
+   * a transaction in the mempool already spends.
    */
-  protected _signSilentPayment(
+  async listCoins(): Promise<WalletCoin[]> {
+    const engine = await this.ensureEngine();
+    const [utxos, mempool] = await Promise.all([engine.getUTXOs(), engine.getMempool()]);
+    return spendableCoins(
+      utxos.map(u => ({ ...u, satoshis: rawToSats(u.satoshis) })),
+      mempool,
+    );
+  }
+
+  /**
+   * Coin control: spend exactly `coins` (from {@link listCoins}) to `to`, an
+   * address or a payment code, with the change to the wallet's change address
+   * or `forcedChangeAddress`. `amount` null sends everything, fee deducted,
+   * without change. Legacy and PQ coins pay a code through
+   * {@link _buildSilentPaymentViaBridge}.
+   */
+  async buildCoinControlTransaction(
+    coins: WalletCoin[],
+    to: string,
+    amount: string | null,
+    opts?: { forcedChangeAddress?: string },
+  ): Promise<NeuraiBuildTransactionResult> {
+    if (looksLikeSilentPaymentCode(to) && this.walletKind !== 'ecdsa') {
+      if (this.amountsStale) throw new Error('Refresh this wallet before sending');
+      this._checkSilentPaymentCode(to);
+      return this._buildSilentPaymentViaBridge(to, amount, opts?.forcedChangeAddress, coins);
+    }
+    const engine = await this.ensureEngine();
+    const keys: Record<string, unknown> = {};
+    for (const coin of coins) {
+      const material = engine.getPrivateKeyByAddress(coin.address);
+      if (!material) throw new Error(`Not a coin of this wallet: ${coin.address}`);
+      keys[coin.address] = material;
+    }
+    const changeAddress = opts?.forcedChangeAddress ?? (await engine.getChangeAddress());
+    return this._buildFromCoins(coins, keys, to, amount, { address: changeAddress });
+  }
+
+  /**
+   * Build + sign a transaction spending exactly `coins` to `to`, an address or
+   * a payment code, with the change to `change`. `keys` holds the signing
+   * material of each coin's address. `amount` null sends everything, fee
+   * deducted, without change. Paying a code takes strict v3 coins: the library
+   * refuses any other input.
+   */
+  protected async _buildFromCoins(
+    coins: WalletCoin[],
+    keys: Record<string, unknown>,
+    to: string,
+    amount: string | null,
+    change: PaymentDestination,
+  ): Promise<NeuraiBuildTransactionResult> {
+    if (this.amountsStale) throw new Error('Refresh this wallet before sending');
+    if (coins.length === 0) throw new Error('Select the coins to spend');
+    const recipient: PaymentDestination = looksLikeSilentPaymentCode(to) ? { code: to } : { address: to };
+    if ('code' in recipient) this._checkSilentPaymentCode(to);
+    else if (!this.isAddressValid(to)) throw new Error('Invalid address');
+
+    // An output to a code is strict v3, like the coins that pay it.
+    const sizingAddress = (d: PaymentDestination) => ('code' in d ? coins[0].address : d.address);
+    const recipientAddress = sizingAddress(recipient);
+    const changeAddress = sizingAddress(change);
+    const feeRate = await this.estimateFeeRate();
+    const feeFor = (withChange: boolean) =>
+      estimateNeuraiFeeSats(
+        coins.map(c => c.script),
+        withChange ? [recipientAddress, changeAddress] : [recipientAddress],
+        feeRate,
+      );
+    const totalSats = coins.reduce((sum, c) => sum + c.satoshis, 0n);
+    let amountSats: bigint;
+    let feeSats: bigint;
+    let changeSats = 0n;
+    if (amount === null) {
+      feeSats = feeFor(false);
+      amountSats = totalSats - feeSats;
+    } else {
+      amountSats = decimalToSats(amountFromInput(amount));
+      feeSats = feeFor(true);
+      changeSats = totalSats - amountSats - feeSats;
+      if (changeSats < 0n) throw new Error('The selected coins do not cover the amount and the network fee');
+      // Fold a sub-dust change into the fee rather than emitting an unspendable output.
+      if (changeSats < dustThresholdSats(changeAddress)) {
+        feeSats += changeSats;
+        changeSats = 0n;
+      }
+    }
+    if (amountSats < dustThresholdSats(recipientAddress)) throw new Error('Amount too low to cover the network fee');
+
+    const outputs: SilentPaymentOutput[] = [{ ...recipient, valueSats: amountSats }];
+    if (changeSats > 0n) outputs.push({ ...change, valueSats: changeSats });
+    const { signedHex, unsignedHex, derived } = this._signPayment(coins, keys, outputs, this.getEngineNetwork());
+    return {
+      signedHex,
+      unsignedHex,
+      feeSats,
+      sentAmountSats: amountSats,
+      netDebitSats: amountSats + feeSats,
+      debug: { coins: coins.length, changeSats, derived: derived.map(d => d.address) },
+    };
+  }
+
+  /**
+   * Build + sign the version 2 transaction spending all of `inputs` to
+   * `outputs`, in that order. An output with a `code` pays a new address
+   * derived from the inputs (strict v3 coins with WIF keys), returned in
+   * `derived` in the same order. The decoded private keys are wiped once the
+   * addresses are derived.
+   */
+  protected _signPayment(
     inputs: SpendableUtxo[],
-    wifs: Record<string, string>,
+    keys: Record<string, unknown>,
     outputs: SilentPaymentOutput[],
     engineNetwork: EngineNetwork,
   ): { signedHex: string; unsignedHex: string; derived: DerivedOutput[] } {
-    const network = silentPaymentNetworkFor(this.network);
-    // `script` makes the library refuse any input a receiver would not accept.
-    const senderInputs = inputs.map(u => ({
-      txid: u.txid,
-      vout: u.outputIndex,
-      privateKey: decodeWIF(wifs[u.address], network),
-      script: u.script,
-    }));
     const recipients = outputs.flatMap(o => ('code' in o ? [{ code: o.code }] : []));
     let derived: DerivedOutput[] = [];
-    try {
-      if (recipients.length > 0) derived = createOutputs(senderInputs, recipients, { network });
-    } finally {
-      for (const input of senderInputs) input.privateKey.fill(0);
+    if (recipients.length > 0) {
+      const network = silentPaymentNetworkFor(this.network);
+      const senderInputs: Array<{ txid: string; vout: number; privateKey: Uint8Array; script: string }> = [];
+      try {
+        for (const u of inputs) {
+          const wif = keys[u.address];
+          if (typeof wif !== 'string') throw new Error(`No ECDSA key for ${u.address}`);
+          // `script` makes the library refuse any input a receiver would not accept.
+          senderInputs.push({ txid: u.txid, vout: u.outputIndex, privateKey: decodeWIF(wif, network), script: u.script });
+        }
+        derived = createOutputs(senderInputs, recipients, { network });
+      } finally {
+        for (const input of senderInputs) input.privateKey.fill(0);
+      }
     }
 
     let next = 0;
@@ -1675,9 +1817,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       signerNetworkFor(engineNetwork),
       rawTx,
       inputs as unknown as Parameters<typeof signNeuraiTransaction>[2],
-      wifs as Parameters<typeof signNeuraiTransaction>[3],
+      keys as Parameters<typeof signNeuraiTransaction>[3],
     );
-    if (!signedHex) throw new Error('Failed to sign the silent payment');
+    if (!signedHex) throw new Error('Failed to sign the transaction');
     return { signedHex, unsignedHex: rawTx, derived };
   }
 

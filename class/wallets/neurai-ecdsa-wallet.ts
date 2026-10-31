@@ -12,9 +12,7 @@
  */
 
 import { Buffer } from 'buffer';
-import { encodeDestinationScript } from '@neuraiproject/neurai-create-transaction';
 import {
-  checkCode,
   decodeIndexMessage,
   deriveKeysFromMnemonic,
   parseIndexResponse,
@@ -23,25 +21,14 @@ import {
   type SilentPaymentKeys,
 } from '@neuraiproject/neurai-silent-payments';
 import { chainFor, isKindAvailable, NeuraiChainType, NeuraiNetwork, WalletKind } from '../../blue_modules/neurai';
-import { amountFromInput, xnaToSats } from '../../blue_modules/neurai/amounts';
-import { dustThresholdSats } from '../../blue_modules/neurai/dust';
-import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
-import { looksLikeSilentPaymentCode, silentPaymentNetworkFor } from '../../blue_modules/neurai/silentPayments';
-import {
-  AbstractNeuraiWallet,
-  type NeuraiBuildTransactionResult,
-  type SilentPaymentOutput,
-  type SpendableUtxo,
-} from './abstract-neurai-wallet';
+import { silentPaymentNetworkFor } from '../../blue_modules/neurai/silentPayments';
+import { AbstractNeuraiWallet, spendableCoins, type NeuraiBuildTransactionResult, type WalletCoin } from './abstract-neurai-wallet';
 
 type SilentPaymentKeysCache = { network: NeuraiChainType; secret: string; passphrase: string; keys: SilentPaymentKeys };
 
 /** A payment to the wallet's silent payment code. `tweak` is secret: with
  * the spend key it gives the private key of the output. */
 export type ReceivedSilentPayment = { txid: string; vout: number; address: string; tweak: string; height: number };
-
-/** An unspent coin on a silent payment address. */
-export type SilentPaymentCoin = SpendableUtxo & { height: number };
 
 /** Index blocks per request, the most the node serves at once. */
 const SILENT_PAYMENT_PAGE = 1000;
@@ -232,23 +219,16 @@ export class NeuraiECDSAWallet extends AbstractNeuraiWallet {
    * Unspent coins on the silent payment addresses, largest first, without the
    * ones a transaction in the mempool already spends.
    */
-  async listSilentPaymentCoins(): Promise<SilentPaymentCoin[]> {
+  async listSilentPaymentCoins(): Promise<WalletCoin[]> {
     const addresses = this._silentPayments.map(p => p.address);
     if (addresses.length === 0) return [];
     const backend = this.getBackend();
     const [utxos, mempool] = await Promise.all([backend.getUtxos(addresses), backend.getMempool(addresses)]);
-    const spentInMempool = new Set(mempool.map(m => `${m.prevtxid}:${m.prevout}`));
     const heights = new Map(this._silentPayments.map(p => [p.address, p.height]));
-    return utxos
-      .filter(u => (u.assetName === 'XNA' || !u.assetName) && u.satoshis > 0n && !spentInMempool.has(`${u.txid}:${u.outputIndex}`))
-      .map(u => ({
-        ...u,
-        assetName: 'XNA',
-        // The wallet service sends no scripts; the signer needs the prevout's.
-        script: u.script || Buffer.from(encodeDestinationScript(u.address)).toString('hex'),
-        height: u.height ?? heights.get(u.address) ?? 0,
-      }))
-      .sort((a, b) => (a.satoshis === b.satoshis ? 0 : a.satoshis < b.satoshis ? 1 : -1));
+    return spendableCoins(
+      utxos.map(u => ({ ...u, height: u.height ?? heights.get(u.address) })),
+      mempool,
+    );
   }
 
   /**
@@ -258,22 +238,8 @@ export class NeuraiECDSAWallet extends AbstractNeuraiWallet {
    * payment, so nothing on chain ties them to the rest of the wallet. `amount`
    * null sends everything, fee deducted, without change.
    */
-  async buildSilentPaymentCoinsTransaction(
-    coins: SilentPaymentCoin[],
-    to: string,
-    amount: string | null,
-  ): Promise<NeuraiBuildTransactionResult> {
-    if (this.amountsStale) throw new Error('Refresh this wallet before sending');
-    if (coins.length === 0) throw new Error('Select the coins to spend');
+  async buildSilentPaymentCoinsTransaction(coins: WalletCoin[], to: string, amount: string | null): Promise<NeuraiBuildTransactionResult> {
     const network = silentPaymentNetworkFor(this.network);
-    const toCode = looksLikeSilentPaymentCode(to);
-    if (toCode) {
-      const check = checkCode(to, network);
-      if (!check.valid) throw new Error(`Invalid silent payment code (${check.reason})`);
-    } else if (!this.isAddressValid(to)) {
-      throw new Error('Invalid address');
-    }
-
     const payments = new Map(this._silentPayments.map(p => [p.address, p]));
     const { spendPrivateKey } = this._getSilentPaymentKeys();
     const wifs: Record<string, string> = {};
@@ -282,48 +248,7 @@ export class NeuraiECDSAWallet extends AbstractNeuraiWallet {
       if (!payment) throw new Error(`Not a silent payment of this wallet: ${coin.address}`);
       wifs[coin.address] = paymentPrivateKeyWIF(spendPrivateKey, payment.tweak, network);
     }
-
-    // Outputs to payment codes are strict v3, like the coins' own addresses.
-    const v3Address = coins[0].address;
-    const recipientAddress = toCode ? v3Address : to;
-    const feeRate = await this.estimateFeeRate();
-    const feeFor = (withChange: boolean) =>
-      estimateNeuraiFeeSats(
-        coins.map(c => c.script),
-        withChange ? [recipientAddress, v3Address] : [recipientAddress],
-        feeRate,
-      );
-    const totalSats = coins.reduce((sum, c) => sum + c.satoshis, 0n);
-    let amountSats: bigint;
-    let feeSats: bigint;
-    let changeSats = 0n;
-    if (amount === null) {
-      feeSats = feeFor(false);
-      amountSats = totalSats - feeSats;
-    } else {
-      amountSats = xnaToSats(amountFromInput(amount));
-      feeSats = feeFor(true);
-      changeSats = totalSats - amountSats - feeSats;
-      if (changeSats < 0n) throw new Error('The selected coins do not cover the amount and the network fee');
-      // Fold a sub-dust change into the fee rather than emitting an unspendable output.
-      if (changeSats < dustThresholdSats(v3Address)) {
-        feeSats += changeSats;
-        changeSats = 0n;
-      }
-    }
-    if (amountSats < dustThresholdSats(recipientAddress)) throw new Error('Amount too low to cover the network fee');
-
-    const outputs: SilentPaymentOutput[] = [toCode ? { code: to, valueSats: amountSats } : { address: to, valueSats: amountSats }];
-    if (changeSats > 0n) outputs.push({ code: this.getSilentPaymentCode(), valueSats: changeSats });
-    const { signedHex, unsignedHex, derived } = this._signSilentPayment(coins, wifs, outputs, this.getEngineNetwork());
-    return {
-      signedHex,
-      unsignedHex,
-      feeSats,
-      sentAmountSats: amountSats,
-      netDebitSats: amountSats + feeSats,
-      debug: { silentPaymentCoins: coins.length, changeSats, derived: derived.map(d => d.address) },
-    };
+    return this._buildFromCoins(coins, wifs, to, amount, { code: this.getSilentPaymentCode() });
   }
 
   /**

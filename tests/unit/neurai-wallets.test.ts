@@ -17,12 +17,54 @@ import * as bitcoin from 'bitcoinjs-lib';
 import { CHAIN_PARAMS, chainFor, createDefaultBackend, isKindAvailable, isTestnetChain, kindOfChain } from '../../blue_modules/neurai';
 import { signerNetworkFor } from '../../blue_modules/neurai/keyNetwork';
 import { estimateNeuraiFeeSats, estimateNeuraiTxSizeKb } from '../../blue_modules/neurai/feeEstimate';
-import { AbstractNeuraiWallet } from '../../class/wallets/abstract-neurai-wallet';
+import { AbstractNeuraiWallet, spendableCoins } from '../../class/wallets/abstract-neurai-wallet';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
 import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
 
 const KNOWN_MNEMONIC = 'result pact model attract result puzzle final boss private educate luggage era';
+
+/** `wallet` holding one coin of each of `sats` on its first address, txids `c0…`, `c1…`… */
+const funded = async <W extends NeuraiHDWallet | NeuraiPQWallet | NeuraiECDSAWallet>(
+  wallet: W,
+  sats: number[] = [500_000_000],
+): Promise<W> => {
+  const [own] = await wallet.listOwnAddresses();
+  const script = Buffer.from(encodeDestinationScript(own)).toString('hex');
+  const utxos = sats.map((satoshis, i) => ({
+    address: own,
+    assetName: 'XNA',
+    txid: `c${i}`.repeat(32),
+    outputIndex: 0,
+    script,
+    satoshis,
+    height: 100,
+  }));
+  const rpc = jest.fn(async (method: string, params: unknown[] = []) => {
+    if (method === 'getaddressutxos') return utxos;
+    if (method === 'getaddressmempool') return [];
+    if (method === 'gettxout') {
+      const coin = utxos.find(u => u.txid === params[0]);
+      return { value: (coin?.satoshis ?? 0) / 1e8, scriptPubKey: { hex: script } };
+    }
+    throw new Error(`unexpected rpc ${method}`);
+  });
+  wallet.setBackend({ chain: wallet.network, rpc } as never);
+  return wallet;
+};
+
+const scriptOf = (address: string) => Buffer.from(encodeDestinationScript(address)).toString('hex');
+
+/** Whether `script` pays one of the addresses `wallet` derived. */
+const paysWallet = async (wallet: Pick<AbstractNeuraiWallet, 'listOwnAddresses'>, script: string) =>
+  (await wallet.listOwnAddresses()).some(address => scriptOf(address) === script);
+
+/** Every input of `signedHex` carries a signature, in its script or its witness. */
+const assertSigned = (signedHex: string) => {
+  for (const input of parseTransaction(signedHex).inputs) {
+    assert.ok(input.scriptSigHex || input.witness?.length, `input ${input.txid}:${input.vout} is signed`);
+  }
+};
 
 describe('Neurai wallets', () => {
   describe('backend defaults', () => {
@@ -233,6 +275,21 @@ describe('Neurai wallets', () => {
         assert.strictEqual(payments[0].valueSat, 150000000n - result.feeSats);
       });
 
+      it('pays a code from the ticked coins only', async () => {
+        const w = senderWallet();
+        const ticked = (await w.listCoins()).filter(c => c.txid === 'bb'.repeat(32));
+        const result = await w.buildCoinControlTransaction(ticked, receiver.code, '0.2');
+        const { tx, payments } = receivedBy(result.signedHex);
+        assert.deepStrictEqual(
+          tx.inputs.map(i => `${i.txid}:${i.vout}`),
+          [`${'bb'.repeat(32)}:1`],
+        );
+        assert.strictEqual(payments.length, 1);
+        assert.strictEqual(payments[0].valueSat, 20000000n);
+        assert.strictEqual(tx.outputs[1].valueSats, 50000000n - 20000000n - result.feeSats);
+        assert.ok(await paysWallet(w, tx.outputs[1].scriptPubKeyHex), 'the change goes to the wallet');
+      });
+
       it('refuses codes of another network and networks without witness v3', async () => {
         const mainnetCode = deriveKeysFromMnemonic(RECEIVER_MNEMONIC, '', 'main').code;
         await assert.rejects(senderWallet().buildSilentPaymentTransaction(mainnetCode, '1'), /Invalid silent payment code \(network\)/);
@@ -245,24 +302,6 @@ describe('Neurai wallets', () => {
       describe('from Legacy and PQ wallets', () => {
         // First ECDSA change address of the same words: the coin between both transactions.
         const bridgeAddress = ecdsaPair('xna-test', 0).internal.address;
-
-        /** `wallet` holding one 5 XNA coin on its first address. */
-        const funded = async (wallet: NeuraiHDWallet | NeuraiPQWallet) => {
-          const [own] = await wallet.listOwnAddresses();
-          const script = Buffer.from(encodeDestinationScript(own)).toString('hex');
-          const rpc = jest.fn(async (method: string) => {
-            if (method === 'getaddressutxos') {
-              return [
-                { address: own, assetName: 'XNA', txid: 'cd'.repeat(32), outputIndex: 0, script, satoshis: 500_000_000, height: 100 },
-              ];
-            }
-            if (method === 'getaddressmempool') return [];
-            if (method === 'gettxout') return { value: 5, scriptPubKey: { hex: script } };
-            throw new Error(`unexpected rpc ${method}`);
-          });
-          wallet.setBackend({ chain: wallet.network, rpc } as never);
-          return wallet;
-        };
 
         // The second transaction spends the first one's coin on the ECDSA address and pays the code.
         const bridged = (result: { signedHex: string; chainedHex?: string }) => {
@@ -302,6 +341,20 @@ describe('Neurai wallets', () => {
           assert.strictEqual(payments.length, 1);
           assert.strictEqual(payments[0].valueSat, 500000000n - result.feeSats);
           assert.strictEqual(result.netDebitSats, 500000000n);
+        }, 60_000);
+
+        it('pays from the ticked coins of a Legacy wallet', async () => {
+          const wallet = await funded(NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC), [300_000_000, 100_000_000]);
+          const small = (await wallet.listCoins()).filter(c => c.satoshis === 100_000_000n);
+          const result = await wallet.buildCoinControlTransaction(small, receiver.code, '0.4');
+          const { first, payments } = bridged(result);
+          assert.deepStrictEqual(
+            first.inputs.map(i => `${i.txid}:${i.vout}`),
+            [`${small[0].txid}:0`],
+          );
+          assert.strictEqual(payments.length, 1);
+          assert.strictEqual(payments[0].valueSat, 40000000n);
+          assert.strictEqual(result.netDebitSats, 40000000n + result.feeSats);
         }, 60_000);
       });
 
@@ -520,6 +573,86 @@ describe('Neurai wallets', () => {
       assert.strictEqual(witness[2], own.publicKey);
       assert.strictEqual(witness[3], '51');
     }, 30_000);
+  });
+
+  describe('coin control', () => {
+    const elsewhere = (
+      getAddressPair('xna-test', 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about', 0, 0) as {
+        external: { address: string };
+      }
+    ).external.address;
+
+    it('lists the XNA coins largest first, without the ones the mempool spends', () => {
+      const coin = (txid: string, satoshis: bigint, assetName = 'XNA') => ({
+        txid,
+        outputIndex: 0,
+        satoshis,
+        address: elsewhere,
+        assetName,
+        script: '',
+      });
+      const coins = spendableCoins(
+        [coin('a1', 1n), coin('a2', 5n), coin('a3', 3n), coin('a4', 9n, 'TOKEN'), coin('a5', 0n)],
+        [{ prevtxid: 'a3', prevout: 0 }],
+      );
+      assert.deepStrictEqual(
+        coins.map(c => c.txid),
+        ['a2', 'a1'],
+      );
+      // The wallet service sends no scripts: they come from the addresses.
+      assert.strictEqual(coins[0].script, scriptOf(elsewhere));
+      assert.strictEqual(coins[0].height, 0);
+    });
+
+    it('spends exactly the ticked coins of a Legacy wallet, with the change to the wallet', async () => {
+      const wallet = await funded(NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC), [300_000_000, 200_000_000, 100_000_000]);
+      const coins = await wallet.listCoins();
+      assert.deepStrictEqual(
+        coins.map(c => c.satoshis),
+        [300000000n, 200000000n, 100000000n],
+      );
+      const ticked = coins.slice(1);
+      const result = await wallet.buildCoinControlTransaction(ticked, elsewhere, '2.5');
+      assertSigned(result.signedHex);
+      const tx = parseTransaction(result.signedHex);
+      assert.deepStrictEqual(
+        tx.inputs.map(i => i.txid),
+        ticked.map(c => c.txid),
+      );
+      assert.strictEqual(tx.outputs[0].scriptPubKeyHex, scriptOf(elsewhere));
+      assert.strictEqual(tx.outputs[0].valueSats, 250000000n);
+      assert.strictEqual(tx.outputs[1].valueSats, 300000000n - 250000000n - result.feeSats);
+      assert.ok(await paysWallet(wallet, tx.outputs[1].scriptPubKeyHex), 'the change goes to the wallet');
+      assert.strictEqual(result.netDebitSats, 250000000n + result.feeSats);
+
+      await assert.rejects(
+        wallet.buildCoinControlTransaction(coins.slice(2), elsewhere, '1'),
+        /do not cover the amount and the network fee/,
+      );
+      await assert.rejects(wallet.buildCoinControlTransaction([], elsewhere, '1'), /Select the coins/);
+    }, 60_000);
+
+    it('sends the whole of the ticked coins of a PQ wallet without change', async () => {
+      const wallet = await funded(NeuraiPQWallet.forNetwork('testnet', KNOWN_MNEMONIC), [300_000_000, 100_000_000]);
+      const [, small] = await wallet.listCoins();
+      const result = await wallet.buildCoinControlTransaction([small], elsewhere, null);
+      assertSigned(result.signedHex);
+      const tx = parseTransaction(result.signedHex);
+      assert.deepStrictEqual(
+        tx.inputs.map(i => i.txid),
+        [small.txid],
+      );
+      assert.strictEqual(tx.outputs.length, 1);
+      assert.strictEqual(tx.outputs[0].valueSats, 100000000n - result.feeSats);
+      assert.strictEqual(result.netDebitSats, 100000000n);
+    }, 60_000);
+
+    it('sends the PQ change to the forced address', async () => {
+      const wallet = await funded(NeuraiPQWallet.forNetwork('testnet', KNOWN_MNEMONIC), [300_000_000]);
+      const receive = await wallet.getStaticReceiveAddress();
+      const result = await wallet.buildCoinControlTransaction(await wallet.listCoins(), elsewhere, '1', { forcedChangeAddress: receive });
+      assert.strictEqual(parseTransaction(result.signedHex).outputs[1].scriptPubKeyHex, scriptOf(receive));
+    }, 60_000);
   });
 
   describe('serialization', () => {
