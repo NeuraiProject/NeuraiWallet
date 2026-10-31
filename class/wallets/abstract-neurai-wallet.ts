@@ -340,6 +340,12 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * the server compares the cached value against its current state and only
    * pushes a synthetic address.changed for diffs. */
   protected _addressStatus: Record<string, string>;
+  /** Receive address of a Legacy or ECDSA wallet, persisted: the offline
+   * engine always answers the first external address, and Receive shows it
+   * without deriving the whole address window again (seconds on Hermes).
+   * Empty until an engine derives it; PQ wallets answer from
+   * `_addressStatus`. */
+  protected _receiveAddress: string;
 
   /** Lazy engine + backend; created on first use, cleared on network change. */
   private _engine: NeuraiEngine | null;
@@ -367,6 +373,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._heldAssets = [];
     this._pendingTxs = [];
     this._addressStatus = {};
+    this._receiveAddress = '';
     this._engine = null;
     this._enginePromise = null;
     this._backend = null;
@@ -429,6 +436,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._engine = null;
     this._enginePromise = null;
     this._backend = null;
+    this._receiveAddress = '';
     this.balance = 0n;
     this.unconfirmed_balance = 0n;
     this.addressPosition = 0;
@@ -456,6 +464,15 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this.passphrase = passphrase || '';
     this._engine = null;
     this._enginePromise = null;
+    this._receiveAddress = '';
+  }
+
+  setSecret(newSecret: string): this {
+    super.setSecret(newSecret);
+    this._engine = null;
+    this._enginePromise = null;
+    this._receiveAddress = '';
+    return this;
   }
 
   /**
@@ -497,7 +514,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       this._enginePromise = pending;
       pending.then(
         engine => {
-          if (this._enginePromise === pending) this._engine = engine;
+          if (this._enginePromise !== pending) return;
+          this._engine = engine;
+          if (this.walletKind !== 'pq') this._receiveAddress = engine.getAddresses()[0] ?? '';
         },
         () => {},
       );
@@ -741,11 +760,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   // ---------- addresses ------------------------------------------------------------
 
   async getReceiveAddressAsync(): Promise<string> {
-    // Fast path for PQ wallets: the receive address is the only address
-    // (current PQ wallets always reuse). We have it in the persisted status
-    // cache, so we can answer without paying the engine bootstrap cost
-    // (~2s of ML-DSA key derivation) that would otherwise freeze the
-    // ReceiveDetails screen.
+    // Fast path: the receive address is persisted (Legacy and ECDSA) or the
+    // only address in the status cache (PQ wallets always reuse), so we can
+    // answer without paying the engine bootstrap cost (seconds of key
+    // derivation) that would otherwise freeze the ReceiveDetails screen.
     const cached = this._getCachedReceiveAddress();
     if (cached) return cached;
     const engine = await this.ensureEngine();
@@ -771,13 +789,13 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   }
 
   /** Returns the wallet's cached receive address if we can answer without
-   * the engine. For PQ-with-reuse, the only address the wallet ever uses
-   * is the key in `_addressStatus` (populated from the previous session's
-   * subscribe.bulk). Returns null when the cache is empty or when the
-   * wallet has multiple subscribed addresses (HD: different indices may
-   * each be a valid receive). */
+   * the engine. Legacy and ECDSA wallets keep it in `_receiveAddress`. For
+   * PQ-with-reuse, the only address the wallet ever uses is the key in
+   * `_addressStatus` (populated from the previous session's subscribe.bulk).
+   * Returns null when the cache is empty or when the PQ wallet has multiple
+   * subscribed addresses. */
   private _getCachedReceiveAddress(): string | null {
-    if (this.walletKind !== 'pq') return null;
+    if (this.walletKind !== 'pq') return this._receiveAddress || null;
     const keys = Object.keys(this._addressStatus || {});
     return keys.length === 1 ? keys[0] : null;
   }

@@ -681,6 +681,35 @@ describe('Neurai wallets', () => {
       assert.strictEqual(restored.getSecret(), KNOWN_MNEMONIC);
       assert.strictEqual(restored.type, 'NeuraiHD');
     }, 30_000);
+
+    it('keeps the receive address, so Receive shows it without deriving the addresses again', async () => {
+      for (const wallet of [
+        NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC),
+        NeuraiECDSAWallet.forNetwork('testnet', KNOWN_MNEMONIC),
+      ]) {
+        const address = await wallet.getReceiveAddressAsync();
+        assert.strictEqual(address, (await wallet.listOwnAddresses())[0], 'the first external address');
+
+        const restored =
+          wallet.constructor === NeuraiHDWallet
+            ? (NeuraiHDWallet.fromJson(JSON.stringify(wallet)) as unknown as NeuraiHDWallet)
+            : (NeuraiECDSAWallet.fromJson(JSON.stringify(wallet)) as unknown as NeuraiECDSAWallet);
+        const ensureEngine = jest.spyOn(restored as unknown as { ensureEngine(): Promise<unknown> }, 'ensureEngine');
+        assert.strictEqual(restored.getAddress(), address);
+        assert.strictEqual(await restored.getReceiveAddressAsync(), address);
+        expect(ensureEngine).not.toHaveBeenCalled();
+
+        // Other words, passphrase or network: other addresses.
+        restored.setPassphrase('another');
+        assert.strictEqual(restored.getAddress(), false);
+        assert.notStrictEqual(await restored.getReceiveAddressAsync(), address);
+        restored.setNetwork(restored.walletKind === 'ecdsa' ? 'xna-ecdsa' : 'xna');
+        assert.strictEqual(restored.getAddress(), false);
+        await restored.getReceiveAddressAsync();
+        restored.setSecret(KNOWN_MNEMONIC);
+        assert.strictEqual(restored.getAddress(), false);
+      }
+    }, 60_000);
   });
 
   describe('passphrase', () => {
