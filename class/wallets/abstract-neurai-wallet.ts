@@ -55,6 +55,7 @@ import { LOCAL_FEE_RATE_RPC, LOCAL_FEE_RATE_XNA_PER_KB } from '../../blue_module
 import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
 import { dustThresholdSats } from '../../blue_modules/neurai/dust';
 import { looksLikeSilentPaymentCode, silentPaymentNetworkFor } from '../../blue_modules/neurai/silentPayments';
+import { isSingleAddressForAll } from '../../blue_modules/neurai/addressPolicy';
 import {
   ecdsaKeyNetworkFor,
   engineNetworkFor,
@@ -311,6 +312,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   passphrase: string;
   /** Highest derivation index ever seen. Persisted; used to skip RPC scan. */
   addressPosition: number;
+  /** Use only the first address, to receive and for the change (Legacy and
+   * ECDSA; PQ wallets always do). The general setting can turn it on for
+   * every wallet, see {@link usesSingleAddress}. Persisted. */
+  singleAddress: boolean;
   /** Testnet genesis the cached chain state belongs to. Persisted; see {@link AbstractNeuraiWallet.fromJson}. */
   testnetGenesis: string;
   /** Highest chain tip height covered by the last successful transaction scan. Persisted. */
@@ -340,8 +345,14 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * the server compares the cached value against its current state and only
    * pushes a synthetic address.changed for diffs. */
   protected _addressStatus: Record<string, string>;
-  /** Receive address of a Legacy or ECDSA wallet, persisted: the offline
-   * engine always answers the first external address, and Receive shows it
+  /** Derivation indexes of the receive and the change address of a Legacy
+   * or ECDSA wallet: the ones after the last that received. Persisted. */
+  protected _receiveIndex: number;
+  protected _changeIndex: number;
+  /** First address of a Legacy or ECDSA wallet, persisted for Receive when it
+   * uses only that one. */
+  protected _mainAddress: string;
+  /** External address at `_receiveIndex`, persisted so Receive shows it
    * without deriving the whole address window again (seconds on Hermes).
    * Empty until an engine derives it; PQ wallets answer from
    * `_addressStatus`. */
@@ -373,6 +384,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._heldAssets = [];
     this._pendingTxs = [];
     this._addressStatus = {};
+    this.singleAddress = false;
+    this._receiveIndex = 0;
+    this._changeIndex = 0;
+    this._mainAddress = '';
     this._receiveAddress = '';
     this._engine = null;
     this._enginePromise = null;
@@ -411,6 +426,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this.balance = 0n;
     this.unconfirmed_balance = 0n;
     this.addressPosition = 0;
+    this._receiveIndex = 0;
+    this._changeIndex = 0;
+    this._receiveAddress = '';
     this._lastTxBlockHeight = 0;
     this._lastTxFetch = 0;
     this._lastBalanceFetch = 0;
@@ -436,7 +454,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._engine = null;
     this._enginePromise = null;
     this._backend = null;
-    this._receiveAddress = '';
+    this._forgetAddresses();
     this.balance = 0n;
     this.unconfirmed_balance = 0n;
     this.addressPosition = 0;
@@ -445,6 +463,14 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._txCache = [];
     this._heldAssets = [];
     this._pendingTxs = [];
+  }
+
+  /** Other words, passphrase or network: other addresses. */
+  private _forgetAddresses(): void {
+    this._receiveIndex = 0;
+    this._changeIndex = 0;
+    this._mainAddress = '';
+    this._receiveAddress = '';
   }
 
   getNetwork(): NeuraiChainType {
@@ -464,14 +490,14 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this.passphrase = passphrase || '';
     this._engine = null;
     this._enginePromise = null;
-    this._receiveAddress = '';
+    this._forgetAddresses();
   }
 
   setSecret(newSecret: string): this {
     super.setSecret(newSecret);
     this._engine = null;
     this._enginePromise = null;
-    this._receiveAddress = '';
+    this._forgetAddresses();
     return this;
   }
 
@@ -516,7 +542,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
         engine => {
           if (this._enginePromise !== pending) return;
           this._engine = engine;
-          if (this.walletKind !== 'pq') this._receiveAddress = engine.getAddresses()[0] ?? '';
+          if (this.walletKind === 'pq') return;
+          const external = this._externalAddresses(engine);
+          this._mainAddress = external[0] ?? '';
+          this._receiveAddress = external[this._receiveIndex] ?? '';
         },
         () => {},
       );
@@ -539,7 +568,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       passphrase: this.passphrase || undefined,
       network: this.getEngineNetwork(),
       offlineMode: true,
-      minAmountOfAddresses: Math.max(1, this.addressPosition),
+      // Past the receive and the change address too.
+      minAmountOfAddresses: Math.max(1, this.addressPosition, this._receiveIndex + 1, this._changeIndex + 1),
       // NIP-040. Without an override jswallet asks the node per build
       // (`resolveAssetMarker`); the app already knows the answer, so it passes
       // it and saves the round trip. Same source as the local builds, so both
@@ -674,6 +704,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       const delta = event.delta;
       const hasNewTxids = !!delta?.added_txids && delta.added_txids.length > 0;
       const noDeltaInfo = !delta;
+      // The history only has confirmed transactions: a payment still in the
+      // mempool moves the receive or change address on here.
+      if (hasNewTxids) this._advanceAddresses([event.address]);
       if (!hasNewTxids && !noDeltaInfo) {
         // Balance was already applied above and nothing else needs fetching.
         emitWalletChanged(this.getID());
@@ -767,7 +800,78 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     const cached = this._getCachedReceiveAddress();
     if (cached) return cached;
     const engine = await this.ensureEngine();
-    return engine.getReceiveAddress();
+    // Legacy and ECDSA: set when the engine came up (the offline engine itself
+    // always answers its first address).
+    return this._getCachedReceiveAddress() ?? engine.getReceiveAddress();
+  }
+
+  /**
+   * Whether a Legacy or ECDSA wallet uses only its first address: it is the
+   * receive address and takes the change, like a PQ wallet, for services that
+   * expect one address per wallet. On with its own setting or the general one.
+   */
+  usesSingleAddress(): boolean {
+    return this.walletKind !== 'pq' && (this.singleAddress || isSingleAddressForAll());
+  }
+
+  /** Receive addresses of a Legacy or ECDSA engine, in derivation order: it
+   * interleaves them with the change addresses. */
+  private _externalAddresses(engine: NeuraiEngine): string[] {
+    return engine.getAddresses().filter((_, i) => i % 2 === 0);
+  }
+
+  private _internalAddresses(engine: NeuraiEngine): string[] {
+    return engine.getAddresses().filter((_, i) => i % 2 === 1);
+  }
+
+  /**
+   * Where the change of a send goes unless the caller forces it: the first
+   * address with a single address, else the change address after the last
+   * used one. Undefined for PQ wallets, whose engine picks it.
+   */
+  private _defaultChangeAddress(engine: NeuraiEngine): string | undefined {
+    if (this.walletKind === 'pq') return undefined;
+    return this.usesSingleAddress() ? this._externalAddresses(engine)[0] : this._internalAddresses(engine)[this._changeIndex];
+  }
+
+  /**
+   * Moves the receive and the change address of a Legacy or ECDSA wallet to
+   * the ones after the last of `used`, addresses that received; they never
+   * move back. Past the derived window the engine is dropped, so the next one
+   * derives further, and the history of the new addresses is fetched. PQ
+   * wallets keep their single address.
+   */
+  private _advanceAddresses(used: Iterable<string>): void {
+    const engine = this._engine;
+    if (this.walletKind === 'pq' || !engine) return;
+    const external = this._externalAddresses(engine);
+    const internal = this._internalAddresses(engine);
+    const position = new Map<string, { change: boolean; i: number }>();
+    external.forEach((address, i) => position.set(address, { change: false, i }));
+    internal.forEach((address, i) => position.set(address, { change: true, i }));
+    let receive = this._receiveIndex;
+    let change = this._changeIndex;
+    for (const address of used) {
+      const p = position.get(address);
+      if (p && p.change) change = Math.max(change, p.i + 1);
+      else if (p) receive = Math.max(receive, p.i + 1);
+    }
+    if (receive === this._receiveIndex && change === this._changeIndex) return;
+    this._receiveIndex = receive;
+    this._changeIndex = change;
+    this._receiveAddress = external[receive] ?? '';
+    if (this._receiveAddress && change < internal.length) return;
+    this._engine = null;
+    this._enginePromise = null;
+    this._refetchInBackground();
+  }
+
+  /** Own addresses that `rawHex` pays, among the derived ones. */
+  private _paidOwnAddresses(rawHex: string): string[] {
+    const engine = this._engine;
+    if (this.walletKind === 'pq' || !engine) return [];
+    const scripts = new Set(parseTransaction(rawHex).outputs.map(o => o.scriptPubKeyHex));
+    return engine.getAddresses().filter(address => scripts.has(Buffer.from(encodeDestinationScript(address)).toString('hex')));
   }
 
   async getStaticReceiveAddress(): Promise<string> {
@@ -795,7 +899,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * Returns null when the cache is empty or when the PQ wallet has multiple
    * subscribed addresses. */
   private _getCachedReceiveAddress(): string | null {
-    if (this.walletKind !== 'pq') return this._receiveAddress || null;
+    if (this.walletKind !== 'pq') return (this.usesSingleAddress() ? this._mainAddress : this._receiveAddress) || null;
     const keys = Object.keys(this._addressStatus || {});
     return keys.length === 1 ? keys[0] : null;
   }
@@ -805,6 +909,11 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   // path. Wire both to the engine so freshly-created Neurai wallets show a QR
   // and copyable address as soon as they're prewarmed.
   getAddress(): string | false | undefined {
+    // The persisted receive address first, so sync callers (ReceiveDetails
+    // QR, clipboard checks) don't return false and trip a 2s engine bootstrap
+    // on every entry to the wallet screen.
+    const cached = this._getCachedReceiveAddress();
+    if (cached) return cached;
     if (this._engine) {
       try {
         const addrs = this._engine.getAddresses();
@@ -813,10 +922,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
         return false;
       }
     }
-    // Engine not bootstrapped yet: serve from the persisted address cache so
-    // sync callers (ReceiveDetails QR, clipboard checks) don't return false
-    // and trip a 2s engine bootstrap on every entry to the wallet screen.
-    return this._getCachedReceiveAddress() ?? false;
+    return false;
   }
 
   async getAddressAsync(): Promise<string | false | undefined> {
@@ -839,7 +945,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   async getChangeAddressAsync(): Promise<string> {
     const engine = await this.ensureEngine();
-    return engine.getChangeAddress();
+    return this._defaultChangeAddress(engine) ?? engine.getChangeAddress();
   }
 
   async getAddressesAsync(): Promise<string[]> {
@@ -1149,6 +1255,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     }
     this._historyItems = items;
     this._txCache = txCache;
+    this._advanceAddresses(rawDeltas.map(d => d.address));
     // Reconcile optimistic pending sends against the fresh history: drop any
     // that have now confirmed (or aged out).
     this._prunePendingTxs();
@@ -1293,7 +1400,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     if (targets.length === 0) {
       throw new Error('buildSendTransaction requires at least one target');
     }
-    const forcedChangeAddressBaseCurrency = opts?.forcedChangeAddress;
+    const engine = await this.ensureEngine();
+    const forcedChangeAddressBaseCurrency = opts?.forcedChangeAddress ?? this._defaultChangeAddress(engine);
     const assetName = opts?.assetName;
     const isAsset = !!assetName && assetName !== 'XNA';
 
@@ -1314,7 +1422,6 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       }
     }
 
-    const engine = await this.ensureEngine();
     if (targets.length === 1) {
       const result = await engine.createTransaction({
         toAddress: targets[0].address,
@@ -1546,7 +1653,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     if (utxos.length === 0) throw new Error('No spendable XNA to send');
 
     const feeRate = await this.estimateFeeRate();
-    const changeAddress = await engine.getChangeAddress();
+    const changeAddress = this._defaultChangeAddress(engine) ?? (await engine.getChangeAddress());
     const changeDust = dustThresholdSats(changeAddress);
     const total = (coins: SpendableUtxo[]) => coins.reduce((sum, u) => sum + u.satoshis, 0n);
     // The payment is a strict v3 output like the change, so the change address sizes it.
@@ -1725,7 +1832,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       if (!material) throw new Error(`Not a coin of this wallet: ${coin.address}`);
       keys[coin.address] = material;
     }
-    const changeAddress = opts?.forcedChangeAddress ?? (await engine.getChangeAddress());
+    const changeAddress = opts?.forcedChangeAddress ?? this._defaultChangeAddress(engine) ?? (await engine.getChangeAddress());
     return this._buildFromCoins(coins, keys, to, amount, { address: changeAddress });
   }
 
@@ -1946,6 +2053,17 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   }
 
   async broadcastTx(rawHex: string): Promise<string> {
+    const txid = await this._broadcast(rawHex);
+    // A next send must not reuse the change address this one paid.
+    try {
+      this._advanceAddresses(this._paidOwnAddresses(rawHex));
+    } catch (err) {
+      console.debug('broadcastTx: own outputs not read', err);
+    }
+    return txid;
+  }
+
+  private async _broadcast(rawHex: string): Promise<string> {
     const primary = this.getBackend();
     try {
       return await primary.broadcast(rawHex);

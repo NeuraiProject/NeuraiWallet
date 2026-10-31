@@ -18,6 +18,7 @@ import { CHAIN_PARAMS, chainFor, createDefaultBackend, isKindAvailable, isTestne
 import { signerNetworkFor } from '../../blue_modules/neurai/keyNetwork';
 import { estimateNeuraiFeeSats, estimateNeuraiTxSizeKb } from '../../blue_modules/neurai/feeEstimate';
 import { AbstractNeuraiWallet, spendableCoins } from '../../class/wallets/abstract-neurai-wallet';
+import { setSingleAddressForAll } from '../../blue_modules/neurai/addressPolicy';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
 import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
@@ -709,6 +710,178 @@ describe('Neurai wallets', () => {
         restored.setSecret(KNOWN_MNEMONIC);
         assert.strictEqual(restored.getAddress(), false);
       }
+    }, 60_000);
+  });
+
+  describe('receive and change addresses', () => {
+    /** Receive and change addresses of KNOWN_MNEMONIC's Legacy testnet wallet. */
+    const pair = (index: number) =>
+      getAddressPair('xna-legacy-test', KNOWN_MNEMONIC, 0, index) as unknown as {
+        external: { address: string };
+        internal: { address: string };
+      };
+    const external = (index: number) => pair(index).external.address;
+    const internal = (index: number) => pair(index).internal.address;
+    const elsewhere = getAddressPair(
+      'xna-legacy-test',
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      0,
+      0,
+    ).external.address as string;
+
+    /** A Legacy wallet whose history has a payment to each of `paid`, with a 5 XNA coin on its first address. */
+    const withHistory = (paid: string[]) => {
+      const wallet = NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC);
+      const history = { paid };
+      let pushed: ((event: { address: string; delta?: { added_txids?: string[] } }) => void) | undefined;
+      wallet.setBackend({
+        chain: wallet.network,
+        getAddressHistory: async (addresses: string[]) =>
+          history.paid
+            .filter(address => addresses.includes(address))
+            .map((address, i) => ({
+              address,
+              assetName: 'XNA',
+              blockindex: 0,
+              height: 50 + i,
+              index: 0,
+              satoshis: 100000000n,
+              txid: (i + 1).toString(16).padStart(64, '0'),
+            })),
+        getBalance: async () => 0n,
+        getTipHeight: async () => 100,
+        getBlockTimes: async () => ({}),
+        rpc: async (method: string) => {
+          const script = scriptOf(external(0));
+          if (method === 'getaddressutxos') {
+            return [
+              { address: external(0), assetName: 'XNA', txid: 'c0'.repeat(32), outputIndex: 0, script, satoshis: 500_000_000, height: 10 },
+            ];
+          }
+          if (method === 'gettxout') return { value: 5, scriptPubKey: { hex: script } };
+          return [];
+        },
+        broadcast: async (rawHex: string) => computeTxid(rawHex),
+        onAddressChanged: (listener: typeof pushed) => {
+          pushed = listener;
+          return () => {};
+        },
+      } as never);
+      // The refetch a push or a longer window asks for runs in the background: the tests call it themselves.
+      const refetch = jest
+        .spyOn(wallet as unknown as { _refetchInBackground(): void }, '_refetchInBackground')
+        .mockImplementation(() => {});
+      return { wallet, history, refetch, push: (address: string) => pushed!({ address, delta: { added_txids: ['ee'.repeat(32)] } }) };
+    };
+
+    it('is the address after the last one that received, and never moves back', async () => {
+      assert.strictEqual(external(0), (await NeuraiHDWallet.forNetwork('testnet', KNOWN_MNEMONIC).listOwnAddresses())[0]);
+      const { wallet, history } = withHistory([external(0), external(2)]);
+      assert.strictEqual(await wallet.getReceiveAddressAsync(), external(0));
+      await wallet.fetchTransactions();
+      assert.strictEqual(await wallet.getReceiveAddressAsync(), external(3));
+      assert.strictEqual((wallet as unknown as { _receiveIndex: number })._receiveIndex, 3);
+
+      // Restarted, it shows it straight away.
+      const restored = NeuraiHDWallet.fromJson(JSON.stringify(wallet)) as unknown as NeuraiHDWallet;
+      assert.strictEqual(restored.getAddress(), external(3));
+
+      history.paid = [external(0)];
+      await wallet.fetchTransactions();
+      assert.strictEqual(await wallet.getReceiveAddressAsync(), external(3));
+    }, 60_000);
+
+    it('moves on as soon as a payment reaches the mempool', async () => {
+      const { wallet, push } = withHistory([]);
+      await wallet.fetchTransactions();
+      assert.strictEqual(await wallet.getReceiveAddressAsync(), external(0));
+      push(external(0));
+      assert.strictEqual(await wallet.getReceiveAddressAsync(), external(1));
+      // A change address or an older one does not move it.
+      push((await wallet.listOwnAddresses())[1]);
+      push(external(0));
+      assert.strictEqual(await wallet.getReceiveAddressAsync(), external(1));
+    }, 60_000);
+
+    it('derives further when the last derived address received', async () => {
+      const { wallet, refetch } = withHistory([external(19)]);
+      await wallet.fetchTransactions();
+      assert.strictEqual((wallet as unknown as { _receiveIndex: number })._receiveIndex, 20);
+      expect(refetch).toHaveBeenCalled();
+      assert.strictEqual(await wallet.getReceiveAddressAsync(), external(20));
+      assert.strictEqual((await wallet.listOwnAddresses()).length, 80, '40 receive and 40 change addresses');
+    }, 60_000);
+
+    it('starts again from the first address on a new testnet', () => {
+      const { wallet } = withHistory([]);
+      const state = wallet as unknown as { _receiveIndex: number; _receiveAddress: string; discardTestnetChainState(): void };
+      state._receiveIndex = 7;
+      state._receiveAddress = external(7);
+      state.discardTestnetChainState();
+      assert.strictEqual(state._receiveIndex, 0);
+      assert.strictEqual(wallet.getAddress(), false);
+    });
+
+    /** Where the change of a 1 XNA send from `wallet` goes. */
+    const changeOf = async (wallet: NeuraiHDWallet) => {
+      const built = await wallet.buildSendTransaction([{ address: elsewhere, amount: '1' }]);
+      const outputs = parseTransaction(built.signedHex).outputs.filter(o => o.scriptPubKeyHex !== scriptOf(elsewhere));
+      assert.strictEqual(outputs.length, 1);
+      return { built, change: outputs[0].scriptPubKeyHex };
+    };
+
+    it('sends each change to the change address after the last used one', async () => {
+      const { wallet, history } = withHistory([]);
+      const first = await changeOf(wallet);
+      assert.strictEqual(first.change, scriptOf(internal(0)));
+      // Broadcast, the next send no longer uses it, before any confirmation.
+      await wallet.broadcastTx(first.built.signedHex);
+      assert.strictEqual((await changeOf(wallet)).change, scriptOf(internal(1)));
+      assert.strictEqual(await wallet.getChangeAddressAsync(), internal(1));
+
+      history.paid = [internal(4)];
+      await wallet.fetchTransactions();
+      assert.strictEqual((await changeOf(wallet)).change, scriptOf(internal(5)));
+      assert.strictEqual(await wallet.getReceiveAddressAsync(), external(0), 'the change does not move the receive address');
+    }, 60_000);
+
+    it('uses only the first address when the wallet is set to', async () => {
+      const { wallet } = withHistory([external(0), external(1), internal(0)]);
+      await wallet.fetchTransactions();
+      assert.strictEqual(await wallet.getReceiveAddressAsync(), external(2));
+      wallet.singleAddress = true;
+      assert.strictEqual(wallet.getAddress(), external(0));
+      assert.strictEqual(await wallet.getReceiveAddressAsync(), external(0));
+      assert.strictEqual((await changeOf(wallet)).change, scriptOf(external(0)), 'the change comes back to it');
+
+      // Restarted, Receive still shows it straight away.
+      const restored = NeuraiHDWallet.fromJson(JSON.stringify(wallet)) as unknown as NeuraiHDWallet;
+      assert.strictEqual(restored.singleAddress, true);
+      assert.strictEqual(restored.getAddress(), external(0));
+
+      // Off again, it goes on from the history.
+      wallet.singleAddress = false;
+      assert.strictEqual(await wallet.getReceiveAddressAsync(), external(2));
+      assert.strictEqual((await changeOf(wallet)).change, scriptOf(internal(1)));
+    }, 60_000);
+
+    it('uses only the first address of every wallet with the general setting', async () => {
+      const { wallet } = withHistory([external(0)]);
+      await wallet.fetchTransactions();
+      setSingleAddressForAll(true);
+      try {
+        assert.strictEqual(wallet.usesSingleAddress(), true);
+        assert.strictEqual(await wallet.getReceiveAddressAsync(), external(0));
+        assert.strictEqual((await changeOf(wallet)).change, scriptOf(external(0)));
+        assert.strictEqual(
+          NeuraiPQWallet.forNetwork('testnet', KNOWN_MNEMONIC).usesSingleAddress(),
+          false,
+          'PQ wallets keep their own rule',
+        );
+      } finally {
+        setSingleAddressForAll(false);
+      }
+      assert.strictEqual(await wallet.getReceiveAddressAsync(), external(1));
     }, 60_000);
   });
 

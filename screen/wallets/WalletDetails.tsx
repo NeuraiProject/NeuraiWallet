@@ -23,6 +23,9 @@ import { CommonToolTipActions } from '../../typings/CommonToolTipActions';
 import SafeAreaScrollView from '../../components/SafeAreaScrollView';
 import { BlueSpacing20 } from '../../components/BlueSpacing';
 import { BlueLoading } from '../../components/BlueLoading';
+import { useSettings } from '../../hooks/context/useSettings';
+import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
+import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
 
 type RouteProps = RouteProp<DetailViewStackParamList, 'WalletDetails'>;
 const WalletDetails: React.FC = () => {
@@ -43,6 +46,11 @@ const WalletDetails: React.FC = () => {
   const { setOptions, navigate, navigateToWalletsList } = useExtendedNavigation();
   const { colors } = useTheme();
   const [walletName, setWalletName] = useState<string>(wallet.getLabel());
+  // Legacy and ECDSA software wallets can use only their first address; PQ
+  // wallets always do, and the hardware wallet has a single address.
+  const { isSingleAddressEnabled } = useSettings();
+  const addressWallet = isNeuraiWallet(wallet) && wallet.type !== NeuraiHardwareWallet.type && wallet.walletKind !== 'pq' ? wallet : null;
+  const [singleAddress, setSingleAddress] = useState<boolean>(addressWallet?.singleAddress ?? false);
 
   const [masterFingerprint, setMasterFingerprint] = useState<string | undefined>();
   const walletTransactionsLength = useMemo<number>(() => wallet.getTransactions().length, [wallet]);
@@ -364,6 +372,33 @@ const WalletDetails: React.FC = () => {
                   />
                 </View>
               </>
+              {addressWallet && (
+                <>
+                  <Text style={[styles.textLabel2, stylesHook.textLabel2]}>{loc.addresses.addresses_title.toLowerCase()}</Text>
+                  <View style={styles.hardware}>
+                    <BlueText>{loc.settings.single_address}</BlueText>
+                    <Switch
+                      testID="WalletSingleAddressSwitch"
+                      value={singleAddress || isSingleAddressEnabled}
+                      disabled={isSingleAddressEnabled}
+                      onValueChange={async (value: boolean) => {
+                        addressWallet.singleAddress = value;
+                        setSingleAddress(value);
+                        triggerHapticFeedback(HapticFeedbackTypes.ImpactLight);
+                        try {
+                          await saveToDisk();
+                        } catch (error: any) {
+                          triggerHapticFeedback(HapticFeedbackTypes.NotificationError);
+                          console.error(error.message);
+                        }
+                      }}
+                    />
+                  </View>
+                  <Text style={[styles.note, stylesHook.textLabel2]}>
+                    {isSingleAddressEnabled ? loc.wallets.details_single_address_all : loc.wallets.details_single_address_explanation}
+                  </Text>
+                </>
+              )}
               <>
                 <Text onPress={purgeTransactions} style={[styles.textLabel2, stylesHook.textLabel2]} testID="PurgeBackdoorButton">
                   {loc.transactions.transactions_count.toLowerCase()}
@@ -457,6 +492,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  note: {
+    fontSize: 13,
+    marginTop: 4,
   },
   row: {
     flexDirection: 'row',

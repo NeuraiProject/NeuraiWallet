@@ -11,6 +11,7 @@ import {
 } from '../../hooks/useDeviceQuickActions';
 import { getIsHandOffUseEnabled, setIsHandOffUseEnabled } from '../HandOffComponent';
 import { useStorage } from '../../hooks/context/useStorage';
+import { setSingleAddressForAll } from '../../blue_modules/neurai/addressPolicy';
 import { XnaUnit } from '../../models/xnaUnits';
 import { TotalWalletsBalanceKey, TotalWalletsBalancePreferredUnit } from '../TotalWalletsBalance';
 import {
@@ -89,6 +90,28 @@ export const setIsPQAddressReuseEnabledStorageFunc = async (value: boolean): Pro
     await DefaultPreference.set(PQ_ADDRESS_REUSE_KEY, value ? 'true' : 'false');
   } catch (e) {
     console.error('Error setting PQAddressReuse:', e);
+  }
+};
+
+const SINGLE_ADDRESS_KEY = 'SINGLE_ADDRESS';
+
+/** Legacy and ECDSA wallets use only their first address (off by default). */
+export const getIsSingleAddressEnabled = async (): Promise<boolean> => {
+  try {
+    await DefaultPreference.setName(GROUP_IO_BLUEWALLET);
+    return (await DefaultPreference.get(SINGLE_ADDRESS_KEY)) === 'true';
+  } catch (e) {
+    console.error('Error getting SingleAddress:', e);
+    return false;
+  }
+};
+
+export const setIsSingleAddressEnabledStorageFunc = async (value: boolean): Promise<void> => {
+  try {
+    await DefaultPreference.setName(GROUP_IO_BLUEWALLET);
+    await DefaultPreference.set(SINGLE_ADDRESS_KEY, value ? 'true' : 'false');
+  } catch (e) {
+    console.error('Error setting SingleAddress:', e);
   }
 };
 
@@ -219,6 +242,9 @@ interface SettingsContextType {
   setIsElectrumDisabled: (value: boolean) => void;
   isPQAddressReuseEnabled: boolean;
   setIsPQAddressReuseEnabledStorage: (value: boolean) => Promise<void>;
+  /** Every Legacy and ECDSA wallet uses only its first address. */
+  isSingleAddressEnabled: boolean;
+  setIsSingleAddressEnabledStorage: (value: boolean) => Promise<void>;
   themeMode: ThemeMode;
   setThemeModeStorage: (value: ThemeMode) => Promise<void>;
   /** Home screen lists every visible wallet's transactions together instead of the focused card's. */
@@ -263,6 +289,8 @@ const defaultSettingsContext: SettingsContextType = {
   setIsElectrumDisabled: () => {},
   isPQAddressReuseEnabled: true,
   setIsPQAddressReuseEnabledStorage: async () => {},
+  isSingleAddressEnabled: false,
+  setIsSingleAddressEnabledStorage: async () => {},
   themeMode: 'system',
   setThemeModeStorage: async () => {},
   isUnifiedTransactionsEnabled: false,
@@ -290,6 +318,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
   const [selectedTestnetBlockExplorer, setSelectedTestnetBlockExplorer] = useState<BlockExplorer>(BLOCK_EXPLORERS.testnet);
   const [isElectrumDisabled, setIsElectrumDisabled] = useState<boolean>(true);
   const [isPQAddressReuseEnabled, setIsPQAddressReuseEnabled] = useState<boolean>(true);
+  const [isSingleAddressEnabled, setIsSingleAddressEnabled] = useState<boolean>(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>('system');
   const [isUnifiedTransactionsEnabled, setIsUnifiedTransactionsEnabled] = useState<boolean>(false);
   const [selectedNetwork, setSelectedNetwork] = useState<NeuraiNetwork>(DEFAULT_SELECTED_NETWORK);
@@ -347,6 +376,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
           // PQ address reuse is mandatory for now: always on regardless of any
           // previously stored value, and not user-editable (see GeneralSettings).
           setIsPQAddressReuseEnabled(true);
+        }),
+        getIsSingleAddressEnabled().then(enabled => {
+          setSingleAddressForAll(enabled);
+          setIsSingleAddressEnabled(enabled);
         }),
         getThemeMode().then(mode => {
           setThemeMode(mode);
@@ -489,6 +522,12 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
     }
   }, []);
 
+  const setIsSingleAddressEnabledStorage = useCallback(async (value: boolean): Promise<void> => {
+    await setIsSingleAddressEnabledStorageFunc(value);
+    setSingleAddressForAll(value);
+    setIsSingleAddressEnabled(value);
+  }, []);
+
   const setThemeModeStorage = useCallback(async (value: ThemeMode): Promise<void> => {
     try {
       await setThemeModeStorageFunc(value);
@@ -599,6 +638,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
       setIsElectrumDisabled,
       isPQAddressReuseEnabled,
       setIsPQAddressReuseEnabledStorage,
+      isSingleAddressEnabled,
+      setIsSingleAddressEnabledStorage,
       themeMode,
       setThemeModeStorage,
       isUnifiedTransactionsEnabled,
@@ -636,6 +677,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = React.m
       isElectrumDisabled,
       isPQAddressReuseEnabled,
       setIsPQAddressReuseEnabledStorage,
+      isSingleAddressEnabled,
+      setIsSingleAddressEnabledStorage,
       themeMode,
       setThemeModeStorage,
       isUnifiedTransactionsEnabled,

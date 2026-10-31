@@ -50,6 +50,8 @@ const GeneralSettings: React.FC = () => {
     setThemeModeStorage,
     isUnifiedTransactionsEnabled,
     setIsUnifiedTransactionsEnabledStorage,
+    isSingleAddressEnabled,
+    setIsSingleAddressEnabledStorage,
   } = useSettings();
   const [isLoading, setIsLoading] = useState<number>(SettingsPrivacySection.All);
   const [storageIsEncrypted, setStorageIsEncrypted] = useState<boolean>(true);
@@ -240,6 +242,19 @@ const GeneralSettings: React.FC = () => {
         Component: View,
         showItem: true,
       },
+      {
+        id: 'singleAddress',
+        title: loc.settings.single_address,
+        subtitle: <SettingsSubtitle>{loc.settings.single_address_explanation}</SettingsSubtitle>,
+        switch: {
+          value: isSingleAddressEnabled,
+          onValueChange: setIsSingleAddressEnabledStorage,
+          disabled: isLoading === SettingsPrivacySection.All,
+        },
+        testID: 'SingleAddressSwitch',
+        Component: View,
+        showItem: true,
+      },
     ];
 
     if (!isDesktop) {
@@ -338,6 +353,8 @@ const GeneralSettings: React.FC = () => {
     onThemePress,
     isUnifiedTransactionsEnabled,
     setIsUnifiedTransactionsEnabledStorage,
+    isSingleAddressEnabled,
+    setIsSingleAddressEnabledStorage,
   ]);
 
   const renderItem: ListRenderItem<SettingItem> = useCallback(
