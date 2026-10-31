@@ -1,9 +1,23 @@
 import Clipboard from '@react-native-clipboard/clipboard';
-import { encodeQR } from 'qr';
+import {
+  colorAlpha,
+  colorHex,
+  emitLayer,
+  encode,
+  getLayout,
+  gradientGeometry,
+  isGradient,
+  layerPaint,
+  parseStyle,
+  SvgPathWriter,
+  type Layer,
+  type Paint,
+  type Style,
+} from '@kudelink/qrkude';
 import React, { useCallback, useMemo, useRef } from 'react';
 import { Platform, StyleSheet, View, ViewStyle } from 'react-native';
 import Share from 'react-native-share';
-import Svg, { Defs, Image as SvgImage, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, Image as SvgImage, LinearGradient, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import loc from '../loc';
 import { ActionIcons } from '../typings/ActionIcons';
@@ -22,18 +36,34 @@ interface QRCodeProps {
   onError?: (error?: unknown) => void;
 }
 
-const GRADIENT_ID = 'qrgrad';
-const GRADIENT_STOP_1 = '#0c2550';
-const GRADIENT_STOP_2 = '#1e3a8a';
 const BACKGROUND = '#FFFFFF';
-const LOGO_BACKGROUND = '#FFFFFF';
+/** Largest logo, as a fraction of the code's width: H codes still read
+ * reliably with it, whatever the payload. */
+const MAX_LOGO_FRACTION = 0.3;
 
-const eclMap: Record<ErrorCorrectionLevel, 'low' | 'medium' | 'quartile' | 'high'> = {
-  L: 'low',
-  M: 'medium',
-  Q: 'quartile',
-  H: 'high',
-};
+/**
+ * QRKude style: round dots in a dark blue gradient, dotted eyes, and the
+ * Neurai logo in a white circle cut out of the center.
+ */
+export const qrStyle = (logoFraction: number): Style =>
+  parseStyle({
+    margin: 1,
+    modules: {
+      shape: 'dot',
+      size: 0.9,
+      color: {
+        type: 'linear',
+        angle: 45,
+        stops: [
+          { offset: 0, color: '#0c2550' },
+          { offset: 1, color: '#1e3a8a' },
+        ],
+      },
+    },
+    eyes: { frame: 'dots', ball: 'dots' },
+    background: { color: BACKGROUND },
+    logo: { size: logoFraction, shape: 'circle', background: BACKGROUND },
+  });
 
 const actionIcons: { [key: string]: ActionIcons } = {
   Copy: { iconValue: 'doc.on.doc' },
@@ -53,87 +83,91 @@ const menuActions: Action[] =
       ]
     : [{ id: actionKeys.Share, text: loc.receive.details_share, icon: actionIcons.Share }];
 
-const roundUpToOdd = (n: number): number => {
-  const rounded = Math.ceil(n);
-  return rounded % 2 === 0 ? rounded + 1 : rounded;
+/** A layer's fill: a color, or a gradient of the plan's `gradients`. */
+type Fill = { color: string; opacity: number } | { gradient: number };
+
+type PlanGradient = {
+  linear: boolean;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  cx: number;
+  cy: number;
+  r: number;
+  stops: Array<{ offset: number; color: string; opacity: number }>;
 };
 
-const MATRIX_CACHE_MAX = 128;
-const matrixCache = new Map<string, boolean[][]>();
-
-const getCachedMatrix = (value: string, ecl: ErrorCorrectionLevel): boolean[][] => {
-  const key = `${ecl}|${value}`;
-  const hit = matrixCache.get(key);
-  if (hit) {
-    matrixCache.delete(key);
-    matrixCache.set(key, hit);
-    return hit;
-  }
-  const m = encodeQR(value, 'raw', { ecc: eclMap[ecl], border: 0 });
-  matrixCache.set(key, m);
-  if (matrixCache.size > MATRIX_CACHE_MAX) {
-    const first = matrixCache.keys().next().value;
-    if (first !== undefined) matrixCache.delete(first);
-  }
-  return m;
-};
-
+/** Everything drawn for one value, in the code's units (modules). */
 type RenderPlan = {
-  N: number;
-  cell: number;
-  dataPath: string;
-  finderOrigins: Array<[number, number]>;
-  logoCells: number;
-  logoStart: number;
+  width: number;
+  height: number;
+  layers: Array<{ layer: Layer; d: string; fill: Fill }>;
+  gradients: PlanGradient[];
+  logo: { x: number; y: number; size: number } | null;
 };
 
 const PLAN_CACHE_MAX = 64;
 const planCache = new Map<string, RenderPlan>();
 
-const getCachedPlan = (value: string, ecl: ErrorCorrectionLevel, size: number, isLogoRendered: boolean, logoSize: number): RenderPlan => {
-  const key = `${ecl}|${size}|${isLogoRendered ? 'L' + logoSize : 'NL'}|${value}`;
+/** Layers drawn as paths, in painting order; the background is a rect. */
+const PATH_LAYERS: Layer[] = ['modules', 'eyeFrames', 'eyeBalls', 'logoBackground'];
+
+/**
+ * The geometry and paints of `value` in the QRKude style, as its SVG writer
+ * lays them out. Eyes without a paint of their own share the modules' one.
+ */
+const buildPlan = (value: string, ecl: ErrorCorrectionLevel, logoFraction: number): RenderPlan => {
+  const style = qrStyle(logoFraction);
+  const code = encode(value, { ecc: ecl });
+  const layout = getLayout(code, style);
+  const gradients: PlanGradient[] = [];
+  const gradientIndex = new Map<Paint, number>();
+  const fillOf = (paint: Paint, geometryLayer: Layer): Fill => {
+    if (isGradient(paint)) {
+      let index = gradientIndex.get(paint);
+      if (index === undefined) {
+        const g = gradientGeometry(code, style, geometryLayer);
+        index = gradients.length;
+        gradients.push({
+          linear: paint.type === 'linear',
+          ...g,
+          stops: paint.stops.slice(0, 8).map(st => ({ offset: st.offset, color: colorHex(st.color), opacity: colorAlpha(st.color) / 255 })),
+        });
+        gradientIndex.set(paint, index);
+      }
+      return { gradient: index };
+    }
+    const color = paint.type === 'solid' ? paint.color : 0;
+    return { color: colorHex(color), opacity: colorAlpha(color) / 255 };
+  };
+
+  const layers: RenderPlan['layers'] = [];
+  for (const layer of PATH_LAYERS) {
+    const writer = new SvgPathWriter();
+    if (emitLayer(code, style, layer, writer) === 0) continue;
+    const paint = layerPaint(style, layer);
+    const sharesModulesPaint = paint === style.modules.color;
+    layers.push({ layer, d: writer.toString(), fill: fillOf(paint, sharesModulesPaint ? 'modules' : layer) });
+  }
+  return {
+    width: layout.width,
+    height: layout.height,
+    layers,
+    gradients,
+    logo: layout.hasLogo ? { x: layout.logoX, y: layout.logoY, size: layout.logoSize } : null,
+  };
+};
+
+const getCachedPlan = (value: string, ecl: ErrorCorrectionLevel, logoFraction: number): RenderPlan => {
+  const key = `${ecl}|${logoFraction}|${value}`;
   const hit = planCache.get(key);
   if (hit) {
     planCache.delete(key);
     planCache.set(key, hit);
     return hit;
   }
-
-  const matrix = getCachedMatrix(value, ecl);
-  const N = matrix.length;
-  const cell = size / (N + 2);
-
-  let logoCells = 0;
-  let logoStart = 0;
-  if (isLogoRendered) {
-    const desired = (logoSize + cell) / cell;
-    logoCells = Math.min(roundUpToOdd(desired), N);
-    logoStart = Math.floor((N - logoCells) / 2);
-  }
-  const logoEnd = logoStart + logoCells;
-
-  const finderOrigins: Array<[number, number]> =
-    N >= 7
-      ? [
-          [0, 0],
-          [0, N - 7],
-          [N - 7, 0],
-        ]
-      : [];
-  const isInsideFinder = (r: number, c: number): boolean =>
-    finderOrigins.some(([fr, fc]) => r >= fr && r < fr + 7 && c >= fc && c < fc + 7);
-
-  let dataPath = '';
-  for (let r = 0; r < N; r++) {
-    for (let c = 0; c < N; c++) {
-      if (!matrix[r][c]) continue;
-      if (isLogoRendered && r >= logoStart && r < logoEnd && c >= logoStart && c < logoEnd) continue;
-      if (isInsideFinder(r, c)) continue;
-      dataPath += `M${(c + 1) * cell} ${(r + 1) * cell}h${cell}v${cell}h-${cell}z`;
-    }
-  }
-
-  const plan: RenderPlan = { N, cell, dataPath, finderOrigins, logoCells, logoStart };
+  const plan = buildPlan(value, ecl, logoFraction);
   planCache.set(key, plan);
   if (planCache.size > PLAN_CACHE_MAX) {
     const first = planCache.keys().next().value;
@@ -141,6 +175,8 @@ const getCachedPlan = (value: string, ecl: ErrorCorrectionLevel, size: number, i
   }
   return plan;
 };
+
+const gradientId = (index: number) => `qrgrad${index}`;
 
 const QRCode: React.FC<QRCodeProps> = ({
   value = '',
@@ -153,14 +189,15 @@ const QRCode: React.FC<QRCodeProps> = ({
 }) => {
   const svgRef = useRef<Svg>(null);
 
+  const logoFraction = isLogoRendered && size > 0 ? Math.min(logoSize / size, MAX_LOGO_FRACTION) : 0;
   const plan = useMemo<RenderPlan | null>(() => {
     try {
-      return getCachedPlan(value, ecl, size, isLogoRendered, logoSize);
+      return getCachedPlan(value, ecl, logoFraction);
     } catch (e) {
       onError?.(e);
       return null;
     }
-  }, [value, ecl, size, isLogoRendered, logoSize, onError]);
+  }, [value, ecl, logoFraction, onError]);
 
   const handleCopy = useCallback(() => {
     if (!svgRef.current) return;
@@ -212,95 +249,46 @@ const QRCode: React.FC<QRCodeProps> = ({
 
   const renderQR = useMemo(() => {
     if (!plan) return null;
-    const { cell, dataPath, finderOrigins, logoCells, logoStart } = plan;
-    const gradFill = `url(#${GRADIENT_ID})`;
-
-    const finderShapes: React.ReactElement[] = [];
-    const outerR = 2 * cell;
-    const holeR = 1.25 * cell;
-    const dotR = 0.9 * cell;
-    finderOrigins.forEach(([fr, fc], i) => {
-      const x = (fc + 1) * cell;
-      const y = (fr + 1) * cell;
-      finderShapes.push(
-        <Rect
-          key={`finder-frame-${i}`}
-          testID="qr-finder-frame"
-          x={x}
-          y={y}
-          width={7 * cell}
-          height={7 * cell}
-          rx={outerR}
-          ry={outerR}
-          fill={gradFill}
-        />,
-        <Rect
-          key={`finder-hole-${i}`}
-          testID="qr-finder-hole"
-          x={x + cell}
-          y={y + cell}
-          width={5 * cell}
-          height={5 * cell}
-          rx={holeR}
-          ry={holeR}
-          fill={BACKGROUND}
-        />,
-        <Rect
-          key={`finder-dot-${i}`}
-          testID="qr-finder-dot"
-          x={x + 2 * cell}
-          y={y + 2 * cell}
-          width={3 * cell}
-          height={3 * cell}
-          rx={dotR}
-          ry={dotR}
-          fill={gradFill}
-        />,
-      );
-    });
-
-    const backdropX = (logoStart + 1) * cell;
-    const backdropY = (logoStart + 1) * cell;
-    const backdropSize = logoCells * cell;
-    const logoCenter = size / 2;
+    const { width, height, layers, gradients, logo } = plan;
+    const fillProps = (fill: Fill) =>
+      'gradient' in fill ? { fill: `url(#${gradientId(fill.gradient)})` } : { fill: fill.color, fillOpacity: fill.opacity };
 
     return (
-      <Svg ref={svgRef} testID="BitcoinAddressQRCode" width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <Defs>
-          <LinearGradient id={GRADIENT_ID} gradientUnits="userSpaceOnUse" x1={0} y1={0} x2={size} y2={size}>
-            <Stop offset="0" stopColor={GRADIENT_STOP_1} />
-            <Stop offset="1" stopColor={GRADIENT_STOP_2} />
-          </LinearGradient>
-        </Defs>
-        <Rect testID="qr-background" x={0} y={0} width={size} height={size} fill={BACKGROUND} />
-        {dataPath ? <Path testID="qr-cells-path" d={dataPath} fill={gradFill} /> : null}
-        {finderShapes}
-        {isLogoRendered && logoCells > 0 && (
-          <>
-            <Rect
-              testID="qr-logo-backdrop"
-              x={backdropX}
-              y={backdropY}
-              width={backdropSize}
-              height={backdropSize}
-              rx={cell * 0.5}
-              ry={cell * 0.5}
-              fill={LOGO_BACKGROUND}
-            />
-            <SvgImage
-              testID="qr-logo-image"
-              href={require('../img/qr-code.png')}
-              x={logoCenter - logoSize / 2}
-              y={logoCenter - logoSize / 2}
-              width={logoSize}
-              height={logoSize}
-              preserveAspectRatio="xMidYMid meet"
-            />
-          </>
+      <Svg ref={svgRef} testID="BitcoinAddressQRCode" width={size} height={(size * height) / width} viewBox={`0 0 ${width} ${height}`}>
+        {gradients.length > 0 && (
+          <Defs>
+            {gradients.map((g, i) => {
+              const stops = g.stops.map((st, j) => <Stop key={j} offset={st.offset} stopColor={st.color} stopOpacity={st.opacity} />);
+              return g.linear ? (
+                <LinearGradient key={i} id={gradientId(i)} gradientUnits="userSpaceOnUse" x1={g.x1} y1={g.y1} x2={g.x2} y2={g.y2}>
+                  {stops}
+                </LinearGradient>
+              ) : (
+                <RadialGradient key={i} id={gradientId(i)} gradientUnits="userSpaceOnUse" cx={g.cx} cy={g.cy} r={g.r}>
+                  {stops}
+                </RadialGradient>
+              );
+            })}
+          </Defs>
+        )}
+        <Rect testID="qr-background" x={0} y={0} width={width} height={height} fill={BACKGROUND} />
+        {layers.map(l => (
+          <Path key={l.layer} testID={`qr-${l.layer}`} d={l.d} {...fillProps(l.fill)} />
+        ))}
+        {logo && (
+          <SvgImage
+            testID="qr-logo-image"
+            href={require('../img/qr-code.png')}
+            x={logo.x}
+            y={logo.y}
+            width={logo.size}
+            height={logo.size}
+            preserveAspectRatio="xMidYMid meet"
+          />
         )}
       </Svg>
     );
-  }, [plan, size, isLogoRendered, logoSize]);
+  }, [plan, size]);
 
   const content = renderQR ?? <View testID="qr-placeholder" style={stylesHook.placeholder} />;
 

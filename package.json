@@ -97,6 +97,7 @@
   "dependencies": {
     "@babel/preset-env": "7.29.2",
     "@keystonehq/bc-ur-registry": "0.7.1",
+    "@kudelink/qrkude": "file:blue_modules/qrkude",
     "@neuraiproject/neurai-connect-core": "^0.0.2",
     "@neuraiproject/neurai-connect-wallet": "^0.0.2",
     "@neuraiproject/neurai-create-transaction": "0.9.3",
@@ -152,7 +153,6 @@
     "lottie-react-native": "7.4.0",
     "pako": "file:blue_modules/pako",
     "prop-types": "15.8.1",
-    "qr": "0.5.5",
     "react": "19.2.3",
     "react-localization": "github:BlueWallet/react-localization#ae7969a",
     "react-native": "0.85.3",
