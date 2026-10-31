@@ -42,7 +42,7 @@ const BACKGROUND = '#FFFFFF';
 const MAX_LOGO_FRACTION = 0.3;
 
 /**
- * QRKude style: round dots in a dark blue gradient, dotted eyes, and the
+ * QRKude style: round dots in a dark blue gradient, rounded eyes, and the
  * Neurai logo in a white circle cut out of the center.
  */
 export const qrStyle = (logoFraction: number): Style =>
@@ -60,7 +60,7 @@ export const qrStyle = (logoFraction: number): Style =>
         ],
       },
     },
-    eyes: { frame: 'dots', ball: 'dots' },
+    eyes: { frame: 'rounded', ball: 'rounded' },
     background: { color: BACKGROUND },
     logo: { size: logoFraction, shape: 'circle', background: BACKGROUND },
   });
