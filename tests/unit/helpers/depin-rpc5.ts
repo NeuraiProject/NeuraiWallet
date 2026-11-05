@@ -16,7 +16,7 @@ export async function fakePool(
   const actors = [legacy, strict, other];
   const url = `https://rpc5.test.invalid/${++count}`;
   const context: DepinRpcContext = {
-    network: '0000008b384aeffecdab182575dc4e86c9f07f90318c65088532660ed9a8a021',
+    network: '000000c710413a4265a996d30c86043aedef6a563900f1bc43fea61d5b2dc77d',
     pool_pubkey: pool.publicKey,
     pool_root: '&TEST',
     instance_id: '11'.repeat(32),

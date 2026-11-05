@@ -14,6 +14,7 @@ import {
   C6_XNA_TESTNET,
   C7_XNA_TESTNET,
   DEFAULT_PRIVACY_POOL,
+  PRIVACY_AVAILABLE,
   PRIVACY_POOLS,
 } from '../../blue_modules/neurai/privacy/deployment';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
@@ -297,12 +298,20 @@ describe('pinned proving files', () => {
     // Same circuits and proving files as C6, served from their own folder.
     expect(c7.config.artifacts).toEqual(C6_XNA_TESTNET!.config.artifacts);
     expect(c7.defaultArtifactUrl).toBe('https://webwallet-testnet.neurai.org/privacy-c7/');
-    expect(PRIVACY_POOLS.map(pool => [pool.id, pool.runtime?.generation, pool.runtime?.kind])).toEqual([
-      ['c7', 'C7', 'xna'],
-      ['c6', 'C6', 'xna'],
-      ['c6-asset', 'C6', 'asset'],
+  });
+
+  it('offers no pool until they are redeployed on the reset testnet', () => {
+    // The pinned files anchor the pools on the previous testnet genesis.
+    for (const instance of [C7_XNA_TESTNET!, C6_XNA_TESTNET!, C6_ASSET_TESTNET!]) {
+      expect(instance.config.deployment.genesis).toBe('0000008b384aeffecdab182575dc4e86c9f07f90318c65088532660ed9a8a021');
+    }
+    expect(PRIVACY_POOLS.map(pool => [pool.id, pool.runtime])).toEqual([
+      ['c7', null],
+      ['c6', null],
+      ['c6-asset', null],
     ]);
-    expect(DEFAULT_PRIVACY_POOL).toBe('c7');
+    expect(PRIVACY_AVAILABLE).toBe(false);
+    expect(DEFAULT_PRIVACY_POOL).toBe('c6');
   });
 
   it('keeps the C7 files apart from the C6 ones and downloads them from the C7 folder', async () => {

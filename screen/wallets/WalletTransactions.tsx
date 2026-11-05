@@ -43,6 +43,7 @@ import useMenuElements from '../../hooks/useMenuElements';
 import useWalletSubscribe from '../../hooks/useWalletSubscribe';
 import useDepinPoolWatch from '../../hooks/useDepinPoolWatch';
 import { c6Family } from '../../blue_modules/neurai/privacy/wallet';
+import { PRIVACY_AVAILABLE } from '../../blue_modules/neurai/privacy/deployment';
 import PrivacySection from '../../components/privacy/PrivacySection';
 import { getClipboardContent } from '../../blue_modules/clipboard';
 import HandOffComponent from '../../components/HandOffComponent';
@@ -100,8 +101,8 @@ const WalletTransactions: React.FC<WalletTransactionsProps> = ({ route }: { rout
   // DePIN chat is Legacy-only (PQ networks have no BIP44 chat identity).
   const showDepinTab = isNeuraiWallet(wallet) && isDepinChatSupportedNetwork(wallet.network);
   // The C6 privacy pool is a testnet section for Legacy and PQ wallets with
-  // their words (hardware wallets have none).
-  const showPrivacyTab = isNeuraiWallet(wallet) && c6Family(wallet) !== null;
+  // their words (hardware wallets have none), shown only while a pool is offered.
+  const showPrivacyTab = PRIVACY_AVAILABLE && isNeuraiWallet(wallet) && c6Family(wallet) !== null;
   const [activeTab, setActiveTab] = useState<WalletTab>('transactions');
   // Kept-mounted panels stop their background work when this screen is covered
   // (Send, Receive, a transaction...), not only when another tab is shown.

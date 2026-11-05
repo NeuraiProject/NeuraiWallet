@@ -56,25 +56,42 @@ function defaultArtifactUrl(config: C6WorkerConfig): string {
 }
 
 function runtime(generation: PoolGeneration, kind: C6PoolKind, file: ReviewedFile): C6Runtime | null {
-  if (file.enabled !== true || file.config.network !== 'testnet') return null;
+  if (file.config.network !== 'testnet') return null;
   if (file.config.deployment.kind !== kind) return null;
   if ((file.config.manifest as { profile?: string }).profile !== PROFILES[generation][kind]) return null;
   const id = file.config.expectedCommitment;
   return { kind, generation, id, config: file.config, defaultArtifactUrl: defaultArtifactUrl(file.config) };
 }
 
-export const C6_XNA_TESTNET = runtime('C6', 'xna', xnaFile as unknown as ReviewedFile);
-export const C6_ASSET_TESTNET = runtime('C6', 'asset', assetFile as unknown as ReviewedFile);
-export const C7_XNA_TESTNET = runtime('C7', 'xna', c7File as unknown as ReviewedFile);
+/** A pinned instance is offered only while its file says `enabled: true`. */
+function offered(file: ReviewedFile, instance: C6Runtime | null): C6Runtime | null {
+  return file.enabled === true ? instance : null;
+}
+
+const XNA_FILE = xnaFile as unknown as ReviewedFile;
+const ASSET_FILE = assetFile as unknown as ReviewedFile;
+const C7_FILE = c7File as unknown as ReviewedFile;
+
+/**
+ * The pinned instances, offered or not. The current files belong to the
+ * testnet before the 2026-11-05 reset (genesis `0000008b…`): their pools do not
+ * exist on the new chain, so they stay disabled until they are redeployed.
+ */
+export const C6_XNA_TESTNET = runtime('C6', 'xna', XNA_FILE);
+export const C6_ASSET_TESTNET = runtime('C6', 'asset', ASSET_FILE);
+export const C7_XNA_TESTNET = runtime('C7', 'xna', C7_FILE);
 
 export type PrivacyPoolId = 'c7' | 'c6' | 'c6-asset';
 
 /** The pools the privacy tab offers, in order: C7 first, so it opens by default. */
 export const PRIVACY_POOLS: ReadonlyArray<{ id: PrivacyPoolId; runtime: C6Runtime | null }> = [
-  { id: 'c7', runtime: C7_XNA_TESTNET },
-  { id: 'c6', runtime: C6_XNA_TESTNET },
-  { id: 'c6-asset', runtime: C6_ASSET_TESTNET },
+  { id: 'c7', runtime: offered(C7_FILE, C7_XNA_TESTNET) },
+  { id: 'c6', runtime: offered(XNA_FILE, C6_XNA_TESTNET) },
+  { id: 'c6-asset', runtime: offered(ASSET_FILE, C6_ASSET_TESTNET) },
 ];
+
+/** Whether any pool is offered; without one, wallets show no privacy tab. */
+export const PRIVACY_AVAILABLE = PRIVACY_POOLS.some(pool => pool.runtime !== null);
 
 /** The pool the privacy tab opens with: the first one installed (C7 when its instance is pinned). */
 export const DEFAULT_PRIVACY_POOL: PrivacyPoolId = PRIVACY_POOLS.find(pool => pool.runtime)?.id ?? 'c6';
