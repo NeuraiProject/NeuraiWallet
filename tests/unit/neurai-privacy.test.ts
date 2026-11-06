@@ -1,22 +1,15 @@
-// C6/C7 privacy pool plumbing: the WebView bridge and its codec, the file CAS
-// store and local locks, the pinned pools and proving-file store, and the wallet adapter.
+// C7 privacy pool plumbing: the WebView bridge and its codec, the file CAS
+// store, the pinned pool and proving-file store, and the wallet adapter.
 // The proving worker itself runs in a browser; see privacy-host/e2e.
 
 import { createHash } from 'crypto';
-import { C6WorkerClient } from '@neuraiproject/neurai-privacy/client';
+import { C7WorkerClient } from '@neuraiproject/neurai-privacy/client';
 
 import { decodeBridgeMessage, encodeBridgeMessage } from '../../blue_modules/neurai/privacy/codec';
 import { PrivacyHostBridge } from '../../blue_modules/neurai/privacy/bridge';
 import { shortStage } from '../../blue_modules/neurai/privacy/stages';
 import { autoPoolFee, requiredPoolFee } from '../../blue_modules/neurai/privacy/fees';
-import {
-  C6_ASSET_TESTNET,
-  C6_XNA_TESTNET,
-  C7_XNA_TESTNET,
-  DEFAULT_PRIVACY_POOL,
-  PRIVACY_AVAILABLE,
-  PRIVACY_POOLS,
-} from '../../blue_modules/neurai/privacy/deployment';
+import { C7_XNA_TESTNET, DEFAULT_PRIVACY_POOL, PRIVACY_AVAILABLE, PRIVACY_POOLS } from '../../blue_modules/neurai/privacy/deployment';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
 import { NeuraiHardwareWallet } from '../../class/wallets/neurai-hardware-wallet';
@@ -72,7 +65,7 @@ jest.mock('react-native-fs', () => ({
 // eslint-disable-next-line import/first
 import { C6ArtifactStore } from '../../blue_modules/neurai/privacy/artifacts';
 // eslint-disable-next-line import/first
-import { FileCasStore, createLocalLocks } from '../../blue_modules/neurai/privacy/store';
+import { FileCasStore } from '../../blue_modules/neurai/privacy/store';
 
 const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
@@ -169,7 +162,7 @@ describe('privacy host bridge', () => {
   it('resolves and rejects helper calls, and fails everything when the page restarts', async () => {
     const { bridge, sent, page } = fakeHost();
     page({ k: 'ready' });
-    const ok = bridge.call('c6SponsorWalletId', ['words', '']);
+    const ok = bridge.call('sealVault', [{ hello: 'vault' }, 'password']);
     const bad = bridge.call('openVault', ['{}', 'password']);
     const pendingCall = bridge.call('sealVault', [{}, 'password']);
     const worker = bridge.createWorker({}, async () => '');
@@ -186,12 +179,12 @@ describe('privacy host bridge', () => {
     expect(errors).toHaveLength(1);
   });
 
-  it('drives the library C6WorkerClient: requests, RPC relay and journal CAS', async () => {
+  it('drives the library C7WorkerClient: requests, RPC relay and journal CAS', async () => {
     const { bridge, sent, page } = fakeHost();
     page({ k: 'ready' });
     const store = new Map<string, string>();
     const rpc = jest.fn(async (method: string) => (method === 'getblockcount' ? 25_000 : null));
-    const client = new C6WorkerClient({
+    const client = new C7WorkerClient({
       worker: bridge.createWorker({}, async () => ''),
       rpc,
       store: {
@@ -224,47 +217,29 @@ describe('privacy host bridge', () => {
   });
 });
 
-describe('file CAS store and local locks', () => {
+describe('file CAS store', () => {
   beforeEach(() => files.clear());
 
   it('implements read / compareAndSwap like the IndexedDB store', async () => {
-    const store = new FileCasStore('c6-private-journal-v1');
-    expect(await store.read('neurai:c6:journal')).toBeNull();
-    expect(await store.compareAndSwap('neurai:c6:journal', null, 'v1')).toBe(true);
-    expect(await store.compareAndSwap('neurai:c6:journal', null, 'v2')).toBe(false);
-    expect(await store.compareAndSwap('neurai:c6:journal', 'v1', 'v2')).toBe(true);
-    expect(await store.read('neurai:c6:journal')).toBe('v2');
+    const store = new FileCasStore('c7-private-journal-v1');
+    expect(await store.read('neurai:c7:journal')).toBeNull();
+    expect(await store.compareAndSwap('neurai:c7:journal', null, 'v1')).toBe(true);
+    expect(await store.compareAndSwap('neurai:c7:journal', null, 'v2')).toBe(false);
+    expect(await store.compareAndSwap('neurai:c7:journal', 'v1', 'v2')).toBe(true);
+    expect(await store.read('neurai:c7:journal')).toBe('v2');
     // Keys never become paths: file names are hashes.
     expect([...files.keys()].every(path => /\/[0-9a-f]{64}$/.test(path))).toBe(true);
   });
 
   it('serializes concurrent swaps: only one writer wins from the same expected value', async () => {
-    const store = new FileCasStore('c6-sponsor-journal-v1');
+    const store = new FileCasStore('c7-private-journal-v1');
     const results = await Promise.all([store.compareAndSwap('k', null, 'a'), store.compareAndSwap('k', null, 'b')]);
     expect(results.sort()).toEqual([false, true]);
-  });
-
-  it('runs lock callbacks of one name one at a time, even after an error', async () => {
-    const locks = createLocalLocks();
-    const order: string[] = [];
-    const slow = locks.request('flow', { mode: 'exclusive' }, async () => {
-      order.push('a:start');
-      await new Promise(resolve => setTimeout(resolve, 20));
-      order.push('a:end');
-      throw new Error('boom');
-    });
-    const next = locks.request('flow', { mode: 'exclusive' }, async () => {
-      order.push('b');
-      return 2;
-    });
-    await expect(slow).rejects.toThrow('boom');
-    await expect(next).resolves.toBe(2);
-    expect(order).toEqual(['a:start', 'a:end', 'b']);
   });
 });
 
 describe('pinned proving files', () => {
-  const runtime = C6_XNA_TESTNET!;
+  const runtime = C7_XNA_TESTNET!;
   const pinned = Object.entries(runtime.config.artifacts.files)[0];
   const [name, meta] = pinned as [string, { bytes: number; sha256: string }];
 
@@ -274,57 +249,41 @@ describe('pinned proving files', () => {
     served = {};
   });
 
-  it('pins the C6 XNA and asset instances shipped with the app', () => {
-    expect(C6_XNA_TESTNET?.config.manifest.profile).toBe('C6-XNA-TEST-J2-v2');
-    expect(C6_ASSET_TESTNET?.config.deployment.kind).toBe('asset');
-    for (const instance of [C6_XNA_TESTNET!, C6_ASSET_TESTNET!]) {
-      expect(Object.keys(instance.config.artifacts.files)).toHaveLength(18);
-    }
-    // Served by the testnet web wallet, where the same pinned files are deployed.
-    expect(C6_XNA_TESTNET!.defaultArtifactUrl).toBe('https://webwallet-testnet.neurai.org/privacy-c6/');
-    expect(C6_ASSET_TESTNET!.defaultArtifactUrl).toBe('https://webwallet-testnet.neurai.org/privacy-c6-assets/C6ASSET261004A/');
-  });
-
   it('pins the C7 XNA instance and opens it by default', () => {
     const c7 = C7_XNA_TESTNET!;
     expect(c7.generation).toBe('C7');
     expect(c7.kind).toBe('xna');
     expect(c7.config.manifest.profile).toBe('C7-XNA-TEST-v1');
-    expect((c7.config.manifest as { identity?: string }).identity).toBe('C7TEST1023A#POOL');
+    expect((c7.config.manifest as { identity?: string }).identity).toBe('C7TEST1106A#POOL');
     expect(c7.id).toBe(c7.config.manifest.commitment);
-    expect(c7.id).not.toBe(C6_XNA_TESTNET!.id);
+    expect(c7.id).toBe('c5ea4bd1506d6b951348263d171d92c490421575aa3c8b3def0defc823f4b762');
     // The verifiable birth: the UNIQUE emission the worker derives the domain from.
     expect(c7.config.deployment).toHaveProperty('emission');
-    // Same circuits and proving files as C6, served from their own folder.
-    expect(c7.config.artifacts).toEqual(C6_XNA_TESTNET!.config.artifacts);
+    // The C6 circuits and proving files, served from the C7 folder.
+    expect(Object.keys(c7.config.artifacts.files)).toHaveLength(18);
     expect(c7.defaultArtifactUrl).toBe('https://webwallet-testnet.neurai.org/privacy-c7/');
   });
 
-  it('offers no pool until they are redeployed on the reset testnet', () => {
-    // The pinned files anchor the pools on the previous testnet genesis.
-    for (const instance of [C7_XNA_TESTNET!, C6_XNA_TESTNET!, C6_ASSET_TESTNET!]) {
-      expect(instance.config.deployment.genesis).toBe('0000008b384aeffecdab182575dc4e86c9f07f90318c65088532660ed9a8a021');
-    }
-    expect(PRIVACY_POOLS.map(pool => [pool.id, pool.runtime])).toEqual([
-      ['c7', null],
-      ['c6', null],
-      ['c6-asset', null],
-    ]);
-    expect(PRIVACY_AVAILABLE).toBe(false);
-    expect(DEFAULT_PRIVACY_POOL).toBe('c6');
+  it('offers the C7 pool of the reset testnet, and only it', () => {
+    // Born again on the testnet restarted on 2026-11-05. neurai-privacy 0.4.0
+    // runs C7 only, so the C6 XNA and asset pools are gone.
+    expect(C7_XNA_TESTNET!.config.deployment.genesis).toBe('000000c710413a4265a996d30c86043aedef6a563900f1bc43fea61d5b2dc77d');
+    expect(PRIVACY_POOLS.map(pool => [pool.id, pool.runtime])).toEqual([['c7', C7_XNA_TESTNET]]);
+    expect(PRIVACY_AVAILABLE).toBe(true);
+    expect(DEFAULT_PRIVACY_POOL).toBe('c7');
   });
 
-  it('keeps the C7 files apart from the C6 ones and downloads them from the C7 folder', async () => {
-    const c7 = C7_XNA_TESTNET!;
-    const store = new C6ArtifactStore(c7);
+  it('keeps the files of each instance apart and downloads them from the C7 folder', async () => {
+    const store = new C6ArtifactStore(runtime);
     served = { [name]: Buffer.alloc(meta.bytes, 1) };
     await expect(store.ensure(name)).rejects.toThrow('pinned hash');
     expect(downloads[0].fromUrl).toBe('https://webwallet-testnet.neurai.org/privacy-c7/' + name);
-    expect(downloads[0].toFile).toBe(`/docs/neurai-privacy/c7/${c7.id}/${name}.download`);
-    // A verified C6 copy is not a C7 file.
+    expect(downloads[0].toFile).toBe(`/docs/neurai-privacy/c7/${runtime.id}/${name}.download`);
+    // Copies kept for another instance (a C6 pool, the C7 pool of the previous testnet) are not this one's.
+    const previous = 'a90ce546a03d4b6a83ba8d7680eced7f8adaf1ff7cf71c4fa9f35badcd158be2';
     files.set(`/docs/neurai-privacy/c6/${runtime.id}/${name}`, Buffer.alloc(meta.bytes, 3));
+    files.set(`/docs/neurai-privacy/c7/${previous}/${name}`, Buffer.alloc(meta.bytes, 3));
     expect((await store.status()).present).toBe(0);
-    expect((await new C6ArtifactStore(runtime).status()).present).toBe(1);
   });
 
   it('keeps a downloaded file only when its size and SHA-256 match the pin', async () => {
@@ -340,7 +299,7 @@ describe('pinned proving files', () => {
     const store = new C6ArtifactStore(runtime);
     const body = Buffer.alloc(meta.bytes, 3);
     // Pretend the pinned hash is this body's hash by placing a verified file directly.
-    files.set(`/docs/neurai-privacy/c6/${runtime.id}/${name}`, body);
+    files.set(`/docs/neurai-privacy/c7/${runtime.id}/${name}`, body);
     const chunk = await store.read(name, 2, 5);
     expect(chunk).toBe(Buffer.alloc(5, 3).toString('base64'));
     expect(await store.read(name, meta.bytes, 5)).toBe('');

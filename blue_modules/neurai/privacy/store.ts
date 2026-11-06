@@ -1,7 +1,7 @@
 /**
- * Durable compare-and-swap string store for the C6/C7 journals.
+ * Durable compare-and-swap string store for the C7 journal.
  *
- * Replaces the web wallet's `IndexedDbSponsorStore`: same `read` /
+ * Replaces the web wallet's `IndexedDbJournalStore`: same `read` /
  * `compareAndSwap` contract, one file per key under the app's documents
  * directory. Values are written to a temporary file and renamed into place,
  * and every operation on a store is serialized, which is enough inside the
@@ -22,7 +22,7 @@ export class FileCasStore {
   private readonly dir: string;
   private tail: Promise<unknown> = Promise.resolve();
 
-  constructor(name: 'c6-private-journal-v1' | 'c7-private-journal-v1' | 'c6-sponsor-journal-v1') {
+  constructor(name: 'c7-private-journal-v1') {
     this.dir = `${ROOT}/${name}`;
   }
 
@@ -61,28 +61,4 @@ export class FileCasStore {
 
   /** Nothing to release; present for parity with the IndexedDB store. */
   async close(): Promise<void> {}
-}
-
-/**
- * Exclusive named locks for `C6SponsorFlow`, which on the web requires Web
- * Locks to keep two tabs from spending the same sponsor coins. The app has a
- * single JS context, so serializing callbacks per name gives the same guarantee.
- */
-export function createLocalLocks() {
-  const tails = new Map<string, Promise<unknown>>();
-  return {
-    request<T>(name: string, _options: unknown, callback: (lock: { name: string; mode: 'exclusive' }) => Promise<T> | T): Promise<T> {
-      const previous = tails.get(name) ?? Promise.resolve();
-      const run = previous.then(
-        () => callback({ name, mode: 'exclusive' }),
-        () => callback({ name, mode: 'exclusive' }),
-      );
-      const settled = run.catch(() => {});
-      tails.set(name, settled);
-      settled.then(() => {
-        if (tails.get(name) === settled) tails.delete(name);
-      });
-      return run;
-    },
-  };
 }

@@ -1,7 +1,7 @@
 /**
- * Private wallet session of one pool (C7 XNA, C6 XNA or C6 asset).
+ * Private wallet session of the C7 XNA pool.
  *
- * Port of the web wallet's C6 components: one `C6WorkerClient` per opened
+ * Port of the web wallet's C6 components: one `C7WorkerClient` per opened
  * private wallet, its proving worker running in the privacy WebView, its
  * encrypted journal in a file store, and RPC through the wallet's own service.
  * Every foreground job goes through `run`, which never overlaps with another
@@ -10,11 +10,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { C6WorkerClient, type ReceivingInfo } from '@neuraiproject/neurai-privacy/client';
+import { C7WorkerClient, type ReceivingInfo } from '@neuraiproject/neurai-privacy/client';
 
 import { usePrivacyHost } from '../components/privacy/PrivacyHost';
 import { C6ArtifactStore } from '../blue_modules/neurai/privacy/artifacts';
-import type { C6Runtime, PoolGeneration } from '../blue_modules/neurai/privacy/deployment';
+import type { C6Runtime } from '../blue_modules/neurai/privacy/deployment';
 import { shortStage, type StageLabels } from '../blue_modules/neurai/privacy/stages';
 import { FileCasStore } from '../blue_modules/neurai/privacy/store';
 import { privacyTxKind, tagPrivacyTxs } from '../blue_modules/neurai/privacy/txTags';
@@ -40,14 +40,11 @@ export type C6Operation = {
   confirmedBy?: string | null;
 };
 
-/**
- * One journal store per generation, as on the web: both C6 pools share theirs
- * (keys carry the pool identity) and C7 keeps its encrypted history apart.
- */
-const journalStores: Partial<Record<PoolGeneration, FileCasStore>> = {};
-const privateJournal = (generation: PoolGeneration) =>
-  (journalStores[generation] ??= new FileCasStore(generation === 'C7' ? 'c7-private-journal-v1' : 'c6-private-journal-v1'));
+/** The C7 journal store, as on the web: keys carry the pool identity. */
+let journalStore: FileCasStore | null = null;
+const privateJournal = () => (journalStore ??= new FileCasStore('c7-private-journal-v1'));
 
+// The library keeps the C6 wording of this error.
 const MISSING_JOURNAL = 'C6 private journal missing';
 
 const stageLabels = (): StageLabels => ({
@@ -81,7 +78,7 @@ export function useC6PrivateWallet(wallet: PrivacyWallet | undefined, runtime: C
   const [operations, setOperations] = useState<C6Operation[]>([]);
   const [saved, setSaved] = useState(false);
 
-  const client = useRef<C6WorkerClient | null>(null);
+  const client = useRef<C7WorkerClient | null>(null);
   const epoch = useRef(0);
   const running = useRef(false);
 
@@ -213,9 +210,9 @@ export function useC6PrivateWallet(wallet: PrivacyWallet | undefined, runtime: C
           if (token === epoch.current) setPhaseState(`${loc.privacy.stage_downloading} ${percent}%`);
         }),
       );
-      const c = new C6WorkerClient({
+      const c = new C7WorkerClient({
         worker,
-        store: privateJournal(runtime.generation),
+        store: privateJournal(),
         rpc: async (method: string, params?: unknown[]) => {
           live(token);
           const result = await rpc(method, params ?? []);

@@ -4,7 +4,7 @@
  * Transport-agnostic: the WebView component feeds `receive()` with the strings
  * the page posts and provides `send()`; tests drive it with a headless browser.
  * Each pool worker is exposed as a `Worker`-like object, which is what
- * `C6WorkerClient` from `@neuraiproject/neurai-privacy/client` expects.
+ * `C7WorkerClient` from `@neuraiproject/neurai-privacy/client` expects.
  */
 
 import { decodeBridgeMessage, encodeBridgeMessage } from './codec';
@@ -20,7 +20,7 @@ export type ArtifactReader = (path: string, offset: number, length: number) => P
 type WorkerEventHandler = ((event: { data: unknown }) => void) | null;
 type WorkerErrorHandler = ((event: { message: string; preventDefault?: () => void }) => void) | null;
 
-/** The subset of `Worker` used by `C6WorkerClient`. */
+/** The subset of `Worker` used by `C7WorkerClient`. */
 export interface BridgedWorker {
   onmessage: WorkerEventHandler;
   onerror: WorkerErrorHandler;
@@ -126,7 +126,7 @@ export class PrivacyHostBridge {
     return worker;
   }
 
-  /** Run one of the page's helper functions (Argon2id vaults, sponsor wallet id). */
+  /** Run one of the page's helper functions (Argon2id vaults). */
   call<T = unknown>(fn: HostCallName, args: unknown[]): Promise<T> {
     if (this.disposed) return Promise.reject(new Error('Privacy engine closed'));
     const id = ++this.nextCall;

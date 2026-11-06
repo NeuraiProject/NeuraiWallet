@@ -1,7 +1,7 @@
 /**
  * Messages between the app and the hidden privacy WebView (`privacy-host/`).
  *
- * Hermes has no WebAssembly, so the C6 proving worker of
+ * Hermes has no WebAssembly, so the C7 proving worker of
  * `@neuraiproject/neurai-privacy` (snarkjs witness generation and Groth16) runs
  * in a dedicated Web Worker inside a WebView. The app keeps the worker's
  * client, storage, RPC and signing; this protocol only relays the worker's own
@@ -10,11 +10,11 @@
  * Shared by both sides: keep it free of React Native and DOM dependencies.
  */
 
-/** Pool worker configuration: `startC6PoolWorker` options without scope, snarkjs or artifact access. */
+/** Pool worker configuration: `startC7PoolWorker` options without scope, snarkjs or artifact access. */
 export type PoolWorkerConfig = Record<string, unknown>;
 
-/** Helpers that run in the WebView because they use Argon2id (64 MiB) or long PBKDF2. */
-export type HostCallName = 'c6SponsorWalletId' | 'sealVault' | 'openVault';
+/** Helpers that run in the WebView because they use Argon2id (64 MiB). */
+export type HostCallName = 'sealVault' | 'openVault';
 
 export type AppToHostMessage =
   /** Create the pool worker of channel `ch`. */

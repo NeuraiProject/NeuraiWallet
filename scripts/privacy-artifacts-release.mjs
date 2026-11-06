@@ -1,20 +1,19 @@
 #!/usr/bin/env node
 /**
- * Prepares a GitHub release mirroring a C6/C7 pool instance's proving files.
+ * Prepares a GitHub release mirroring the C7 pool instance's proving files.
  *
- * By default the app downloads the 18 files of an instance (circuit .wasm,
+ * By default the app downloads the 18 files of the instance (circuit .wasm,
  * .zkey and verifying keys, ~88 MB) from the testnet web wallet. A release
- *   https://github.com/<repo>/releases/download/c6-test-<commitment[0:12]>/<file>
- * (`c7-test-…` for C7) is an alternative the user can set as the URL in the privacy screen. Any
+ *   https://github.com/<repo>/releases/download/c7-test-<commitment[0:12]>/<file>
+ * is an alternative the user can set as the URL in the privacy screen. Any
  * host works: the app keeps a file only if its size and SHA-256 match the pins
  * built into it, so this script first checks the local files against them.
  *
  * Usage:
- *   node scripts/privacy-artifacts-release.mjs <c7|xna|asset> <dir> [--repo owner/name] [--publish]
+ *   node scripts/privacy-artifacts-release.mjs c7 <dir> [--repo owner/name] [--publish]
  *
  * <dir> is the folder with the instance's files, e.g. the web wallet's
- * public/privacy-c7 (C7), public/privacy-c6 (C6 XNA) or
- * public/privacy-c6-assets/C6ASSET261004A (C6 asset).
+ * public/privacy-c7.
  * Without --publish it only verifies and prints the `gh release create`
  * command; with --publish it runs it (needs an authenticated GitHub CLI).
  */
@@ -32,20 +31,19 @@ const dir = args[1];
 const repo = args.includes('--repo') ? args[args.indexOf('--repo') + 1] : 'NeuraiProject/neurai-privacy';
 const publish = args.includes('--publish');
 
+// The C6 pools were removed with neurai-privacy 0.4.0: only C7 is pinned.
 const manifests = {
   c7: 'blue_modules/neurai/privacy/c7-testnet.json',
-  xna: 'blue_modules/neurai/privacy/c6-testnet.json',
-  asset: 'blue_modules/neurai/privacy/c6-assets-testnet.json',
 };
 if (!manifests[kind] || !dir) {
-  console.error('Usage: node scripts/privacy-artifacts-release.mjs <c7|xna|asset> <dir> [--repo owner/name] [--publish]');
+  console.error('Usage: node scripts/privacy-artifacts-release.mjs c7 <dir> [--repo owner/name] [--publish]');
   process.exit(2);
 }
 
 const { config } = JSON.parse(readFileSync(join(root, manifests[kind]), 'utf8'));
 const commitment = config.expectedCommitment;
-const generation = kind === 'c7' ? 'C7' : 'C6';
-const tag = `${generation.toLowerCase()}-test-${commitment.slice(0, 12)}`;
+const generation = 'C7';
+const tag = `c7-test-${commitment.slice(0, 12)}`;
 const identity = config.manifest.identity ?? commitment;
 
 let failed = false;

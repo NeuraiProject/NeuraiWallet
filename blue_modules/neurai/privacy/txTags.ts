@@ -4,7 +4,7 @@
  * The wallet history comes from address deltas, which say nothing about the
  * pool, so the app records the kind of every pool transaction it learns about:
  * the operations of an opened private wallet journal and the coins it publishes
- * for the pool (funding coins, sponsor sweeps). Kept per wallet in
+ * for the pool (funding coins). Kept per wallet in
  * AsyncStorage; losing it only drops the icons.
  */
 

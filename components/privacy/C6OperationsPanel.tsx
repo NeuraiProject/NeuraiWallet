@@ -12,7 +12,6 @@ import type { PrivacyWallet } from '../../blue_modules/neurai/privacy/wallet';
 import { AUTO_FEE } from '../../blue_modules/neurai/privacy/fees';
 import type { C6Action, C6Operations, TxPreview } from '../../hooks/useC6Operations';
 import type { C6PrivateWallet } from '../../hooks/useC6PrivateWallet';
-import type { C6Sponsor } from '../../hooks/useC6Sponsor';
 import loc from '../../loc';
 import {
   Card,
@@ -71,22 +70,9 @@ function Review(props: { title: string; preview: TxPreview; unit: string; busy: 
 /** Quick deposit amounts in XNA (private payments use multiples of 100 XNA). */
 const QUICK_DEPOSITS = ['100', '200', '500'];
 
-export function C6OperationsPanel({
-  wallet,
-  pool,
-  ops,
-  sponsor,
-  unused,
-}: {
-  wallet: PrivacyWallet;
-  pool: C6PrivateWallet;
-  ops: C6Operations;
-  sponsor: C6Sponsor;
-  /** The private wallet has no notes yet: a missing fee-coin journal can be created. */
-  unused: boolean;
-}) {
-  const busy = pool.busy || sponsor.busy;
-  const pending = !!ops.preview || !!ops.fundingPreview || !!sponsor.prepared;
+export function C6OperationsPanel({ wallet, pool, ops }: { wallet: PrivacyWallet; pool: C6PrivateWallet; ops: C6Operations }) {
+  const busy = pool.busy;
+  const pending = !!ops.preview || !!ops.fundingPreview;
   const locked = busy || pending || !pool.historyReady;
   const unit = ops.unit;
   const spendable = (pool.summary?.notes ?? []).filter(n => n.spendable);
@@ -129,7 +115,7 @@ export function C6OperationsPanel({
 
   const feeChips = (
     <StepSlider
-      label={ops.isAsset ? loc.privacy.fee_xna : loc.privacy.fee}
+      label={loc.privacy.fee}
       levels={ops.feeOptions}
       value={ops.feeSelection}
       onChange={ops.setFee}
@@ -140,32 +126,7 @@ export function C6OperationsPanel({
     />
   );
 
-  const sponsorChips = ops.isAsset ? (
-    <View>
-      <Label>{loc.privacy.fee_coin}</Label>
-      {ops.sponsorCoins.length ? (
-        <ChipRow>
-          {ops.sponsorCoins.slice(0, 6).map(c => {
-            const point = `${c.txid}:${c.vout}`;
-            return (
-              <Chip
-                key={point}
-                label={`${formatXna(String(c.valueSats))} XNA`}
-                active={point === ops.selectedSponsor}
-                disabled={locked}
-                onPress={() => ops.setSelectedSponsor(point)}
-              />
-            );
-          })}
-        </ChipRow>
-      ) : (
-        <Hint>{loc.privacy.no_fee_coin}</Hint>
-      )}
-    </View>
-  ) : null;
-
-  const prove = () => (ops.isAsset ? sponsor.authorize(ops.prepareAsset, unused) : ops.prepareXna());
-  const sponsorReady = !ops.isAsset || !!ops.selectedSponsor;
+  const prove = ops.prepareXna;
   // Editing the form clears the last operation's error.
   const setAmount = (value: string) => {
     ops.setAmount(value);
@@ -174,8 +135,7 @@ export function C6OperationsPanel({
 
   let body: React.ReactNode;
   if (ops.action === 'deposit') {
-    const assetFundingReady = ops.isAsset && ops.assetCoins.some(c => c.point === ops.selectedFunding);
-    const fundingReady = ops.isAsset ? assetFundingReady : !!ops.fundingCoin;
+    const fundingReady = !!ops.fundingCoin;
     const waiting = !fundingReady && !!ops.fundingSent;
     const issue = ops.amountIssue(ops.amount, 'deposit');
     const amountOk = !!ops.amount && !issue;
@@ -187,27 +147,24 @@ export function C6OperationsPanel({
           onChangeText={setAmount}
           editable={!locked}
           keyboardType="decimal-pad"
-          placeholder={ops.isAsset ? '0' : '100'}
+          placeholder="100"
           suffix={unit}
           testID="PrivacyAmount"
         />
-        {ops.isAsset ? null : (
-          <Segmented
-            options={QUICK_DEPOSITS.map(v => ({ label: v, value: v }))}
-            value={ops.amount}
-            onChange={setAmount}
-            disabled={locked}
-            testID="PrivacyQuickAmount"
-          />
-        )}
+        <Segmented
+          options={QUICK_DEPOSITS.map(v => ({ label: v, value: v }))}
+          value={ops.amount}
+          onChange={setAmount}
+          disabled={locked}
+          testID="PrivacyQuickAmount"
+        />
         {issue ? <Hint>{issue}</Hint> : null}
-        {ops.isAsset ? sponsorChips : null}
         {feeChips}
         {fundingReady ? (
           <PrimaryButton
             title={`2/2 · ${loc.privacy.action_deposit}`}
             onPress={prove}
-            disabled={locked || !amountOk || !sponsorReady}
+            disabled={locked || !amountOk}
             busy={busy}
             testID="PrivacyDeposit"
           />
@@ -217,7 +174,7 @@ export function C6OperationsPanel({
           <PrimaryButton
             title={`1/2 · ${loc.privacy.prepare_funding}`}
             onPress={ops.prepareFunding}
-            disabled={locked || !amountOk || (!ops.isAsset && !ops.fundingChecked)}
+            disabled={locked || !amountOk || !ops.fundingChecked}
             busy={busy}
             testID="PrivacyPrepareFunding"
           />
@@ -240,7 +197,7 @@ export function C6OperationsPanel({
             <Field
               label={loc.privacy.amount}
               value={r.amount}
-              placeholder={ops.isAsset ? '0' : '100'}
+              placeholder="100"
               editable={!locked}
               keyboardType="decimal-pad"
               suffix={unit}
@@ -261,7 +218,6 @@ export function C6OperationsPanel({
             <Chip label={`− ${loc.privacy.recipient}`} disabled={locked} onPress={() => ops.setRecipients(rows => rows.slice(0, -1))} />
           ) : null}
         </ChipRow>
-        {sponsorChips}
         {feeChips}
         <PrimaryButton
           title={loc.privacy.action_transfer}
@@ -269,7 +225,6 @@ export function C6OperationsPanel({
           disabled={
             locked ||
             !ops.notes[0] ||
-            !sponsorReady ||
             ops.recipients.some(r => !r.recipient.trim() || !r.amount || !!ops.amountIssue(r.amount, 'recipient'))
           }
           busy={busy}
@@ -281,7 +236,7 @@ export function C6OperationsPanel({
     const note = spendable.find(n => n.cm === ops.notes[0]);
     const issue = ops.amountIssue(ops.amount, 'withdraw', note?.amountAtomic);
     const all =
-      !ops.isAsset && note && BigInt(note.amountAtomic) > BigInt(ops.fee || '0')
+      note && BigInt(note.amountAtomic) > BigInt(ops.fee || '0')
         ? formatXna(String(BigInt(note.amountAtomic) - BigInt(ops.fee || '0')))
         : null;
     body = (
@@ -316,12 +271,11 @@ export function C6OperationsPanel({
             }}
           />
         </ChipRow>
-        {sponsorChips}
         {feeChips}
         <PrimaryButton
           title={loc.privacy.action_withdraw}
           onPress={prove}
-          disabled={locked || !ops.notes[0] || !ops.amount || !!issue || !ops.destination || !sponsorReady}
+          disabled={locked || !ops.notes[0] || !ops.amount || !!issue || !ops.destination}
           busy={busy}
           testID="PrivacyWithdraw"
         />
@@ -331,12 +285,11 @@ export function C6OperationsPanel({
     body = (
       <>
         {noteChips}
-        {sponsorChips}
         {feeChips}
         <PrimaryButton
           title={loc.privacy.action_join}
           onPress={prove}
-          disabled={locked || ops.notes.length !== 2 || !sponsorReady}
+          disabled={locked || ops.notes.length !== 2}
           busy={busy}
           testID="PrivacyJoin"
         />
@@ -351,13 +304,11 @@ export function C6OperationsPanel({
         value={ops.action}
         onChange={a => {
           ops.setAction(a);
-          ops.setResume('');
           ops.setAmount('');
           pool.setError('');
         }}
         disabled={busy || pending}
       >
-        {ops.resume ? <Hint>{`${loc.privacy.resuming} ${ops.resume.slice(0, 12)}…`}</Hint> : null}
         {body}
       </FolderTabs>
 
@@ -379,16 +330,6 @@ export function C6OperationsPanel({
           busy={busy}
           onPublish={ops.publishXna}
           onCancel={() => ops.setPreview(null)}
-        />
-      ) : null}
-      {sponsor.prepared ? (
-        <Review
-          title={`${loc.privacy.review} · ${actionLabel(ops.action)}`}
-          preview={{ raw: '', txid: sponsor.prepared.txid, points: [], fee: formatXna(ops.fee || '0') }}
-          unit={unit}
-          busy={busy}
-          onPublish={sponsor.publish}
-          onCancel={() => sponsor.setPrepared(null)}
         />
       ) : null}
     </View>

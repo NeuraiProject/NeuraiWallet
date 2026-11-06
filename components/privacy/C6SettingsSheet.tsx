@@ -1,19 +1,16 @@
 /**
  * Advanced privacy settings behind the gear: ZK passphrase, encrypted history
- * backup and restore, proving files, the asset pool's fee-coin (sponsor)
- * journal, lock, and the pinned pool instance.
+ * backup and restore, proving files, lock, and the pinned pool instance.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { formatXna } from '@neuraiproject/neurai-privacy/client';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { showFilePickerAndReadFile, writeFileAndExport } from '../../blue_modules/fs';
 import { getArtifactBaseUrl, setArtifactBaseUrl, type ArtifactStatus } from '../../blue_modules/neurai/privacy/artifacts';
 import type { C6Runtime } from '../../blue_modules/neurai/privacy/deployment';
 import type { C6PrivateWallet } from '../../hooks/useC6PrivateWallet';
-import type { C6Sponsor } from '../../hooks/useC6Sponsor';
 import loc from '../../loc';
 import { Chip, ChipRow, Field, Hint, InfoRow, Label, OutlineButton, PrimaryButton, usePrivacyTheme } from './C6UI';
 
@@ -34,20 +31,18 @@ export function C6SettingsSheet(props: {
   onClose: () => void;
   runtime: C6Runtime;
   pool: C6PrivateWallet;
-  sponsor: C6Sponsor | null;
   zkPassphrase: string;
   onZkPassphrase: (value: string) => void;
   onLock: () => void;
   backupName: string;
 }) {
-  const { pool, sponsor, runtime } = props;
+  const { pool, runtime } = props;
   const t = usePrivacyTheme();
   const insets = useSafeAreaInsets();
   const [files, setFiles] = useState<ArtifactStatus | null>(null);
   const [url, setUrl] = useState('');
   const [progress, setProgress] = useState('');
-  const [password, setPassword] = useState('');
-  const busy = pool.busy || !!sponsor?.busy;
+  const busy = pool.busy;
 
   const refresh = useCallback(async () => {
     setFiles(await pool.artifacts.status());
@@ -184,84 +179,6 @@ export function C6SettingsSheet(props: {
               </ChipRow>
             </Section>
 
-            {sponsor ? (
-              <Section title={loc.privacy.section_fee_coins}>
-                {sponsor.snapshot ? (
-                  <>
-                    <InfoRow
-                      label={loc.privacy.fee_budget}
-                      value={`${formatXna(sponsor.snapshot.authorizedAtomic)} / ${formatXna(sponsor.snapshot.budgetAtomic)} XNA`}
-                    />
-                    <View style={styles.switchRow}>
-                      <Text style={[styles.switchLabel, t.text]}>{loc.privacy.auto_sweep}</Text>
-                      <Switch value={sponsor.autoSweep} disabled={busy} onValueChange={sponsor.setAutoSweep} />
-                    </View>
-                    {sponsor.resumable.map(tx => (
-                      <Chip
-                        key={tx.txid}
-                        label={`${loc.privacy.resume} ${tx.txid.slice(0, 10)}…`}
-                        disabled={busy}
-                        onPress={() => sponsor.setPrepared(tx)}
-                      />
-                    ))}
-                    {sponsor.snapshot.operations.flatMap(op =>
-                      op.sponsors
-                        .filter(s => !s.spentBy)
-                        .map(s => (
-                          <View key={s.offer.outpoint} style={styles.exposure}>
-                            <Text style={[styles.mono, t.subtext]} numberOfLines={1} ellipsizeMode="middle">
-                              {s.offer.outpoint}
-                            </Text>
-                            <Chip label={loc.privacy.sweep} disabled={busy} onPress={() => sponsor.sweep(s.offer.outpoint)} />
-                          </View>
-                        )),
-                    )}
-                  </>
-                ) : sponsor.missing ? (
-                  <>
-                    <Hint>{loc.privacy.fee_journal_missing}</Hint>
-                    <Chip
-                      label={loc.privacy.new_history}
-                      disabled={busy}
-                      onPress={() => sponsor.run(loc.privacy.opening, () => sponsor.openFlow(true))}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <Hint>{loc.privacy.fee_journal_closed}</Hint>
-                    <Chip
-                      label={loc.privacy.open_now}
-                      disabled={busy}
-                      onPress={() => sponsor.autoOpen((pool.summary?.notes.length ?? 0) === 0)}
-                    />
-                  </>
-                )}
-                <Field label={loc.privacy.backup_password} value={password} onChangeText={setPassword} secure editable={!busy} />
-                <ChipRow>
-                  <Chip
-                    label={loc.privacy.save_backup}
-                    disabled={busy || !sponsor.snapshot || password.length < sponsor.minPassword}
-                    onPress={() =>
-                      sponsor.run(loc.privacy.saving_backup, async () => {
-                        const sealed = await sponsor.backup(password);
-                        if (sealed) await writeFileAndExport('neurai-c6-fee-coins.encrypted.json', sealed);
-                      })
-                    }
-                  />
-                  <Chip
-                    label={loc.privacy.restore_backup}
-                    disabled={busy || !!sponsor.snapshot || password.length < sponsor.minPassword}
-                    onPress={() =>
-                      sponsor.run(loc.privacy.restoring, async () => {
-                        const { data } = await showFilePickerAndReadFile();
-                        if (data) await sponsor.restore(data, password);
-                      })
-                    }
-                  />
-                </ChipRow>
-              </Section>
-            ) : null}
-
             <Section title={loc.privacy.section_pool}>
               <InfoRow label={loc.privacy.instance} value={String((runtime.config.manifest as { identity?: string }).identity ?? '')} />
               <InfoRow label={loc.privacy.commitment} value={runtime.config.expectedCommitment} mono />
@@ -283,8 +200,4 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: 18, paddingBottom: 32 },
   section: { marginTop: 18 },
   sectionBody: { rowGap: 10 },
-  switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', columnGap: 12 },
-  switchLabel: { flex: 1, fontSize: 13 },
-  exposure: { flexDirection: 'row', alignItems: 'center', columnGap: 8 },
-  mono: { flex: 1, fontSize: 11, fontFamily: 'monospace' },
 });

@@ -1,12 +1,12 @@
 /**
- * Privacy tab of a testnet wallet (C7 and C6 TEST pools, C7 first), laid out
- * like the DePIN section: a header card (status badge, pool chips, private balance and
+ * Privacy tab of a testnet wallet (C7 TEST pool), laid out like the DePIN
+ * section: a header card (status badge, pool chips, private balance and
  * address, gear for the advanced settings), folder tabs for the operations
  * and a short activity list. Switching pools keeps the others' sessions open.
  * The proving engine (hidden WebView) lives only while this tab is open.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { formatXna } from '@neuraiproject/neurai-privacy/client';
@@ -14,9 +14,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DEFAULT_PRIVACY_POOL, PRIVACY_POOLS, type C6Runtime, type PrivacyPoolId } from '../../blue_modules/neurai/privacy/deployment';
 import type { PrivacyWallet } from '../../blue_modules/neurai/privacy/wallet';
-import { useC6Operations, SPONSOR_BUDGET_ATOMIC } from '../../hooks/useC6Operations';
+import { useC6Operations } from '../../hooks/useC6Operations';
 import { useC6PrivateWallet } from '../../hooks/useC6PrivateWallet';
-import { useC6Sponsor } from '../../hooks/useC6Sponsor';
+import useScrollAboveKeyboard from '../../hooks/useScrollAboveKeyboard';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 import { useStorage } from '../../hooks/context/useStorage';
 import loc from '../../loc';
@@ -40,10 +40,7 @@ import {
 } from './C6UI';
 import { PrivacyHostProvider } from './PrivacyHost';
 
-/** The asset pool is shown but cannot be selected until it works on the phone. */
-const ASSET_POOL_ENABLED = false;
-
-const poolLabel = (id: PrivacyPoolId) => (id === 'c7' ? 'C7 · XNA' : id === 'c6' ? 'C6 · XNA' : `C6 · ${loc.privacy.pool_assets}`);
+const poolLabel = (_id: PrivacyPoolId) => 'C7 · XNA';
 
 /** Seconds since `busy` turned on. */
 function useElapsed(busy: boolean): number {
@@ -73,44 +70,28 @@ function PoolView({
 }) {
   const t = usePrivacyTheme();
   const insets = useSafeAreaInsets();
-  const kind = runtime.kind;
   const pool = useC6PrivateWallet(wallet, runtime, hidden);
   const ops = useC6Operations(wallet, runtime, pool);
-  const deployments = useMemo(() => [runtime.config.deployment as never], [runtime]);
-  const sponsor = useC6Sponsor(wallet, deployments, SPONSOR_BUDGET_ATOMIC);
   const [zkPassphrase, setZkPassphrase] = useState('');
   const [showQr, setShowQr] = useState(false);
   const [settings, setSettings] = useState(false);
+  // The settings sheet is a modal with its own fields: leave its keyboard alone.
+  const keyboard = useScrollAboveKeyboard(!hidden && !settings);
 
-  const busy = pool.busy || sponsor.busy;
+  const busy = pool.busy;
   const unit = ops.unit;
-  const pending = !!ops.preview || !!ops.fundingPreview || !!sponsor.prepared;
+  const pending = !!ops.preview || !!ops.fundingPreview;
   const address = pool.receiving?.current?.address ?? '';
-  const unused = (pool.summary?.notes.length ?? 0) === 0;
-
-  // Asset pool: once the private wallet is open with its history, list the
-  // funding and fee coins and open the fee-coin journal (creating it for an
-  // unused wallet). neurai-privacy 0.2.1 scans it from a checkpoint, so this
-  // takes seconds, not a walk over the whole pool history.
-  const { open, historyReady } = pool;
-  const { loadAssetCoins } = ops;
-  const { autoOpen } = sponsor;
-  useEffect(() => {
-    if (kind !== 'asset' || !open || !historyReady) return;
-    void pool.run(loc.privacy.stage_coins, loadAssetCoins);
-    void autoOpen(unused);
-  }, [kind, open, historyReady]); // eslint-disable-line react-hooks/exhaustive-deps
   const elapsed = useElapsed(busy);
 
   const unlock = useCallback(() => pool.run(loc.privacy.opening, () => pool.unlock({ zkPassphrase })), [pool, zkPassphrase]);
   const lock = useCallback(() => {
     pool.lock();
-    sponsor.lock();
     setShowQr(false);
-  }, [pool, sponsor]);
+  }, [pool]);
 
   // The journal keeps a published but unconfirmed operation as `prepared`.
-  const published = new Set([...ops.publishedTxids, ...sponsor.publishedTxids]);
+  const published = new Set(ops.publishedTxids);
   const opStatus = (op: { outcome: string | null; phase: string; txid: string | null }) =>
     op.outcome ?? (published.has(op.txid ?? '') ? loc.privacy.pending : op.phase);
 
@@ -126,16 +107,20 @@ function PoolView({
 
   const summary = pool.open ? pool.summary : null;
   const status = busy ? (
-    <ProgressLine text={sponsor.phase || pool.phase} seconds={elapsed} onCancel={lock} cancelLabel={loc.privacy.cancel} />
+    <ProgressLine text={pool.phase} seconds={elapsed} onCancel={lock} cancelLabel={loc.privacy.cancel} />
   ) : summary?.tip ? (
     <Hint lines={1}>{pool.sync.syncing ? loc.privacy.refreshing : `${loc.privacy.synced_block} ${summary.tip.height}`}</Hint>
   ) : null;
 
   return (
     <ScrollView
-      style={[styles.flex, { backgroundColor: t.colors.background }]}
+      ref={keyboard.scrollRef}
+      style={[styles.flex, { backgroundColor: t.colors.background, marginBottom: keyboard.bottomInset }]}
       contentContainerStyle={[styles.content, { paddingBottom: (insets.bottom || 0) + 16 }]}
       keyboardShouldPersistTaps="handled"
+      onLayout={keyboard.onLayout}
+      onScroll={keyboard.onScroll}
+      scrollEventThrottle={16}
     >
       <Card badge={<Badge label={badge.label} tone={badge.tone} />}>
         <View style={styles.titleRow}>
@@ -150,7 +135,7 @@ function PoolView({
               key={p.id}
               label={poolLabel(p.id)}
               active={p.id === poolId}
-              disabled={busy || pending || (p.id === 'c6-asset' && !ASSET_POOL_ENABLED)}
+              disabled={busy || pending}
               onPress={() => onPool(p.id)}
               testID={`PrivacyPool-${p.id}`}
             />
@@ -230,12 +215,11 @@ function PoolView({
         </View>
         {pool.blockedReason ? <ErrorBox message={pool.blockedReason} /> : null}
         {pool.error ? <ErrorBox message={pool.error} /> : null}
-        {sponsor.error ? <ErrorBox message={sponsor.error} /> : null}
       </Card>
 
       {pool.open ? (
         <View style={styles.section}>
-          <C6OperationsPanel wallet={wallet} pool={pool} ops={ops} sponsor={sponsor} unused={unused} />
+          <C6OperationsPanel wallet={wallet} pool={pool} ops={ops} />
         </View>
       ) : null}
 
@@ -256,11 +240,7 @@ function PoolView({
                     </Text>
                   </View>
                   {!op.outcome && op.phase === 'prepared' && !published.has(op.txid ?? '') ? (
-                    <Chip
-                      label={loc.privacy.resume}
-                      disabled={busy || pending}
-                      onPress={() => (ops.isAsset ? ops.setResume(op.id) : ops.resumeXna(op.id))}
-                    />
+                    <Chip label={loc.privacy.resume} disabled={busy || pending} onPress={() => ops.resumeXna(op.id)} />
                   ) : null}
                   {!op.outcome && op.phase === 'draft' ? (
                     <Chip label={loc.privacy.release} disabled={busy} onPress={() => ops.releaseDraft(op.id)} />
@@ -276,13 +256,10 @@ function PoolView({
         onClose={() => setSettings(false)}
         runtime={runtime}
         pool={pool}
-        sponsor={kind === 'asset' ? sponsor : null}
         zkPassphrase={zkPassphrase}
         onZkPassphrase={setZkPassphrase}
         onLock={lock}
-        backupName={
-          kind === 'asset' ? `${unit}-c6-private.encrypted.json` : `neurai-${runtime.generation.toLowerCase()}-private.encrypted.json`
-        }
+        backupName={`neurai-${runtime.generation.toLowerCase()}-private.encrypted.json`}
       />
     </ScrollView>
   );

@@ -1,19 +1,19 @@
 /**
  * Dedicated Web Worker inside the privacy WebView.
  *
- * Role `pool`: runs `startC6PoolWorker` (witness generation and Groth16 with
+ * Role `pool`: runs `startC7PoolWorker` (witness generation and Groth16 with
  * snarkjs, scanning, journal encryption). Its messages are relayed unchanged
- * to the app, where `C6WorkerClient` handles RPC and storage. Proving files
+ * to the app, where `C7WorkerClient` handles RPC and storage. Proving files
  * are read from the app chunk by chunk; the library checks their pinned size
  * and SHA-256.
  *
  * Role `util`: slow helpers the app would run poorly on Hermes (Argon2id
- * vaults, PBKDF2 sponsor wallet id).
+ * vaults).
  */
 
 import * as snarkjs from 'snarkjs';
-import { startC6PoolWorker } from '@neuraiproject/neurai-privacy/worker';
-import { c6SponsorWalletId, openVault, sealVault } from '@neuraiproject/neurai-privacy/browser';
+import { startC7PoolWorker } from '@neuraiproject/neurai-privacy/worker';
+import { openVault, sealVault } from '@neuraiproject/neurai-privacy/browser';
 
 import { ARTIFACT_CHUNK_BYTES } from '../blue_modules/neurai/privacy/protocol';
 
@@ -32,7 +32,7 @@ interface WorkerGlobal {
 
 const ctx = self as unknown as WorkerGlobal;
 
-/** The scope `startC6PoolWorker` talks to: its posts go to the page tagged as pool traffic. */
+/** The scope `startC7PoolWorker` talks to: its posts go to the page tagged as pool traffic. */
 const poolScope: { postMessage(message: unknown): void; onmessage: ((event: { data: unknown }) => unknown) | null; navigator: unknown } = {
   postMessage: message => ctx.postMessage({ k: 'pool', data: message }),
   onmessage: null,
@@ -69,7 +69,6 @@ async function fetchArtifact(path: string) {
 }
 
 const helpers: Record<string, (...args: never[]) => unknown> = {
-  c6SponsorWalletId: c6SponsorWalletId as (...args: never[]) => unknown,
   sealVault: sealVault as (...args: never[]) => unknown,
   openVault: openVault as (...args: never[]) => unknown,
 };
@@ -83,8 +82,8 @@ ctx.onmessage = ({ data }) => {
       started = true;
       try {
         const { artifactBaseUrl: _ignored, ...config } = data.config;
-        startC6PoolWorker({
-          ...(config as unknown as Parameters<typeof startC6PoolWorker>[0]),
+        startC7PoolWorker({
+          ...(config as unknown as Parameters<typeof startC7PoolWorker>[0]),
           scope: poolScope,
           snarkjs,
           fetchArtifact: fetchArtifact as unknown as (path: string) => Promise<Response>,

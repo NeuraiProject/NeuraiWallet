@@ -2,28 +2,27 @@
  * End-to-end check of the privacy WebView bridge in headless Chromium.
  *
  * Node plays the app: the real PrivacyHostBridge, the library's
- * C6WorkerClient, an in-memory CAS store and the pinned proving files from a
+ * C7WorkerClient, an in-memory CAS store and the pinned proving files from a
  * local directory. Chromium loads the generated privacy-host page from an
  * https origin, as the WebView does with its base URL. RPC goes to a public
  * testnet node.
  *
- * Covers: helper calls (sponsor wallet id, Argon2id vault), private wallet
+ * Covers: helper calls (Argon2id vault), private wallet
  * derivation, journal creation, a real pool scan, and a real Groth16 deposit
  * proof whose proving files cross the bridge chunk by chunk. The deposit then
  * stops where it must: the fake funding coin does not exist on chain.
  *
  * Run (see privacy-host/e2e/run.sh):
  *   PRIVACY_ARTIFACTS=/path/to/privacy-c7 node dist/host.e2e.mjs
- * PRIVACY_POOL=c6 checks the C6 XNA pool instead of C7 (both use the same files).
+ * PRIVACY_RPC points it at another node of the reset testnet.
  */
 
 import { readFileSync, openSync, readSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright-core';
-import { C6WorkerClient } from '@neuraiproject/neurai-privacy/client';
+import { C7WorkerClient } from '@neuraiproject/neurai-privacy/client';
 
 import { PrivacyHostBridge } from '../../blue_modules/neurai/privacy/bridge';
-import c6File from '../../blue_modules/neurai/privacy/c6-testnet.json';
 import c7File from '../../blue_modules/neurai/privacy/c7-testnet.json';
 
 const RPC_URL = process.env.PRIVACY_RPC ?? 'https://rpc-testnet.neurai.org/rpc';
@@ -32,8 +31,7 @@ const HOST_HTML = process.env.PRIVACY_HOST_HTML ?? 'privacy-host/dist/privacy-ho
 const ORIGIN = 'https://privacy-host.neurai.invalid/';
 const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
-const POOL = process.env.PRIVACY_POOL === 'c6' ? 'c6' : 'c7';
-const config = ((POOL === 'c6' ? c6File : c7File) as { config: Record<string, any> }).config;
+const config = (c7File as { config: Record<string, any> }).config;
 
 function check(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error('CHECK FAILED: ' + message);
@@ -79,7 +77,7 @@ const memoryStore = () => {
 
 async function main() {
   check(ARTIFACTS, 'set PRIVACY_ARTIFACTS to the directory with the pinned XNA proving files');
-  console.log(`pool ${POOL}: ${config.manifest.profile} ${config.manifest.identity}`);
+  console.log(`pool: ${config.manifest.profile} ${config.manifest.identity}`);
   const html = readFileSync(HOST_HTML, 'utf8');
   const browser = await chromium.launch();
   const page = await browser.newPage();
@@ -102,8 +100,6 @@ async function main() {
   console.log('host ready');
 
   // Helpers in the util worker.
-  const walletId = await bridge.call<string>('c6SponsorWalletId', [MNEMONIC, '']);
-  check(/^[0-9a-f]{64}$/.test(walletId), 'sponsor wallet id is a 32-byte hex string: ' + walletId);
   const sealed = await bridge.call<string>('sealVault', [{ hello: 'vault', n: 1 }, 'correct horse battery']);
   const opened = await bridge.call<{ hello: string }>('openVault', [sealed, 'correct horse battery']);
   check(opened.hello === 'vault', 'vault round trip');
@@ -111,14 +107,14 @@ async function main() {
     () => check(false, 'wrong vault password must fail'),
     () => undefined,
   );
-  console.log('helpers ok, wallet id', walletId.slice(0, 16));
+  console.log('helpers ok');
 
   const stages: string[] = [];
   const worker = bridge.createWorker(config, async (path, offset, length) => {
     chunks++;
     return readArtifact(path, offset, length);
   });
-  const client = new C6WorkerClient({
+  const client = new C7WorkerClient({
     worker,
     rpc: (method: string, params?: unknown[]) => rpc(method, params ?? []),
     store: memoryStore(),

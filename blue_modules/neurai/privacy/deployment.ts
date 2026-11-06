@@ -1,26 +1,24 @@
 /**
- * Pinned C6 and C7 TEST pool instances (same files as the web wallet's
- * `src/privacy-pool/c6-*.json` and `c7-testnet.json`).
+ * Pinned C7 TEST pool instance (same file as the web wallet's
+ * `src/privacy-pool/c7-testnet.json`).
  *
  * The manifest, deployment anchor, verifying keys and proving-file hashes are
  * part of the application build and are never taken from an RPC reply or from
  * the server that hosts the proving files.
  *
- * C7 (NeuraiZK/v3 addresses and records) runs on the same pool worker and
- * circuits as C6: the worker selects it from the manifest profile and checks
- * that its domain derives from the pinned birth.
+ * C7 (NeuraiZK/v3 addresses and records) reuses the C6 circuits and proving
+ * files; the worker checks that its domain derives from the pinned birth.
+ * neurai-privacy 0.4.0 runs C7 only, so the C6 XNA and asset pools are gone.
  */
 
-import type { startC6PoolWorker } from '@neuraiproject/neurai-privacy/worker';
+import type { startC7PoolWorker } from '@neuraiproject/neurai-privacy/worker';
 
-import xnaFile from './c6-testnet.json';
-import assetFile from './c6-assets-testnet.json';
 import c7File from './c7-testnet.json';
 
-export type C6PoolKind = 'xna' | 'asset';
-export type PoolGeneration = 'C6' | 'C7';
+export type C6PoolKind = 'xna';
+export type PoolGeneration = 'C7';
 
-export type C6WorkerConfig = Omit<Parameters<typeof startC6PoolWorker>[0], 'scope' | 'snarkjs' | 'fetchArtifact'> & {
+export type C6WorkerConfig = Omit<Parameters<typeof startC7PoolWorker>[0], 'scope' | 'snarkjs' | 'fetchArtifact'> & {
   artifactBaseUrl?: string;
 };
 
@@ -36,16 +34,12 @@ export interface C6Runtime {
 
 type ReviewedFile = { enabled: boolean; testOnly?: boolean; config: C6WorkerConfig };
 
-const PROFILES: Record<PoolGeneration, Record<C6PoolKind, string | null>> = {
-  C6: { xna: 'C6-XNA-TEST-J2-v2', asset: 'C6-ORDINARY-ASSET-TEST-J2-v1' },
-  C7: { xna: 'C7-XNA-TEST-v1', asset: null },
-};
+const C7_PROFILE = 'C7-XNA-TEST-v1';
 
 /**
- * The testnet web wallet deploys each instance's proving files under the
- * manifest's `artifactBaseUrl` (e.g. `/privacy-c6/`, `/privacy-c7/`). Any
- * HTTPS host works: the app keeps a file only if it matches its pinned size
- * and SHA-256.
+ * The testnet web wallet deploys the instance's proving files under the
+ * manifest's `artifactBaseUrl` (`/privacy-c7/`). Any HTTPS host works: the
+ * app keeps a file only if it matches its pinned size and SHA-256.
  */
 export const C6_TESTNET_FILES_ORIGIN = 'https://webwallet-testnet.neurai.org';
 
@@ -55,12 +49,12 @@ function defaultArtifactUrl(config: C6WorkerConfig): string {
   return C6_TESTNET_FILES_ORIGIN + path;
 }
 
-function runtime(generation: PoolGeneration, kind: C6PoolKind, file: ReviewedFile): C6Runtime | null {
+function runtime(file: ReviewedFile): C6Runtime | null {
   if (file.config.network !== 'testnet') return null;
-  if (file.config.deployment.kind !== kind) return null;
-  if ((file.config.manifest as { profile?: string }).profile !== PROFILES[generation][kind]) return null;
+  if (file.config.deployment.kind !== 'xna') return null;
+  if ((file.config.manifest as { profile?: string }).profile !== C7_PROFILE) return null;
   const id = file.config.expectedCommitment;
-  return { kind, generation, id, config: file.config, defaultArtifactUrl: defaultArtifactUrl(file.config) };
+  return { kind: 'xna', generation: 'C7', id, config: file.config, defaultArtifactUrl: defaultArtifactUrl(file.config) };
 }
 
 /** A pinned instance is offered only while its file says `enabled: true`. */
@@ -68,30 +62,20 @@ function offered(file: ReviewedFile, instance: C6Runtime | null): C6Runtime | nu
   return file.enabled === true ? instance : null;
 }
 
-const XNA_FILE = xnaFile as unknown as ReviewedFile;
-const ASSET_FILE = assetFile as unknown as ReviewedFile;
 const C7_FILE = c7File as unknown as ReviewedFile;
 
-/**
- * The pinned instances, offered or not. The current files belong to the
- * testnet before the 2026-11-05 reset (genesis `0000008b…`): their pools do not
- * exist on the new chain, so they stay disabled until they are redeployed.
- */
-export const C6_XNA_TESTNET = runtime('C6', 'xna', XNA_FILE);
-export const C6_ASSET_TESTNET = runtime('C6', 'asset', ASSET_FILE);
-export const C7_XNA_TESTNET = runtime('C7', 'xna', C7_FILE);
+/** The pinned C7 instance, offered or not: C7TEST1106A#POOL, born on the testnet restarted on 2026-11-05. */
+export const C7_XNA_TESTNET = runtime(C7_FILE);
 
-export type PrivacyPoolId = 'c7' | 'c6' | 'c6-asset';
+export type PrivacyPoolId = 'c7';
 
-/** The pools the privacy tab offers, in order: C7 first, so it opens by default. */
+/** The pools the privacy tab offers. */
 export const PRIVACY_POOLS: ReadonlyArray<{ id: PrivacyPoolId; runtime: C6Runtime | null }> = [
   { id: 'c7', runtime: offered(C7_FILE, C7_XNA_TESTNET) },
-  { id: 'c6', runtime: offered(XNA_FILE, C6_XNA_TESTNET) },
-  { id: 'c6-asset', runtime: offered(ASSET_FILE, C6_ASSET_TESTNET) },
 ];
 
 /** Whether any pool is offered; without one, wallets show no privacy tab. */
 export const PRIVACY_AVAILABLE = PRIVACY_POOLS.some(pool => pool.runtime !== null);
 
-/** The pool the privacy tab opens with: the first one installed (C7 when its instance is pinned). */
-export const DEFAULT_PRIVACY_POOL: PrivacyPoolId = PRIVACY_POOLS.find(pool => pool.runtime)?.id ?? 'c6';
+/** The pool the privacy tab opens with. */
+export const DEFAULT_PRIVACY_POOL: PrivacyPoolId = 'c7';
