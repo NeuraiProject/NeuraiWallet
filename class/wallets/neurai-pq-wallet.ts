@@ -1,5 +1,5 @@
 /**
- * PostQuantum Neurai wallet (ML-DSA-44).
+ * Post-quantum Neurai wallet (ML-DSA-44).
  *
  * Networks: `xna-pq` (mainnet) and `xna-pq-test` (testnet). Mainnet addresses
  * are generic AuthScript witness v1 (`nc1p…`, the 4.x derivation). Testnet
@@ -17,7 +17,7 @@ import { AbstractNeuraiWallet } from './abstract-neurai-wallet';
 
 export class NeuraiPQWallet extends AbstractNeuraiWallet {
   static readonly type = 'NeuraiPQ';
-  static readonly typeReadable = 'Neurai PostQuantum';
+  static readonly typeReadable = 'Neurai Post-Quantum';
   // @ts-ignore: override
   public readonly type = NeuraiPQWallet.type;
   // @ts-ignore: override

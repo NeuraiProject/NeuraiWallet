@@ -35,6 +35,8 @@ export class AbstractWallet {
     const obj2 = decodeWalletAmounts(JSON.parse(obj));
     const temp = new this();
     for (const key2 of Object.keys(obj2)) {
+      // The display name comes from the class: a stored copy may hold an older spelling.
+      if (key2 === 'typeReadable') continue;
       // @ts-ignore: dynamic property copy is intentional
       temp[key2] = obj2[key2];
     }

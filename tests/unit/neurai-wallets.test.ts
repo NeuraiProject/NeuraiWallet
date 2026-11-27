@@ -129,6 +129,15 @@ describe('Neurai wallets', () => {
       assert.strictEqual(w.network, 'xna-pq-test');
       assert.strictEqual(w.walletKind, 'pq');
       assert.strictEqual(w.allowSweepFromWif(), false);
+      assert.strictEqual(w.typeReadable, 'Neurai Post-Quantum');
+    });
+
+    it('shows the current type name for a wallet stored with the old spelling', () => {
+      const stored = JSON.parse(JSON.stringify(new NeuraiPQWallet()));
+      stored.typeReadable = 'Neurai PostQuantum';
+      const w = NeuraiPQWallet.fromJson(JSON.stringify(stored));
+      assert.strictEqual(w.typeReadable, 'Neurai Post-Quantum');
+      assert.strictEqual(JSON.parse(JSON.stringify(w)).typeReadable, 'Neurai Post-Quantum');
     });
 
     it('rejects legacy networks', () => {

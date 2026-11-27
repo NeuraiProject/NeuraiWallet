@@ -87,7 +87,7 @@ export function homeWalletKind(wallet: TWallet): HomeWalletKind {
 const KIND_LABELS: Record<HomeWalletKind, string> = {
   hd: 'Neurai HD',
   ecdsa: 'Neurai ECDSA',
-  pq: 'Neurai PostQuantum',
+  pq: 'Neurai Post-Quantum',
   hardware: 'NeuraiHW',
 };
 
