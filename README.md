@@ -63,10 +63,10 @@ dialogs. The light and dark themes follow the phone or are set in Settings → G
   Settings → Security. See [`SECURITY.md`](SECURITY.md).
 * **Android widgets** — Neurai Price and Neurai Market: the XNA price in the app's currency, its
   24-hour change, market cap and volume, from CoinGecko.
-* Inherited from BlueWallet and still in use: biometric unlock on the sensitive screens, "is it my
-  address?" verification, raw transaction broadcast, fiat rates and 50+ UI languages. (The
-  decoy-storage "plausible deniability" feature was removed; a store that still holds a decoy
-  keeps opening with each password.)
+* Inherited from BlueWallet and still in use: biometric unlock on the sensitive screens, raw
+  transaction broadcast, fiat rates and 50+ UI languages. (The decoy-storage "plausible
+  deniability" feature was removed; a store that still holds a decoy keeps opening with each
+  password.)
 
 ## Networks
 

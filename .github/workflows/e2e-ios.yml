@@ -1,6 +1,8 @@
 name: Tests e2e iOS
 
-on: [pull_request]
+# Manual only: the Apple targets are not released yet, and the Detox specs are
+# still BlueWallet's.
+on: workflow_dispatch
 
 permissions:
   contents: read
