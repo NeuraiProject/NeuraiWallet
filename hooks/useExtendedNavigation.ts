@@ -128,11 +128,18 @@ export const useExtendedNavigation = <T extends NavigationProp<ParamListBase>>()
           const wallet = wallets.find(w => w.getID() === walletID);
           if (wallet && !wallet.getUserHasSavedExport()) {
             try {
-              await presentWalletExportReminder();
+              await presentWalletExportReminder(wallet.getLabel());
               wallet.setUserHasSavedExport(true);
-              await saveToDisk();
+              // Not awaited inside this try: its catch means "show the export
+              // screen", not "the save failed" (reported by saveToDisk).
+              saveToDisk().catch(() => {});
               proceedWithNavigation();
             } catch (error) {
+              // A hardware wallet's words are on the device: explain where, nothing secret to unlock.
+              if (wallet.use_with_hardware_wallet) {
+                originalNavigation.navigate('HardwareBackupInfo', { walletID });
+                return;
+              }
               // This detour lands on WalletExport too, so it needs the same biometric gate.
               if ((await isBiometricUseEnabled()) && !(await unlockWithBiometrics())) {
                 return;
@@ -153,33 +160,33 @@ export const useExtendedNavigation = <T extends NavigationProp<ParamListBase>>()
   );
 
   const navigateToWalletsList = useCallback(() => {
-  if (navigationRef.isReady()) {
-    navigationRef.dispatch(
-      CommonActions.reset({
-        index: 0,
-        routes: [
-          {
-            name: 'DrawerRoot',
-            state: {
-              routes: [
-                {
-                  name: 'DetailViewStackScreensStack',
-                  state: {
-                    routes: [
-                      {
-                        name: 'WalletsList',
-                      },
-                    ],
+    if (navigationRef.isReady()) {
+      navigationRef.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [
+            {
+              name: 'DrawerRoot',
+              state: {
+                routes: [
+                  {
+                    name: 'DetailViewStackScreensStack',
+                    state: {
+                      routes: [
+                        {
+                          name: 'WalletsList',
+                        },
+                      ],
+                    },
                   },
-                },
-              ],
+                ],
+              },
             },
-          },
-        ],
-      })
-    );
-  }
-}, []);
+          ],
+        }),
+      );
+    }
+  }, []);
 
   return useMemo(
     () => ({

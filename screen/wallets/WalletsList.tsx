@@ -1,6 +1,6 @@
 import React, { useCallback, useContext, useEffect, useReducer, useRef, useMemo } from 'react';
 import { useFocusEffect, useIsFocused, useRoute, RouteProp } from '@react-navigation/native';
-import { Alert, findNodeHandle, Image, InteractionManager, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { findNodeHandle, Image, InteractionManager, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { getClipboardContent } from '../../blue_modules/clipboard';
 import { isDesktop } from '../../blue_modules/environment';
 import * as fs from '../../blue_modules/fs';
@@ -29,6 +29,7 @@ import useMenuElements from '../../hooks/useMenuElements';
 import SafeAreaSectionList from '../../components/SafeAreaSectionList';
 import { scanQrHelper } from '../../helpers/scan-qr';
 import { useNetworkSelection } from '../../hooks/useNetworkSelection';
+import { appAlert } from '../../components/AppDialog';
 
 const WalletsListSections = { CAROUSEL: 'CAROUSEL', TRANSACTIONS: 'TRANSACTIONS', ADD_GUIDE: 'ADD_GUIDE' };
 
@@ -113,7 +114,7 @@ const WalletsList: React.FC = () => {
   const currentWalletIndex = useRef<number>(0);
   const { registerTransactionsHandler, unregisterTransactionsHandler } = useMenuElements();
   const { wallets, refreshAllWalletTransactions } = useStorage();
-  const { isTotalBalanceEnabled, isUnifiedTransactionsEnabled } = useSettings();
+  const { isTotalBalanceEnabled } = useSettings();
   const { width } = useWindowDimensions();
   const { colors, scanImage } = useTheme();
   const navigation = useExtendedNavigation<NavigationProps>();
@@ -124,10 +125,10 @@ const WalletsList: React.FC = () => {
   // refreshed: hidden wallets keep syncing, or the switcher's dot would never
   // light and their balances would be stale on the way back.
   const { network, visibleWallets } = useNetworkSelection();
-  // The recent list follows the card in view unless the user opted into the
-  // merged list. Large screens have no carousel (wallets live in the drawer),
-  // so there is no card to follow and they always get the merged list.
-  const showUnifiedTransactions = isUnifiedTransactionsEnabled || sizeClass === SizeClass.Large;
+  // The recent list follows the card in view. Large screens have no carousel
+  // (wallets live in the drawer), so there is no card to follow and they get
+  // the merged list.
+  const showUnifiedTransactions = sizeClass === SizeClass.Large;
   // The "add wallet" card past the end has no transactions of its own: under
   // it goes the guide to the ways of adding one. Also the whole content when
   // there is no wallet yet, merged list or not.
@@ -286,12 +287,12 @@ const WalletsList: React.FC = () => {
           {
             onPayment: payment => {
               triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
-              if (!openNeuraiPaymentUri(navigation, wallets, payment)) Alert.alert(loc.send.header, loc.wallets.select_no_bitcoin);
+              if (!openNeuraiPaymentUri(navigation, wallets, payment)) appAlert(loc.send.header, loc.wallets.select_no_bitcoin);
             },
           },
         );
       } catch (e: any) {
-        Alert.alert(loc.send.details_scan_error, e.message);
+        appAlert(loc.send.details_scan_error, e.message);
       }
     },
     [navigation, wallets],

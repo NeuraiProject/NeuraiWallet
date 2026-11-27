@@ -452,6 +452,23 @@ describe('Neurai wallets', () => {
           assert.strictEqual(w._silentPaymentScan, null);
         });
 
+        it('knows how much of its balance is on its silent payment addresses, kept after a restart', async () => {
+          const { w, paid } = await paidReceiver();
+          const backend = w.getBackend() as unknown as { getBalance: (addresses: string[]) => Promise<bigint> };
+          // 1.2 XNA on the payment's address, 0.3 on the wallet's other addresses.
+          backend.getBalance = async addresses =>
+            (addresses.includes(paid.address) ? 120000000n : 0n) + (addresses.some(a => a !== paid.address) ? 30000000n : 0n);
+          await w.fetchBalance();
+          assert.strictEqual(w.getBalance(), 150000000n);
+          assert.strictEqual(w.getSilentBalance(), 120000000n);
+
+          const restored = NeuraiECDSAWallet.fromJson(JSON.stringify(w)) as unknown as NeuraiECDSAWallet;
+          assert.strictEqual(restored.getSilentBalance(), 120000000n);
+
+          w.setPassphrase('other identity');
+          assert.strictEqual(w.getSilentBalance(), 0n);
+        });
+
         it('spends its payments apart from the other coins, with the change back to its own code', async () => {
           const { w, paid, coin } = await paidReceiver();
           const elsewhere = ecdsaPair('xna-test', 0).external.address;
@@ -720,6 +737,15 @@ describe('Neurai wallets', () => {
         external: { address: string };
         internal: { address: string };
       };
+    /** A wallet whose engine derived at least `positions` positions by itself, as it does past a used address. */
+    const nativeWindow = async (Kind: typeof NeuraiHDWallet | typeof NeuraiECDSAWallet, positions: number) => {
+      const w = Kind.forNetwork('testnet', KNOWN_MNEMONIC);
+      (w as unknown as { _receiveIndex: number })._receiveIndex = positions - 1;
+      await w.loadAddresses();
+      return w;
+    };
+    /** The address objects (keys included) of a wallet's engine. */
+    const engineObjects = (w: object) => (w as unknown as { _engine: { getAddressObjects(): unknown[] } })._engine.getAddressObjects();
     const external = (index: number) => pair(index).external.address;
     const internal = (index: number) => pair(index).internal.address;
     const elsewhere = getAddressPair(
@@ -812,6 +838,66 @@ describe('Neurai wallets', () => {
       assert.strictEqual((await wallet.listOwnAddresses()).length, 80, '40 receive and 40 change addresses');
     }, 60_000);
 
+    it('knows the transactions of each address, which tell the used ones, also after a restart', async () => {
+      const { wallet, push } = withHistory([external(0), external(2)]);
+      assert.strictEqual(wallet.addressActivityKnown(), false);
+      await wallet.fetchTransactions();
+      assert.strictEqual(wallet.addressActivityKnown(), true);
+      assert.deepStrictEqual(wallet.getAddressTxids(external(0)), ['1'.padStart(64, '0')]);
+      assert.strictEqual(wallet.isAddressUsed(external(2)), true);
+      assert.strictEqual(wallet.isAddressUsed(external(1)), false);
+
+      // A payment in the mempool marks its address at once, and survives a
+      // fetch that does not have it confirmed yet.
+      push(external(1));
+      assert.deepStrictEqual(wallet.getAddressTxids(external(1)), ['ee'.repeat(32)]);
+      await wallet.fetchTransactions();
+      assert.strictEqual(wallet.isAddressUsed(external(1)), true);
+
+      // Only the confirmed ones are stored: the history brings the rest.
+      const restored = NeuraiHDWallet.fromJson(JSON.stringify(wallet)) as unknown as NeuraiHDWallet;
+      assert.strictEqual(restored.addressActivityKnown(), true);
+      assert.strictEqual(restored.isAddressUsed(external(2)), true);
+      assert.strictEqual(restored.isAddressUsed(external(1)), false);
+    }, 60_000);
+
+    it('lists receive and change addresses, and derives more on request, up to 100, kept after a restart', async () => {
+      const { wallet, refetch } = withHistory([]);
+      const receive = (w: NeuraiHDWallet) => w.getAddressEntries().filter(e => !e.change);
+      await wallet.loadAddresses();
+      assert.deepStrictEqual(wallet.getAddressEntries().slice(0, 2), [
+        { address: external(0), index: 0, change: false },
+        { address: internal(0), index: 0, change: true },
+      ]);
+      assert.strictEqual(receive(wallet).length, 20);
+      expect(refetch).not.toHaveBeenCalled();
+
+      await wallet.loadAddresses(30);
+      assert.strictEqual(receive(wallet).length, 30);
+      assert.deepStrictEqual(receive(wallet)[29], { address: external(29), index: 29, change: false });
+      expect(refetch).toHaveBeenCalled();
+
+      // The same addresses and keys the library derives when it reaches them itself.
+      assert.deepStrictEqual(engineObjects(wallet), engineObjects(await nativeWindow(NeuraiHDWallet, 30)).slice(0, 60));
+
+      // Restarted, it derives them again.
+      const restored = NeuraiHDWallet.fromJson(JSON.stringify(wallet)) as unknown as NeuraiHDWallet;
+      await restored.loadAddresses();
+      assert.deepStrictEqual(engineObjects(restored), engineObjects(wallet));
+
+      await wallet.loadAddresses(500);
+      assert.strictEqual(receive(wallet).length, 100);
+      assert.strictEqual(wallet.getAddressEntries()[199].address, internal(99));
+    }, 120_000);
+
+    it('derives more ECDSA addresses as its engine would', async () => {
+      const wallet = NeuraiECDSAWallet.forNetwork('testnet', KNOWN_MNEMONIC);
+      jest.spyOn(wallet as unknown as { _refetchInBackground(): void }, '_refetchInBackground').mockImplementation(() => {});
+      await wallet.loadAddresses(25);
+      assert.strictEqual(engineObjects(wallet).length, 50);
+      assert.deepStrictEqual(engineObjects(wallet), engineObjects(await nativeWindow(NeuraiECDSAWallet, 25)).slice(0, 50));
+    }, 120_000);
+
     it('starts again from the first address on a new testnet', () => {
       const { wallet } = withHistory([]);
       const state = wallet as unknown as { _receiveIndex: number; _receiveAddress: string; discardTestnetChainState(): void };
@@ -893,6 +979,25 @@ describe('Neurai wallets', () => {
       const addrB = await b.getReceiveAddressAsync();
       assert.notStrictEqual(addrA, addrB);
     }, 30_000);
+  });
+
+  describe('privacy pool balance', () => {
+    it('keeps the last private balance read in the pool, after a restart, until the identity changes', () => {
+      const w = NeuraiPQWallet.forNetwork('testnet', KNOWN_MNEMONIC);
+      assert.strictEqual(w.getPrivacyPoolBalance('pool-a'), null, 'never read here');
+
+      assert.strictEqual(w.notePrivacyPoolBalance('pool-a', '12000000000', 100), true, 'a first reading is worth saving');
+      assert.strictEqual(w.notePrivacyPoolBalance('pool-a', '12000000000', 101), false, 'the same balance again is not');
+      assert.strictEqual(w.getPrivacyPoolBalance('pool-a')?.sats, 12000000000n);
+      assert.strictEqual(w.getPrivacyPoolBalance('pool-b'), null, 'another pool has other notes');
+
+      const restored = NeuraiPQWallet.fromJson(JSON.stringify(w)) as unknown as NeuraiPQWallet;
+      assert.strictEqual(restored.getPrivacyPoolBalance('pool-a')?.sats, 12000000000n);
+      assert.strictEqual(restored.notePrivacyPoolBalance('pool-a', '5000000000'), true, 'another balance is worth saving');
+
+      w.setPassphrase('other identity');
+      assert.strictEqual(w.getPrivacyPoolBalance('pool-a'), null);
+    });
   });
 
   describe('pending (optimistic) transactions', () => {

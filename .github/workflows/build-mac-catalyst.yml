@@ -1,11 +1,9 @@
 name: Build Mac Catalyst
 
+# Manual only: the Apple targets are not released yet, and this workflow needs
+# signing and App Store secrets the repository does not have.
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - master
-    types: [labeled, synchronize]
 
 concurrency:
   group: catalyst-build-${{ github.event.pull_request.number || github.run_id }}

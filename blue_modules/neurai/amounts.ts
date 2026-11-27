@@ -75,6 +75,35 @@ export function formatXnaGrouped(value: SatsInput, locale?: string): string {
   return (raw < 0n ? '-' : '') + formatSatsGrouped(whole, locale) + (fraction ? decimalSeparator(locale) + fraction : '');
 }
 
+const COIN = 100_000_000n;
+
+/**
+ * A balance in XNA, short, for lists where only its size matters (the wallet
+ * panel): under 100 with up to 3 decimals; from 100, whole XNA; from 10,000 in
+ * thousands ("15.3k"); from 10,000,000 in millions ("12.3M"), with one decimal
+ * below 100k / 100M. Always cut, never rounded up, so it never shows more than
+ * is held; a balance above 0 but under 0.001 shows as "<0.001".
+ */
+export function formatCompactXna(value: SatsInput, locale?: string): string {
+  const raw = parseRawSats(value);
+  const sats = absSats(raw);
+  const sign = raw < 0n ? '-' : '';
+  const separator = decimalSeparator(locale);
+  // `units / scale` with at most `digits` decimals, cut, its trailing zeros dropped.
+  const scaled = (scale: bigint, digits: number): string => {
+    const whole = formatSatsGrouped(sats / scale, locale);
+    if (digits === 0) return whole;
+    const fraction = (((sats % scale) * 10n ** BigInt(digits)) / scale).toString().padStart(digits, '0').replace(/0+$/, '');
+    return fraction ? whole + separator + fraction : whole;
+  };
+  if (sats === 0n) return '0';
+  if (sats < COIN / 1000n) return `${sign}<0${separator}001`;
+  if (sats < 100n * COIN) return sign + scaled(COIN, 3);
+  if (sats < 10_000n * COIN) return sign + scaled(COIN, 0);
+  if (sats < 10_000_000n * COIN) return sign + scaled(1000n * COIN, sats < 100_000n * COIN ? 1 : 0) + 'k';
+  return sign + scaled(1_000_000n * COIN, sats < 100_000_000n * COIN ? 1 : 0) + 'M';
+}
+
 /** Split display text using its actual decimal separator, never a thousands separator. */
 export function splitFormattedAmount(text: string, separator = decimalSeparator()): [string, string, string] {
   const index = text.indexOf(separator);
@@ -82,4 +111,22 @@ export function splitFormattedAmount(text: string, separator = decimalSeparator(
   const match = text.slice(index + separator.length).match(/^(\d+)(.*)$/);
   if (!match) return [text, '', ''];
   return [text.slice(0, index), separator + match[1], match[2]];
+}
+
+/**
+ * `splitFormattedAmount`, keeping at most `maxDecimals` decimal digits. The rest
+ * are cut, never rounded, so a shortened amount never shows more than is held;
+ * zeros left at the end by the cut go as well. For summaries (home, wallet
+ * list); the send flow keeps the full amount.
+ */
+export function splitShortenedAmount(text: string, maxDecimals: number, separator = decimalSeparator()): [string, string, string] {
+  const [integer, decimals, suffix] = splitFormattedAmount(text, separator);
+  if (!decimals) return [integer, '', suffix];
+  const digits = decimals.slice(separator.length, separator.length + Math.max(0, maxDecimals)).replace(/0+$/, '');
+  return [integer, digits ? separator + digits : '', suffix];
+}
+
+/** `splitShortenedAmount` joined back into one string. */
+export function shortenFormattedAmount(text: string, maxDecimals: number, separator = decimalSeparator()): string {
+  return splitShortenedAmount(text, maxDecimals, separator).join('');
 }

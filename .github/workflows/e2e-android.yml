@@ -1,6 +1,8 @@
 name: Tests e2e Android
 
-on: [pull_request]
+# Manual only: the Detox specs under tests/e2e/ are BlueWallet's and still test
+# removed Bitcoin flows. Back on pull requests once there is a Neurai suite.
+on: workflow_dispatch
 
 permissions:
   contents: read
@@ -31,7 +33,6 @@ jobs:
         rm -rf ~/.gradle/caches/modules-2/files-2.1 || true
         rm -rf ~/.gradle/caches/build-cache || true
         rm -rf ~/.npm/_cacache ~/.cache || true
-        sudo rm -rf /home/runner/work/_temp || true
         echo "Disk after cleanup:" && df -h
 
     - name: Specify node version
@@ -98,7 +99,6 @@ jobs:
         sudo rm -rf /usr/local/lib/android/sdk/ndk || true
         sudo docker system prune -af || true
         rm -rf ~/.npm/_cacache ~/.cache || true
-        sudo rm -rf /home/runner/work/_temp || true
         echo "Disk after cleanup:" && df -h
 
     - name: Ensure artifacts directory

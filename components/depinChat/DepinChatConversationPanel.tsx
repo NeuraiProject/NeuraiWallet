@@ -1,225 +1,259 @@
+/**
+ * An open token chat, on its own squared ground so it never reads as part of
+ * the wallet screens: a floating header (the menu with the conversations and
+ * the chat's options, who this conversation is with, the chat info), the
+ * messages and the input bar. Leaving is the system back, or "Leave" in the
+ * menu.
+ */
 import React, { type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import FontAwesome6 from '@react-native-vector-icons/fontawesome6';
-import { Bubble, GiftedChat, type IMessage } from 'react-native-gifted-chat';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import loc from '../../loc';
 import Icon from '../Icon';
-
-// Our own bubbles used GiftedChat's default blue, which clashed with the
-// wallet's orange palette and left the amber clock at 1.7:1 against it — all
-// but invisible in light mode. A deep brand orange keeps the wallet's look and
-// puts both delivery icons above 3.5:1 on the bubble, white timestamp included.
-const OUTGOING_BUBBLE = '#c2410c';
-const TICK_PENDING = '#fcd34d';
-const TICK_DELIVERED = '#86efac';
+import { useSettingsPalette } from '../settings/SettingsUI';
+import type { ChatMessage, ChatRow } from './chatRows';
+import { ChatWallpaper, useChatPalette } from './chatTheme';
+import DepinMessageList from './DepinMessageList';
+import { SenderAvatar } from './DepinUI';
 
 interface DepinChatConversationPanelProps {
-  activeConversationName: string;
+  /** 'group' or the address of the other side of a private conversation. */
   activeTab: string;
-  draft: string;
+  /** Who the conversation is with: the token, a short address, or your notes. */
+  title: string;
+  subtitle: string;
+  /** The chat is connecting or waiting for the device: shown in place of the subtitle. */
+  busyNote: string | null;
+  /** The server cannot be reached, or refused the read. */
   error: string | null;
-  gearButton: ReactNode;
+  draft: string;
   identityAddress: string;
-  lastPoll: Date | null;
-  messages: IMessage[];
-  messagesListRef: any;
-  onBack: () => void;
+  messages: ChatMessage[];
+  messagesListRef: React.MutableRefObject<FlatList<ChatRow> | null>;
+  /** Something unread in a conversation that is not on screen: a dot on the menu. */
+  unreadElsewhere: boolean;
   onChangeDraft: (draft: string) => void;
-  onOpenDrawer: () => void;
-  /** Unread across all conversations — shows a dot on the contacts button. */
-  unreadCount: number;
+  onOpenMenu: () => void;
   onOpenInfo: () => void;
   onSend: () => void;
   overlays: ReactNode;
-  placeholderColor: string;
   revealBanner: ReactNode;
   selectedAsset: string;
-  /** Progress note shown in place of "checking the server", e.g. a pending device approval. */
-  status?: string | null;
-  stylesHook: any;
+  /** Bottom space under the input bar (gesture bar, or a little above the keyboard). */
+  inputBottom: number;
+  /** Lifts the whole chat above the keyboard. */
+  keyboardOffset: number;
 }
 
 const DepinChatConversationPanel = ({
-  activeConversationName,
   activeTab,
-  draft,
+  title,
+  subtitle,
+  busyNote,
   error,
-  gearButton,
+  draft,
   identityAddress,
-  lastPoll,
   messages,
   messagesListRef,
-  onBack,
+  unreadElsewhere,
   onChangeDraft,
-  onOpenDrawer,
-  unreadCount,
+  onOpenMenu,
   onOpenInfo,
   onSend,
   overlays,
-  placeholderColor,
   revealBanner,
   selectedAsset,
-  status,
-  stylesHook,
-}: DepinChatConversationPanelProps) => (
-  <View style={[styles.flex, stylesHook.root, stylesHook.chatRoot]}>
-    <View style={styles.headerRow}>
-      <Pressable onPress={onOpenDrawer} style={styles.gear} accessibilityLabel={loc.depin.contacts_title} testID="DepinContactsOpen">
-        <Icon name="menu" type="material" size={24} color={stylesHook.text.color} />
-        {unreadCount > 0 && <View style={styles.unreadDot} testID="DepinUnreadDot" />}
-      </Pressable>
-      <Pressable onPress={onBack} style={styles.backBtn}>
-        <Text style={[styles.title, stylesHook.text]} numberOfLines={1}>
-          {`# ${selectedAsset}`}
-        </Text>
-      </Pressable>
-      <Pressable onPress={onOpenInfo} style={styles.gear} accessibilityLabel={loc.depin.info_title} testID="DepinChatInfo">
-        <Icon name="information-circle-outline" type="ionicons" size={22} color={stylesHook.subtext.color} />
-      </Pressable>
-      {gearButton}
-    </View>
+  inputBottom,
+  keyboardOffset,
+}: DepinChatConversationPanelProps) => {
+  const p = useSettingsPalette();
+  const c = useChatPalette();
+  const isGroup = activeTab === 'group';
+  const isNotes = activeTab === identityAddress;
+  const canSend = draft.trim().length > 0;
+  const placeholder = isGroup
+    ? loc.depin.input_placeholder
+    : (loc.formatString(loc.depin.input_placeholder_private_to, { name: title }) as string);
 
-    <Pressable onPress={onOpenDrawer} style={styles.activeConvRow} testID="DepinActiveConversation">
-      {activeTab === 'group' ? (
-        <Icon name="groups" type="material" size={18} color={stylesHook.subtext.color} />
-      ) : (
-        <View style={styles.onlineDot} />
-      )}
-      <Text style={[styles.activeConvText, stylesHook.text]} numberOfLines={1}>
-        {activeConversationName}
-      </Text>
-      <Icon name="expand-more" type="material" size={18} color={stylesHook.subtext.color} />
-    </Pressable>
+  return (
+    <View style={[styles.flex, { paddingBottom: keyboardOffset }]}>
+      <ChatWallpaper />
 
-    {revealBanner}
-    {error ? (
-      <View style={styles.statusRow}>
-        <ActivityIndicator size="small" />
-        <Text style={[styles.errorText, stylesHook.subtext]}>{`${error} — ${loc.depin.connection_retrying}`}</Text>
-      </View>
-    ) : status || !lastPoll ? (
-      <View style={styles.statusRow}>
-        <ActivityIndicator size="small" />
-        <Text style={[styles.errorText, stylesHook.subtext]}>{status || loc.depin.checking_server}</Text>
-      </View>
-    ) : null}
+      <View style={[styles.header, { backgroundColor: p.card }]}>
+        <Pressable
+          onPress={onOpenMenu}
+          accessibilityRole="button"
+          accessibilityLabel={unreadElsewhere ? `${loc.depin.menu}, ${loc.home.depin_new}` : loc.depin.menu}
+          hitSlop={6}
+          testID="DepinChatMenu"
+          style={({ pressed }) => [styles.menu, pressed && styles.pressed]}
+        >
+          <Icon name="menu" type="material" size={26} color={p.ink} />
+          {unreadElsewhere ? (
+            <View style={[styles.menuDot, { backgroundColor: p.unread, borderColor: p.card }]} testID="DepinUnreadDot" />
+          ) : null}
+        </Pressable>
 
-    <View style={styles.flex}>
-      <GiftedChat
-        messages={messages}
-        user={{ _id: identityAddress }}
-        isInverted={false}
-        renderInputToolbar={() => null}
-        keyboardProviderProps={{ enabled: false } as any}
-        messagesContainerRef={messagesListRef}
-        messagesContainerStyle={stylesHook.root}
-        // Delivery state on our own messages: an amber clock while the pool has
-        // not handed the message back, a green check once it has. The same two
-        // states the web wallet shows, so a user moving between them reads the
-        // same thing. `renderTicks` belongs to the bubble, not to GiftedChat.
-        renderBubble={(props: any) => (
-          <Bubble
-            {...props}
-            wrapperStyle={bubbleWrapperStyle}
-            renderTicks={(message: IMessage) => {
-              if (message.user?._id !== identityAddress) return null;
-              return message.pending ? (
-                <FontAwesome6 name="clock" iconStyle="regular" size={12} color={TICK_PENDING} style={styles.tick} />
-              ) : (
-                <FontAwesome6 name="circle-check" iconStyle="regular" size={12} color={TICK_DELIVERED} style={styles.tick} />
-              );
-            }}
-          />
-        )}
-        renderAvatar={(props: any) => (
-          <View style={[styles.msgAvatar, stylesHook.chip]}>
-            <Text style={[styles.msgAvatarText, stylesHook.chipText]}>{props?.currentMessage?.user?.name ?? '?'}</Text>
+        <Pressable
+          onPress={onOpenInfo}
+          accessibilityRole="button"
+          accessibilityLabel={`${title}, ${busyNote ?? subtitle}. ${loc.depin.info_title}`}
+          testID="DepinChatTitle"
+          style={({ pressed }) => [styles.who, pressed && styles.pressed]}
+        >
+          {isGroup ? (
+            <View style={[styles.channelAvatar, { backgroundColor: p.accentSoft }]}>
+              <Icon name="tag" type="material" size={22} color={p.accentText} />
+            </View>
+          ) : (
+            <SenderAvatar address={activeTab} size={40} me={isNotes} />
+          )}
+          <View style={styles.whoTexts}>
+            <Text style={[styles.title, { color: p.ink }]} numberOfLines={1}>
+              {title}
+            </Text>
+            {busyNote ? (
+              <View style={styles.subtitleRow} accessibilityLiveRegion="polite">
+                <ActivityIndicator size="small" color={p.accentText} style={styles.busySpinner} />
+                <Text style={[styles.subtitle, { color: p.accentText }]} numberOfLines={1}>
+                  {busyNote}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.subtitleRow}>
+                {isGroup ? null : <Icon name="lock" type="material" size={13} color={p.mutedOnCard} />}
+                <Text style={[styles.subtitle, { color: p.mutedOnCard }]} numberOfLines={1}>
+                  {subtitle}
+                </Text>
+              </View>
+            )}
           </View>
-        )}
-      />
-    </View>
+        </Pressable>
 
-    <View style={[styles.inputBar, stylesHook.inputBar]}>
-      <TextInput
-        style={[styles.inputField, stylesHook.inputField]}
-        value={draft}
-        onChangeText={onChangeDraft}
-        placeholder={activeTab === 'group' ? loc.depin.input_placeholder : loc.depin.input_placeholder_private}
-        placeholderTextColor={placeholderColor}
-        multiline
-        testID="DepinChatInput"
-      />
-      <Pressable
-        onPress={onSend}
-        disabled={!draft.trim()}
-        style={[styles.sendBtn, !draft.trim() && styles.sendBtnDisabled]}
-        testID="DepinChatSend"
-      >
-        <Text style={styles.sendBtnGlyph}>➤</Text>
-      </Pressable>
-    </View>
+        <Pressable
+          onPress={onOpenInfo}
+          accessibilityRole="button"
+          accessibilityLabel={loc.depin.info_title}
+          hitSlop={6}
+          testID="DepinChatInfo"
+          style={({ pressed }) => [styles.menu, pressed && styles.pressed]}
+        >
+          <Icon name="info-outline" type="material" size={24} color={p.mutedOnCard} />
+        </Pressable>
+      </View>
 
-    {overlays}
-  </View>
-);
+      {error ? (
+        <View style={styles.noteWrap} accessibilityLiveRegion="polite">
+          <View style={[styles.errorNote, { backgroundColor: p.fail.bg }]} testID="DepinChatError">
+            <Icon name="cloud-off" type="material" size={16} color={p.fail.fg} />
+            <Text style={[styles.errorText, { color: p.fail.fg }]}>{`${error} — ${loc.depin.connection_retrying}`}</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {revealBanner}
+
+      <DepinMessageList
+        messages={messages}
+        me={identityAddress}
+        isGroup={isGroup}
+        listRef={messagesListRef}
+        empty={
+          <View style={[styles.empty, { backgroundColor: c.pill }]} testID="DepinChatEmpty">
+            <Icon name={isGroup ? 'forum' : 'lock'} type="material" size={28} color={p.accentText} />
+            <Text style={[styles.emptyTitle, { color: p.ink }]}>{loc.depin.chat_empty_title}</Text>
+            <Text style={[styles.emptyText, { color: c.pillText }]}>
+              {isGroup
+                ? loc.formatString(loc.depin.chat_empty_group, { token: selectedAsset })
+                : loc.formatString(loc.depin.chat_empty_private, { name: title })}
+            </Text>
+          </View>
+        }
+      />
+
+      <View style={[styles.inputBar, { paddingBottom: inputBottom }]}>
+        <View style={[styles.field, { backgroundColor: p.card }]}>
+          <TextInput
+            style={[styles.input, { color: p.ink }]}
+            value={draft}
+            onChangeText={onChangeDraft}
+            placeholder={placeholder}
+            placeholderTextColor={p.mutedOnCard}
+            selectionColor={p.accent}
+            accessibilityLabel={placeholder}
+            multiline
+            underlineColorAndroid="transparent"
+            testID="DepinChatInput"
+          />
+        </View>
+        <Pressable
+          onPress={onSend}
+          disabled={!canSend}
+          accessibilityRole="button"
+          accessibilityLabel={loc.home.send}
+          accessibilityState={{ disabled: !canSend }}
+          testID="DepinChatSend"
+          style={({ pressed }) => [styles.send, { backgroundColor: p.button }, !canSend && styles.disabled, pressed && styles.pressed]}
+        >
+          <Icon name="send" type="material" size={22} color="#ffffff" />
+        </Pressable>
+      </View>
+
+      {overlays}
+    </View>
+  );
+};
+
+const FLOAT_SHADOW = {
+  shadowColor: '#111827',
+  shadowOpacity: 0.12,
+  shadowRadius: 8,
+  shadowOffset: { width: 0, height: 2 },
+  elevation: 4,
+};
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 },
-  backBtn: { flex: 1, marginRight: 12 },
-  title: { fontSize: 18, fontWeight: '700' },
-  gear: { padding: 8 },
-  // Small green dot pinned to the contacts button's corner: unread traffic is
-  // worth noticing but not worth a number at this size.
-  unreadDot: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#22c55e',
-  },
-  activeConvRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, columnGap: 6 },
-  activeConvText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
-  onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' },
-  tick: { marginLeft: 6 },
-  outgoingBubble: { backgroundColor: OUTGOING_BUBBLE },
-  msgAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  msgAvatarText: { fontSize: 10, fontWeight: '700' },
-  errorText: { fontSize: 12, textAlign: 'center', paddingVertical: 6, flexShrink: 1 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', columnGap: 8, paddingHorizontal: 16 },
-  inputBar: {
+  pressed: { opacity: 0.6 },
+  disabled: { opacity: 0.45 },
+  header: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    columnGap: 8,
-  },
-  inputField: {
-    flex: 1,
-    minHeight: 40,
-    maxHeight: 120,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 15,
-  },
-  sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f97316',
+    marginHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+    borderRadius: 24,
+    ...FLOAT_SHADOW,
   },
-  sendBtnDisabled: { opacity: 0.4 },
-  sendBtnGlyph: { color: '#ffffff', fontSize: 18, fontWeight: '700' },
+  menu: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  menuDot: { position: 'absolute', top: 9, right: 8, width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
+  who: { flex: 1, flexDirection: 'row', alignItems: 'center', columnGap: 10, minHeight: 48, paddingLeft: 4 },
+  channelAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  whoTexts: { flex: 1, rowGap: 1 },
+  title: { fontSize: 17, fontWeight: '700' },
+  subtitleRow: { flexDirection: 'row', alignItems: 'center', columnGap: 4 },
+  busySpinner: { transform: [{ scale: 0.7 }], marginLeft: -4, marginRight: -2 },
+  subtitle: { fontSize: 13, flexShrink: 1 },
+  noteWrap: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 4 },
+  errorNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 8,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    maxWidth: '100%',
+  },
+  errorText: { fontSize: 13, lineHeight: 18, flexShrink: 1 },
+  empty: { alignItems: 'center', rowGap: 8, borderRadius: 24, paddingHorizontal: 24, paddingVertical: 22, maxWidth: 320 },
+  emptyTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  emptyText: { fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', columnGap: 8, paddingHorizontal: 10, paddingTop: 6 },
+  field: { flex: 1, borderRadius: 24, minHeight: 48, justifyContent: 'center', paddingHorizontal: 16, ...FLOAT_SHADOW },
+  input: { fontSize: 16, maxHeight: 128, paddingTop: 12, paddingBottom: 12, paddingHorizontal: 0 },
+  send: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', ...FLOAT_SHADOW },
 });
-
-// Module-level so the Bubble prop keeps a stable identity across renders.
-const bubbleWrapperStyle = { right: styles.outgoingBubble };
 
 export default DepinChatConversationPanel;

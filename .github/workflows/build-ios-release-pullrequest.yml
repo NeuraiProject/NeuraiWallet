@@ -1,13 +1,8 @@
 name: Build Release and Upload to TestFlight (iOS)
 
+# Manual only: the Apple targets are not released yet, and this workflow needs
+# signing and App Store secrets the repository does not have.
 on:
-  push:
-    branches:
-      - master
-  pull_request:
-    types: [opened, reopened, synchronize, labeled]
-    branches:
-      - master
   workflow_dispatch:
 
 concurrency:

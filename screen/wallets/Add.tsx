@@ -1,34 +1,72 @@
+/**
+ * Add a wallet, in the settings style: its name, the network, the kind of
+ * wallet (ECDSA and PQ are testnet only for now) and, apart, the other ways to
+ * add one: import it from its words or connect a hardware wallet. Creating
+ * runs behind the Neurai loader, then the words are shown to back them up.
+ */
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Keyboard, StyleSheet, TextInput, View } from 'react-native';
-import Animated, { Layout } from 'react-native-reanimated';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Keyboard, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
-import { BlueButtonLink, BlueFormLabel } from '../../BlueComponents';
+import { chainFor, isKindAvailable, NeuraiNetwork, WalletKind } from '../../blue_modules/neurai';
+import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
 import { NeuraiHDWallet } from '../../class/wallets/neurai-hd-wallet';
 import { NeuraiPQWallet } from '../../class/wallets/neurai-pq-wallet';
-import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
-import { chainFor, isKindAvailable, NeuraiNetwork, WalletKind } from '../../blue_modules/neurai';
 import presentAlert from '../../components/Alert';
-import Button from '../../components/Button';
-import SegmentedControl from '../../components/SegmentedControl';
-import WalletButton from '../../components/WalletButton';
-import { useTheme } from '../../components/themes';
-import loc from '../../loc';
+import { isReportedSaveError } from '../../class/storage-errors';
+import { ConnectFooter, ConnectOption } from '../../components/ConnectUI';
+import { HomeWalletKind, walletKindIconOf } from '../../components/home/homeTheme';
+import NeuraiLoader, { untilLoaderPainted } from '../../components/NeuraiLoader';
+import {
+  SettingsCard,
+  SettingsRow,
+  SettingsScreenHeader,
+  SettingsSectionLabel,
+  SettingsSegment,
+  SettingsSegmented,
+  useSettingsPalette,
+} from '../../components/settings/SettingsUI';
 import { useStorage } from '../../hooks/context/useStorage';
 import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import loc from '../../loc';
 import { AddWalletStackParamList } from '../../navigation/AddWalletStack';
-import SafeAreaScrollView from '../../components/SafeAreaScrollView';
-import { BlueSpacing20, BlueSpacing40 } from '../../components/BlueSpacing';
 
 type NavigationProps = NativeStackNavigationProp<AddWalletStackParamList, 'AddWallet'>;
 
-const NETWORK_OPTIONS: NeuraiNetwork[] = ['mainnet', 'testnet'];
+const NETWORKS: SettingsSegment<NeuraiNetwork>[] = [
+  { value: 'mainnet', label: loc.wallets.neurai_network_mainnet, icon: 'public', testID: 'AddWalletMainnet' },
+  { value: 'testnet', label: loc.wallets.neurai_network_testnet, icon: 'science', testID: 'AddWalletTestnet' },
+];
+
+const KINDS: { kind: WalletKind; icon: HomeWalletKind; title: string; explain: string; testID: string }[] = [
+  {
+    kind: 'legacy',
+    icon: 'hd',
+    title: loc.wallets.add_neurai_legacy,
+    explain: loc.wallets.add_neurai_legacy_explain,
+    testID: 'ActivateNeuraiHDButton',
+  },
+  {
+    kind: 'ecdsa',
+    icon: 'ecdsa',
+    title: loc.wallets.add_neurai_ecdsa,
+    explain: loc.wallets.add_neurai_ecdsa_explain,
+    testID: 'ActivateNeuraiECDSAButton',
+  },
+  {
+    kind: 'pq',
+    icon: 'pq',
+    title: loc.wallets.add_neurai_pq,
+    explain: loc.wallets.add_neurai_pq_explain,
+    testID: 'ActivateNeuraiPQButton',
+  },
+];
 
 const WalletsAdd: React.FC = () => {
-  const { colors } = useTheme();
-  const { addWallet, saveToDisk } = useStorage();
-  const { navigate } = useExtendedNavigation<NavigationProps>();
+  const p = useSettingsPalette();
+  const { addWalletAndSave } = useStorage();
+  const { navigate, goBack } = useExtendedNavigation<NavigationProps>();
 
   const [label, setLabel] = useState('');
   const [walletKind, setWalletKind] = useState<WalletKind>('legacy');
@@ -38,172 +76,129 @@ const WalletsAdd: React.FC = () => {
   const [network, setNetwork] = useState<NeuraiNetwork>('mainnet');
   const [isLoading, setIsLoading] = useState(false);
 
-  const stylesHook = {
-    label: {
-      borderColor: colors.formBorder,
-      borderBottomColor: colors.formBorder,
-      backgroundColor: colors.inputBackgroundColor,
-    },
-    root: {
-      backgroundColor: colors.elevated,
-    },
-  };
-
   const createWallet = useCallback(async () => {
     Keyboard.dismiss();
     setIsLoading(true);
     try {
+      // Generating and deriving hold the JS thread: let the loader show first.
+      await untilLoaderPainted();
       const wallet = walletKind === 'pq' ? new NeuraiPQWallet() : walletKind === 'ecdsa' ? new NeuraiECDSAWallet() : new NeuraiHDWallet();
       wallet.setNetwork(chainFor(network, walletKind));
       wallet.setLabel(label.trim() || loc.wallets.details_title);
       wallet.generate();
       await wallet.prewarmEngine();
-      addWallet(wallet);
-      await saveToDisk();
+      // Rejects (and drops the wallet again) when it was not saved: the backup
+      // screen is only reached for a wallet that is on disk.
+      await addWalletAndSave(wallet);
       triggerHapticFeedback(HapticFeedbackTypes.NotificationSuccess);
       navigate('PleaseBackup', { walletID: wallet.getID() });
     } catch (err: any) {
-      presentAlert({ message: err?.message ?? String(err) });
+      if (!isReportedSaveError(err)) presentAlert({ message: err?.message ?? String(err) });
     } finally {
       setIsLoading(false);
     }
-  }, [walletKind, network, label, addWallet, saveToDisk, navigate]);
+  }, [walletKind, network, label, addWalletAndSave, navigate]);
 
-  const navigateToImportWallet = useCallback(() => navigate('ImportNeurai' as never), [navigate]);
-  const navigateToHardwareWallet = useCallback(() => navigate('AddHardwareWallet' as never), [navigate]);
-
-  const networkSegmentValues = NETWORK_OPTIONS.map(n =>
-    n === 'mainnet' ? loc.wallets.neurai_network_mainnet : loc.wallets.neurai_network_testnet,
-  );
-  const selectedNetworkIndex = NETWORK_OPTIONS.indexOf(network);
-
-  const onNetworkChange = useCallback((idx: number) => {
-    const next = NETWORK_OPTIONS[idx];
+  const onNetworkChange = useCallback((next: NeuraiNetwork) => {
     setNetwork(next);
-    // ECDSA and PQ are not available on mainnet yet — bounce the kind back
-    // to legacy if the user had one of them selected.
+    // ECDSA and PQ are not available on mainnet yet: back to legacy if one of them was picked.
     setWalletKind(kind => (isKindAvailable(next, kind) ? kind : 'legacy'));
   }, []);
 
   return (
-    <Animated.View layout={Layout.springify().damping(16).stiffness(180)} style={styles.flex1}>
-      <SafeAreaScrollView style={stylesHook.root} testID="ScrollView" automaticallyAdjustKeyboardInsets>
-        <BlueSpacing20 />
-        <BlueFormLabel>{loc.wallets.add_wallet_name}</BlueFormLabel>
-        <View style={[styles.label, stylesHook.label]}>
-          <TextInput
-            testID="WalletNameInput"
-            value={label}
-            placeholderTextColor="#81868e"
-            placeholder={loc.wallets.add_placeholder}
-            onChangeText={setLabel}
-            style={styles.textInput}
-            editable={!isLoading}
-            underlineColorAndroid="transparent"
-          />
+    <View style={[styles.root, { backgroundColor: p.ground }]}>
+      <SettingsScreenHeader title={loc.wallets.add_title} onBack={goBack} icon="close" iconLabel={loc._.close} />
+      {isLoading ? (
+        <View style={styles.creating}>
+          <NeuraiLoader label={loc.wallets.add_creating} />
         </View>
-
-        <BlueFormLabel>{loc.wallets.add_wallet_type}</BlueFormLabel>
-        <View style={styles.buttons}>
-          <WalletButton
-            buttonType="NeuraiLegacy"
-            testID="ActivateNeuraiHDButton"
-            active={walletKind === 'legacy'}
-            onPress={() => setWalletKind('legacy')}
-            size={styles.button}
-          />
-          <WalletButton
-            buttonType="NeuraiECDSA"
-            testID="ActivateNeuraiECDSAButton"
-            active={walletKind === 'ecdsa'}
-            disabled={!isKindAvailable(network, 'ecdsa')}
-            onPress={() => setWalletKind('ecdsa')}
-            size={styles.button}
-          />
-          <WalletButton
-            buttonType="NeuraiPQ"
-            testID="ActivateNeuraiPQButton"
-            active={walletKind === 'pq'}
-            disabled={!isKindAvailable(network, 'pq')}
-            onPress={() => setWalletKind('pq')}
-            size={styles.button}
-          />
-        </View>
-
-        <BlueFormLabel>{loc.wallets.neurai_network_label}</BlueFormLabel>
-        <View style={styles.networkRow}>
-          <SegmentedControl values={networkSegmentValues} selectedIndex={selectedNetworkIndex} onChange={onNetworkChange} />
-        </View>
-
-        <View style={styles.advanced}>
-          <BlueSpacing20 />
-          {!isLoading ? (
-            <>
-              <Button testID="Create" title={loc.wallets.add_create} onPress={createWallet} />
-              <BlueSpacing20 />
-              <WalletButton
-                buttonType="NeuraiHardware"
-                testID="ConnectHardwareWallet"
-                active={false}
-                onPress={navigateToHardwareWallet}
-                size={styles.button}
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          automaticallyAdjustKeyboardInsets
+          testID="ScrollView"
+        >
+          <View>
+            <SettingsSectionLabel>{loc.wallets.add_wallet_name}</SettingsSectionLabel>
+            <SettingsCard>
+              <TextInput
+                testID="WalletNameInput"
+                value={label}
+                onChangeText={setLabel}
+                placeholder={loc.wallets.add_placeholder}
+                placeholderTextColor={p.mutedOnCard}
+                selectionColor={p.accent}
+                returnKeyType="done"
+                style={[styles.nameInput, { color: p.ink }]}
+                underlineColorAndroid="transparent"
               />
-              <BlueButtonLink
-                testID="ImportWallet"
-                style={styles.import}
+            </SettingsCard>
+          </View>
+
+          <View>
+            <SettingsSectionLabel>{loc.wallets.neurai_network_label}</SettingsSectionLabel>
+            <SettingsCard style={styles.padded}>
+              <SettingsSegmented segments={NETWORKS} value={network} onChange={onNetworkChange} testID="AddWalletNetwork" />
+            </SettingsCard>
+          </View>
+
+          <View>
+            <SettingsSectionLabel>{loc.wallets.add_wallet_type}</SettingsSectionLabel>
+            <SettingsCard>
+              {KINDS.map((k, index) => {
+                const available = isKindAvailable(network, k.kind);
+                return (
+                  <ConnectOption
+                    key={k.kind}
+                    icon={walletKindIconOf(k.icon)}
+                    title={k.title}
+                    subtitle={available ? k.explain : loc.wallets.add_testnet_only}
+                    selected={walletKind === k.kind}
+                    disabled={!available}
+                    onPress={() => setWalletKind(k.kind)}
+                    divider={index > 0}
+                    testID={k.testID}
+                  />
+                );
+              })}
+            </SettingsCard>
+          </View>
+
+          <View>
+            <SettingsSectionLabel>{loc.wallets.add_other}</SettingsSectionLabel>
+            <SettingsCard>
+              <SettingsRow
+                icon="download"
                 title={loc.wallets.add_import_wallet}
-                onPress={navigateToImportWallet}
+                subtitle={loc.wallets.add_import_explain}
+                onPress={() => navigate('ImportNeurai')}
+                testID="ImportWallet"
               />
-              <BlueSpacing40 />
-            </>
-          ) : (
-            <ActivityIndicator />
-          )}
-        </View>
-      </SafeAreaScrollView>
-    </Animated.View>
+              <SettingsRow
+                icon={walletKindIconOf('hardware')}
+                title={loc.wallets.add_neurai_hardware}
+                subtitle={loc.wallets.add_neurai_hardware_explain}
+                onPress={() => navigate('AddHardwareWallet')}
+                divider
+                testID="ConnectHardwareWallet"
+              />
+            </SettingsCard>
+          </View>
+        </ScrollView>
+      )}
+      <ConnectFooter primary={{ title: loc.wallets.add_create, onPress: createWallet, disabled: isLoading, testID: 'Create' }} />
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  flex1: { flex: 1 },
-  label: {
-    flexDirection: 'row',
-    borderWidth: 1,
-    borderBottomWidth: 0.5,
-    minHeight: 44,
-    height: 44,
-    marginHorizontal: 20,
-    alignItems: 'center',
-    marginVertical: 16,
-    borderRadius: 4,
-  },
-  textInput: {
-    flex: 1,
-    marginHorizontal: 8,
-    color: '#81868e',
-  },
-  buttons: {
-    flexDirection: 'column',
-    marginHorizontal: 20,
-    marginTop: 16,
-    borderWidth: 0,
-    minHeight: 100,
-  },
-  button: {
-    width: '100%',
-    height: 'auto',
-  },
-  networkRow: {
-    marginHorizontal: 20,
-    marginVertical: 12,
-  },
-  advanced: {
-    marginHorizontal: 20,
-  },
-  import: {
-    marginVertical: 24,
-  },
+  root: { flex: 1 },
+  content: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24, rowGap: 20 },
+  padded: { paddingVertical: 12 },
+  nameInput: { fontSize: 16, minHeight: 56, paddingVertical: 14, paddingHorizontal: 0 },
+  creating: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
 
 export default WalletsAdd;

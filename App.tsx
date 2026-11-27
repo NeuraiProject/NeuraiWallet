@@ -10,6 +10,8 @@ import MasterView from './navigation/MasterView';
 import { navigationRef } from './NavigationService';
 import { useLogger } from '@react-navigation/devtools';
 import { StorageProvider } from './components/Context/StorageProvider';
+import { BackupReminderHost } from './components/BackupReminder';
+import { AppDialogHost } from './components/AppDialog';
 
 // Lives inside SettingsProvider so it can read the user's theme preference
 // (system / light / dark) and apply it to the navigation container.
@@ -24,6 +26,10 @@ const ThemedNavigation = () => {
   return (
     <NavigationContainer ref={navigationRef} theme={isDark ? BlueDarkTheme : BlueDefaultTheme}>
       <MasterView />
+      {/* Inside the navigation container, for the theme. */}
+      <BackupReminderHost />
+      {/* Last, so a message shows over everything, the backup reminder included. */}
+      <AppDialogHost />
     </NavigationContainer>
   );
 };

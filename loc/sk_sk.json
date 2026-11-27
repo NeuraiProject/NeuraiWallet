@@ -45,16 +45,7 @@
     "please_pay": "Prosím zaplaťte",
     "sats": "sats"
   },
-  "plausibledeniability": {
-    "create_fake_storage": "Vytvoriť falošné zašifrované úložisko",
-    "create_password_explanation": "Heslo k falošnému úložisku nesmie byť rovnaké ako heslo k hlavnému úložisku",
-    "help": "Za určitých okolností môžete byť donútení k prezradeniu hesla. K zaisteniu bezpečnosti vaších prostriedkov, NeuraiWallet môže vytvořiť ďalšie zašifrované úložiská s rozdielným heslom. V prípade potreby môžete toto heslo dať tretej strane. Pokiaľ bude zadané do NeuraiWallet, odomkne nové \"falošné\" úložisko. Toto bude vyzerať hodnoverne, ale udrží vaše pravé hlavné úložisko v bezpečí.",
-    "help2": "Nové úložisko bude plne funkčné, môžete naň uložiť minimálnu čiastku, aby vyzeralo uveriteľnejšie.",
-    "password_should_not_match": "Heslo k falošnému úložisku nesmie byť rovnaké ako heslo k hlavnému úložisku",
-    "title": "Plausible deniability..."
-  },
   "pleasebackup": {
-    "ask": "Zapísali ste si svoju zálohovaciu frázu? Táto fráza je nutná pre prístup k vašim prostriedkom v prípade straty či poruchy prístroja. Bez zálohovacej frázy by ste trvale prišli o svoje prostriedky.",
     "ok_lnd": "OK, uložené.",
     "title": "Vaša peňaženka je vytvorená..."
   },
@@ -68,7 +59,6 @@
     "broadcastButton": "Odoslať",
     "broadcastError": "chyba",
     "broadcastPending": "Čaká...",
-    "broadcastSuccess": "Správne",
     "confirm_header": "Potvrdiť",
     "confirm_sendNow": "Poslať teraz",
     "create_amount": "Čiastka",
@@ -132,7 +122,6 @@
     "network_electrum": "Electrum server",
     "notifications": "Notifikácie",
     "password": "Heslo",
-    "plausible_deniability": "Plausible deniability...",
     "privacy_system_settings": "Systémové nastavenia",
     "save": "Uložiť",
     "saved": "Uložené"
@@ -145,12 +134,7 @@
     "cpfp_no_bump": "Poplatok za túto transakciu sa nedá navýšiť",
     "cpfp_title": "Navýšiť poplatok za transakciu (CPFP)",
     "details_copy": "Kopírovať",
-    "details_from": "Vstup",
-    "details_inputs": "Vstupy",
-    "details_outputs": "Výstupy",
-    "details_received": "Prijaté",
     "details_title": "Transakcia",
-    "details_to": "Výstup",
     "pending": "Čaká...",
     "list_title": "transakcie",
     "list_title_received": "Prijaté",
@@ -188,7 +172,6 @@
     "export_title": "exportovať peňaženku",
     "import_do_import": "Importovať",
     "import_error": "Chyba pri importe. Prosím uistite sa, že poskytnuté údaje sú správne.",
-    "import_imported": "Importovaná",
     "import_scan_qr": "alebo radšej naskenovať QR kód?",
     "import_success": "Úspech",
     "import_title": "importovať",

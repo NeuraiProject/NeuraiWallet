@@ -1,36 +1,26 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RouteProp, useFocusEffect, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import {
-  BackHandler,
-  Image,
-  ImageSourcePropType,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  useColorScheme,
-  View,
-} from 'react-native';
-import Animated, { Easing, Layout, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
+import { BackHandler, Image, ImageSourcePropType, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Animated, { Easing, Layout, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import Share from 'react-native-share';
 import * as BlueElectrum from '../../blue_modules/BlueElectrum';
 import { fiatToXNA, satoshiToXNA } from '../../blue_modules/currency';
 import triggerHapticFeedback, { HapticFeedbackTypes } from '../../blue_modules/hapticFeedback';
 import { majorTomToGroundControl, tryToObtainPermissions } from '../../blue_modules/notifications';
-import { BlueButtonLink, BlueCard, BlueText } from '../../BlueComponents';
+import { BlueText } from '../../BlueComponents';
 import DeeplinkSchemaMatch from '../../class/deeplink-schema-match';
 import { isNeuraiWallet } from '../../class/wallets/is-neurai-wallet';
 import { NeuraiECDSAWallet } from '../../class/wallets/neurai-ecdsa-wallet';
-import { SILENT_PAYMENT_ACCENT } from '../../blue_modules/neurai/silentPayments';
+import { SILENT_PAYMENT_ACCENT, silentPaymentTint } from '../../blue_modules/neurai/silentPayments';
 import { isTestnetChain } from '../../blue_modules/neurai/networkConfig';
 import presentAlert from '../../components/Alert';
-import Button from '../../components/Button';
+import HomeActions, { HomeAction } from '../../components/home/HomeActions';
 import CopyTextToClipboard, { CopyTextToClipboardHandle } from '../../components/CopyTextToClipboard';
 import HandOffComponent from '../../components/HandOffComponent';
 import HeaderMenuButton from '../../components/HeaderMenuButton';
 import QRCode from '../../components/QRCode';
+import QrStaggerReveal from '../../components/QrStaggerReveal';
 import SegmentedControl from '../../components/SegmentedControl';
 import { useTheme } from '../../components/themes';
 import { TransactionPendingIconBig } from '../../components/TransactionPendingIconBig';
@@ -67,25 +57,6 @@ const QR_WIDTH_USE_FRACTION = 0.92;
 /** Silent payment code card: a colored frame inside the same QR tile size, so the layout does not jump. */
 const SILENT_PAYMENT_FRAME_WIDTH = 4;
 
-/** Staggered “reveal” for the QR: white tiles fade out in random order */
-const QR_STAGGER_GRID = 5;
-const QR_STAGGER_MAX_DELAY_MS = 420;
-const QR_STAGGER_TILE_DURATION_MS = 400;
-
-/** Deterministic stagger delays for a given payload key */
-function staggerDelaysForRunKey(runKey: string, tileCount: number, maxDelayMs: number): number[] {
-  const delays: number[] = [];
-  for (let i = 0; i < tileCount; i++) {
-    let n = 0;
-    const s = `${runKey}:${i}`;
-    for (let j = 0; j < s.length; j++) {
-      n = (n * 31 + s.charCodeAt(j) * (j + 1)) % 2147483647;
-    }
-    delays.push(n % maxDelayMs);
-  }
-  return delays;
-}
-
 const receiveAuxStyles = StyleSheet.create({
   headerCloseButton: {
     minWidth: 40,
@@ -93,80 +64,7 @@ const receiveAuxStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  qrRevealTile: {
-    position: 'absolute',
-  },
-  qrStaggerHost: {
-    overflow: 'hidden',
-  },
 });
-
-type QrRevealTileProps = {
-  width: number;
-  height: number;
-  left: number;
-  top: number;
-  maskColor: string;
-  delayMs: number;
-  runKey: string;
-};
-
-const QrRevealTile: React.FC<QrRevealTileProps> = ({ width, height, left, top, maskColor, delayMs, runKey }) => {
-  const opacity = useSharedValue(1);
-  useEffect(() => {
-    opacity.value = 1;
-    opacity.value = withDelay(delayMs, withTiming(0, { duration: QR_STAGGER_TILE_DURATION_MS, easing: Easing.out(Easing.quad) }));
-  }, [runKey, delayMs, opacity]);
-  const tileStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={[receiveAuxStyles.qrRevealTile, { left, top, width, height, backgroundColor: maskColor }, tileStyle]}
-    />
-  );
-};
-
-type QrStaggerRevealProps = {
-  size: number;
-  maskColor: string;
-  runKey: string;
-  children: React.ReactNode;
-};
-
-const QrStaggerReveal: React.FC<QrStaggerRevealProps> = ({ size, maskColor, runKey, children }) => {
-  const delays = useMemo(() => staggerDelaysForRunKey(runKey, QR_STAGGER_GRID * QR_STAGGER_GRID, QR_STAGGER_MAX_DELAY_MS), [runKey]);
-  const g = QR_STAGGER_GRID;
-  const qx = Math.floor(size / g);
-  const extraX = size - qx * g;
-  const qy = Math.floor(size / g);
-  const extraY = size - qy * g;
-  const tileW = (c: number) => (c === g - 1 ? qx + extraX : qx);
-  const tileH = (r: number) => (r === g - 1 ? qy + extraY : qy);
-  const left = (c: number) => c * qx;
-  const top = (r: number) => r * qy;
-
-  return (
-    <View style={[receiveAuxStyles.qrStaggerHost, { width: size, height: size }]}>
-      {children}
-      {delays.map((delayMs, i) => {
-        const row = Math.floor(i / g);
-        const col = i % g;
-        return (
-          <QrRevealTile
-            key={`${runKey}-${i}`}
-            width={tileW(col)}
-            height={tileH(row)}
-            left={left(col)}
-            top={top(row)}
-            maskColor={maskColor}
-            delayMs={delayMs}
-            runKey={runKey}
-          />
-        );
-      })}
-    </View>
-  );
-};
 
 type ReceiveDetailsCloseButtonProps = {
   closeImage: ImageSourcePropType;
@@ -193,8 +91,8 @@ const ReceiveDetails = () => {
   const { walletID, address } = route.params;
   const { wallets, saveToDisk, sleep, fetchAndSaveWalletTransactions } = useStorage();
   const { isPQAddressReuseEnabled } = useSettings();
-  const { colors, closeImage } = useTheme();
-  const isDarkTheme = useColorScheme() === 'dark';
+  // The app's theme, which can differ from the system's: the action icons and the address follow it.
+  const { colors, closeImage, dark: isDarkTheme } = useTheme();
   const [customLabel, setCustomLabel] = useState('');
   const [customAmount, setCustomAmount] = useState('');
   const [customUnit, setCustomUnit] = useState<XnaUnit>(XnaUnit.XNA);
@@ -322,7 +220,7 @@ const ReceiveDetails = () => {
     if (newAddress === undefined) {
       newAddress = wallet.getAddress();
     } else {
-      saveToDisk();
+      saveToDisk().catch(() => {}); // reported by saveToDisk
     }
 
     if (!newAddress) {
@@ -344,7 +242,7 @@ const ReceiveDetails = () => {
     // BIP47 is Bitcoin-only; left as a no-op so the existing handler wiring
     // keeps compiling. The toggle in the header menu is hidden via
     // `wallet.allowBIP47()` returning false on every Neurai wallet.
-    saveToDisk();
+    saveToDisk().catch(() => {}); // reported by saveToDisk
     obtainWalletAddress();
   }, [saveToDisk, obtainWalletAddress]);
 
@@ -879,6 +777,39 @@ const ReceiveDetails = () => {
     Share.open({ message }).catch(error => console.debug('Error sharing:', error));
   };
 
+  // Round actions like the home's: an amount (on the address), the silent
+  // payment code (ECDSA wallets; filled in its colour while it is shown) and share.
+  const receiveActions: HomeAction[] = [];
+  if (showAddress && currentTab === loc.wallets.details_address && !isSilentPaymentShown) {
+    receiveActions.push({
+      key: 'amount',
+      label: loc.receive.action_amount,
+      icon: 'request-quote',
+      testID: 'SetCustomAmountButton',
+      onPress: showCustomAmountModal,
+    });
+  }
+  if (showAddress && silentPaymentWallet) {
+    receiveActions.push({
+      key: 'silent',
+      label: isSilentPaymentShown ? loc.receive.show_address : loc.receive.silent_payments,
+      icon: isSilentPaymentShown ? 'qr-code-2' : 'visibility-off',
+      testID: 'SilentPaymentsButton',
+      onPress: toggleSilentPayment,
+      fill: isSilentPaymentShown ? SILENT_PAYMENT_ACCENT : undefined,
+      tint: isSilentPaymentShown ? '#FFFFFF' : silentPaymentTint(isDarkTheme),
+      loading: isSilentPaymentLoading,
+    });
+  }
+  receiveActions.push({
+    key: 'share',
+    label: loc.receive.action_share,
+    icon: 'share',
+    testID: 'ReceiveShareButton',
+    onPress: handleShareButtonPressed,
+    disabled: !bip21encoded && !(currentTab === segmentControlValues[1] && isBIP47Enabled),
+  });
+
   return (
     <Animated.View layout={Layout.duration(200)} style={[styles.flex, stylesHook.root]}>
       <SafeAreaScrollView
@@ -907,34 +838,7 @@ const ReceiveDetails = () => {
         )}
 
         <View style={styles.share}>
-          <BlueCard>
-            {showAddress && currentTab === loc.wallets.details_address && !isSilentPaymentShown && (
-              <BlueButtonLink
-                style={styles.link}
-                testID="SetCustomAmountButton"
-                title={loc.receive.details_setAmount}
-                onPress={showCustomAmountModal}
-              />
-            )}
-            {showAddress && silentPaymentWallet && (
-              <>
-                <Button
-                  onPress={toggleSilentPayment}
-                  testID="SilentPaymentsButton"
-                  title={isSilentPaymentShown ? loc.receive.show_address : loc.receive.silent_payments}
-                  backgroundColor={SILENT_PAYMENT_ACCENT}
-                  showActivityIndicator={isSilentPaymentLoading}
-                  disabled={isSilentPaymentLoading}
-                />
-                <View style={styles.buttonSpacer} />
-              </>
-            )}
-            <Button
-              onPress={handleShareButtonPressed}
-              title={loc.receive.details_share}
-              disabled={!bip21encoded && !(currentTab === segmentControlValues[1] && isBIP47Enabled)}
-            />
-          </BlueCard>
+          <HomeActions actions={receiveActions} circleColor={cardBackgroundColor} />
         </View>
       </SafeAreaScrollView>
     </Animated.View>
@@ -956,12 +860,8 @@ const styles = StyleSheet.create({
   },
   share: {
     width: '100%',
-    paddingHorizontal: 32,
-    marginBottom: 16,
-  },
-  link: {
-    marginVertical: 16,
-    paddingHorizontal: 32,
+    paddingHorizontal: 16,
+    marginBottom: 24,
   },
   amount: {
     fontWeight: '600',
@@ -1033,9 +933,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
-  },
-  buttonSpacer: {
-    height: 12,
   },
   qrPlaceholder: {
     borderRadius: 4,

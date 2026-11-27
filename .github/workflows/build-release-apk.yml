@@ -1,10 +1,15 @@
 name: BuildReleaseApk
 
+# Builds the release APK on every pull request and push to master. Pull requests
+# sign it with a throwaway key made for the run (fastlane `auto_credentials`), so
+# the upload key never reaches a PR build; a push to master uses the
+# KEYSTORE_FILE_HEX / KEYSTORE_PASSWORD secrets when they are set.
+
 on:
   pull_request:
     branches:
       - master
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened]
   push:
     branches:
       - master
@@ -33,7 +38,6 @@ jobs:
           rm -rf ~/.gradle/caches/modules-2/files-2.1 || true
           rm -rf ~/.gradle/caches/build-cache || true
           rm -rf ~/.npm/_cacache ~/.cache || true
-          sudo rm -rf /home/runner/work/_temp || true
           df -h
 
       - name: Specify node version
@@ -58,13 +62,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-
+      # The runner image ships the Android SDK and its command-line tools; the
+      # NDK removed above is installed again at the version the project pins.
       - name: Install Android SDK components
         run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platforms;android-36" "platform-tools" "build-tools;36.0.0" "ndk;27.1.12297006"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          NDK_VERSION=$(sed -n 's/.*ndkVersion = "\([^"]*\)".*/\1/p' android/build.gradle)
+          test -n "$NDK_VERSION" || { echo "ndkVersion not found in android/build.gradle"; exit 1; }
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" "platforms;android-36" "platform-tools" "build-tools;36.0.0" "ndk;$NDK_VERSION" "cmake;3.22.1"
 
       - name: Install node_modules (include dev deps for patch-package)
         run: npm ci --yes
@@ -84,11 +90,18 @@ jobs:
 
       - name: Build and sign APK
         id: build_and_sign_apk
-        run: bundle exec fastlane android build_release_apk
+        run: |
+          if [ -n "$KEYSTORE_FILE_HEX" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            bundle exec fastlane android build_release_apk
+          else
+            echo "Signing with a throwaway key made for this run."
+            bundle exec fastlane android build_release_apk auto_credentials:true
+          fi
         env:
           BUILD_NUMBER: ${{ steps.build_number.outputs.build_number }}
-          KEYSTORE_FILE_HEX: ${{ secrets.KEYSTORE_FILE_HEX }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          # Only a push to master gets the upload key.
+          KEYSTORE_FILE_HEX: ${{ github.event_name == 'push' && secrets.KEYSTORE_FILE_HEX || '' }}
+          KEYSTORE_PASSWORD: ${{ github.event_name == 'push' && secrets.KEYSTORE_PASSWORD || '' }}
 
       - name: Upload build logs on failure
         if: failure()
@@ -112,9 +125,9 @@ jobs:
           BRANCH_NAME=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9_-]/_/g')
 
           if [ -n "$BRANCH_NAME" ] && [ "$BRANCH_NAME" != "master" ]; then
-            EXPECTED_FILENAME="BlueWallet-${VERSION_NAME}-${BUILD_NUMBER}-${BRANCH_NAME}.apk"
+            EXPECTED_FILENAME="NeuraiWallet-${VERSION_NAME}-${BUILD_NUMBER}-${BRANCH_NAME}.apk"
           else
-            EXPECTED_FILENAME="BlueWallet-${VERSION_NAME}-${BUILD_NUMBER}.apk"
+            EXPECTED_FILENAME="NeuraiWallet-${VERSION_NAME}-${BUILD_NUMBER}.apk"
           fi
       
           APK_PATH="android/app/build/outputs/apk/release/${EXPECTED_FILENAME}"
@@ -127,39 +140,3 @@ jobs:
           name: signed-apk
           path: ${{ env.APK_PATH }}
           if-no-files-found: error
-
-  browserstack:
-    runs-on: macos-26
-    needs: buildReleaseApk
-    if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'browserstack') }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@c4e5b1316158f92e3d49443a9d58b31d25ac0f8f # v1.306.0
-        with:
-          ruby-version: 3.4.8
-          bundler-cache: true
-
-      - name: Install dependencies with Bundler
-        run: bundle install --jobs 4 --retry 3
-
-      - name: Download APK artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
-        with:
-          name: signed-apk
-
-      - name: Set APK Path
-        run: |
-          APK_PATH=$(find ${{ github.workspace }} -name '*.apk')
-          echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
-
-      - name: Upload APK to BrowserStack and Post PR Comment
-        env:
-          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
-          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
-          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bundle exec fastlane upload_to_browserstack_and_comment

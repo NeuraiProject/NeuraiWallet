@@ -9,6 +9,9 @@ import {
   formatXnaGrouped,
   formatSatsGrouped,
   splitFormattedAmount,
+  splitShortenedAmount,
+  shortenFormattedAmount,
+  formatCompactXna,
 } from '../../blue_modules/neurai/amounts';
 import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
 import { formatAssetAmount } from '../../blue_modules/neurai/assetUtils';
@@ -74,4 +77,55 @@ it('keeps the fallback grouping exact when Intl cannot format bigint', () => {
   } finally {
     replacement.mockRestore();
   }
+});
+
+describe('shortened amounts (at most N decimals, cut not rounded)', () => {
+  it('cuts the extra decimals without rounding up', () => {
+    expect(splitShortenedAmount('100.000.000,12345678', 4, ',')).toEqual(['100.000.000', ',1234', '']);
+    expect(splitShortenedAmount('0,99999999', 4, ',')).toEqual(['0', ',9999', '']);
+    expect(shortenFormattedAmount('9,993.994552', 4, '.')).toBe('9,993.9945');
+  });
+  it('leaves shorter amounts as they are', () => {
+    expect(splitShortenedAmount('1,5', 4, ',')).toEqual(['1', ',5', '']);
+    expect(splitShortenedAmount('10.000', 4, ',')).toEqual(['10.000', '', '']);
+  });
+  it('drops the zeros the cut leaves at the end, and the separator with them', () => {
+    expect(splitShortenedAmount('1,10001234', 4, ',')).toEqual(['1', ',1', '']);
+    expect(splitShortenedAmount('100.000.000,00001234', 4, ',')).toEqual(['100.000.000', '', '']);
+  });
+  it('keeps a suffix such as the unit', () => {
+    expect(shortenFormattedAmount('1.284,56789 XNA', 4, ',')).toBe('1.284,5678 XNA');
+    expect(shortenFormattedAmount('2.12345678 XNA', 2, '.')).toBe('2.12 XNA');
+  });
+});
+
+describe('compact XNA for lists', () => {
+  const xna = (value: string) => xnaToSats(value);
+  test.each([
+    ['0', '0'],
+    ['0.0005', '<0.001'],
+    ['0.001992', '0.001'],
+    ['12.5', '12.5'],
+    ['99.99999999', '99.999'],
+    ['100', '100'],
+    ['9499.9956', '9,499'],
+    ['9999.99999999', '9,999'],
+    ['10000', '10k'],
+    ['15398.794', '15.3k'],
+    ['99999.99', '99.9k'],
+    ['250000', '250k'],
+    ['2500000', '2,500k'],
+    ['9999999.99', '9,999k'],
+    ['10000000', '10M'],
+    ['12345678', '12.3M'],
+    ['250000000', '250M'],
+  ])('%s XNA reads %s (cut, never rounded up)', (value, shown) => {
+    expect(formatCompactXna(xna(value), 'en-US')).toBe(shown);
+  });
+
+  it('uses the separators of the language', () => {
+    expect(formatCompactXna(xna('15398.794'), 'es-ES')).toBe('15,3k');
+    expect(formatCompactXna(xna('9499.9956'), 'de-DE')).toBe('9.499');
+    expect(formatCompactXna(xna('0.0005'), 'es-ES')).toBe('<0,001');
+  });
 });

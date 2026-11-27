@@ -1,4 +1,4 @@
-import { Transaction, TWallet } from '../class/wallets/types';
+import { TWallet } from '../class/wallets/types';
 import { XnaUnit, Chain } from '../models/xnaUnits';
 import { PromptPasswordConfirmationParams } from '../screen/PromptPasswordConfirmationSheet.types';
 import { ElectrumServerItem } from '../screen/settings/ElectrumSettings';
@@ -34,7 +34,6 @@ export type DetailViewStackParamList = {
   WalletsList: { onBarScanned?: string };
   WalletTransactions: { isLoading?: boolean; walletID: string; walletType: string; walletNetwork?: string; onBarScanned?: string };
   WalletDetails: { walletID: string };
-  TransactionDetails: { tx: Transaction; hash: string; walletID: string };
   TransactionStatus: { hash: string; walletID?: string };
   SelectWallet: {
     chainType?: Chain;
@@ -45,15 +44,18 @@ export type DetailViewStackParamList = {
     /** Scrolls the picker to the wallet with this ID. */
     selectedWalletID?: string;
   };
-  IsItMyAddress: object;
   Broadcast: undefined;
-  GenerateWord: undefined;
   WalletAddresses: { walletID: string };
+  /** One address of the wallet, opened from its addresses. */
+  AddressDetails: { walletID: string; address: string; index: number; change: boolean };
+  WalletTransactionHistory: { walletID: string };
   AddWalletRoot: NavigatorScreenParams<AddWalletStackParamList> | undefined;
   SendNeurai: {
     walletID: string;
     address?: string;
     amount?: string;
+    /** Opens in asset mode with this asset chosen (from the assets list). */
+    assetName?: string;
     onBarScanned?: string;
   };
   ImportNeurai: undefined;
@@ -80,14 +82,13 @@ export type DetailViewStackParamList = {
   About: undefined;
   ElectrumSettings: { server?: ElectrumServerItem; onBarScanned?: string };
   SettingsBlockExplorer: undefined;
-  PlausibleDeniability: undefined;
   EncryptStorage: undefined;
   Language: undefined;
   NotificationSettings: undefined;
   SelfTest: undefined;
   ReleaseNotes: undefined;
-  SettingsTools: undefined;
   WalletXpub: { walletID: string; xpub: string };
+  HardwareBackupInfo: { walletID: string };
   ReceiveDetails: {
     walletID?: string;
     address: string;
@@ -101,5 +102,6 @@ export type DetailViewStackParamList = {
   };
   ScanQRCode: ScanQRCodeParamList;
   PromptPasswordConfirmationSheet: PromptPasswordConfirmationParams | undefined;
+  EncryptionUpgradeSheet: undefined;
   ManageWallets: undefined;
 };

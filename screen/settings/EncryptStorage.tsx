@@ -1,16 +1,26 @@
-import React, { useCallback, useEffect, useReducer } from 'react';
-import { Alert, Platform, StyleSheet, Text, View } from 'react-native';
-import ListItem from '../../components/ListItem';
-import { useTheme } from '../../components/themes';
-import { unlockWithBiometrics, useBiometrics } from '../../hooks/useBiometrics';
-import loc from '../../loc';
-import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
-import { useStorage } from '../../hooks/context/useStorage';
-import { MODAL_TYPES } from '../PromptPasswordConfirmationSheet.types';
-import { Header } from '../../components/Header';
+import React, { useCallback, useEffect, useReducer, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import SafeAreaScrollView from '../../components/SafeAreaScrollView';
-import { BlueSpacing20 } from '../../components/BlueSpacing';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import Icon from '../../components/Icon';
+import { securityScore } from '../../components/settings/securityScore';
+import {
+  biometricLabel,
+  SettingsCard,
+  SettingsRow,
+  SettingsScreenHeader,
+  SettingsSectionLabel,
+  SettingsSwitchRow,
+  useSettingsPalette,
+} from '../../components/settings/SettingsUI';
+import { useSettings } from '../../hooks/context/useSettings';
+import { useStorage } from '../../hooks/context/useStorage';
+import { unlockWithBiometrics, useBiometrics } from '../../hooks/useBiometrics';
+import { useExtendedNavigation } from '../../hooks/useExtendedNavigation';
+import loc from '../../loc';
+import { MODAL_TYPES } from '../PromptPasswordConfirmationSheet.types';
+import { appAlert } from '../../components/AppDialog';
 
 enum ActionType {
   SetLoading = 'SET_LOADING',
@@ -59,17 +69,15 @@ const reducer = (state: State, action: Action): State => {
 };
 
 const EncryptStorage = () => {
-  const { isStorageEncrypted } = useStorage();
+  const { isStorageEncrypted, canUpgradeEncryption } = useStorage();
+  const { isPrivacyBlurEnabled, setIsPrivacyBlurEnabled } = useSettings();
   const { isDeviceBiometricCapable, biometricEnabled, setBiometricUseEnabled, deviceBiometricType } = useBiometrics();
   const [state, dispatch] = useReducer(reducer, initialState);
+  // The summary waits for the first read, so it never shows a count that then jumps.
+  const [ready, setReady] = useState(false);
   const navigation = useExtendedNavigation();
-  const { colors } = useTheme();
-
-  const styleHooks = StyleSheet.create({
-    root: {
-      backgroundColor: colors.background,
-    },
-  });
+  const p = useSettingsPalette();
+  const insets = useSafeAreaInsets();
 
   const initializeState = useCallback(async () => {
     const isStorageEncryptedSwitchEnabled = await isStorageEncrypted();
@@ -77,6 +85,7 @@ const EncryptStorage = () => {
     dispatch({ type: ActionType.SetStorageEncryptedSwitch, payload: isStorageEncryptedSwitchEnabled });
     dispatch({ type: ActionType.SetDeviceBiometricCapable, payload: isDeviceBiometricCapableSync });
     dispatch({ type: ActionType.SetLoading, payload: false });
+    setReady(true);
   }, [isStorageEncrypted, isDeviceBiometricCapable]);
 
   useEffect(() => {
@@ -110,7 +119,7 @@ const EncryptStorage = () => {
         returnTo: 'EncryptStorage',
       });
     } else {
-      Alert.alert(
+      appAlert(
         loc.settings.encrypt_decrypt,
         loc.settings.encrypt_decrypt_q,
         [
@@ -143,70 +152,119 @@ const EncryptStorage = () => {
     }
   };
 
-  const navigateToPlausibleDeniability = () => {
-    navigation.navigate('PlausibleDeniability');
-  };
+  const encrypted = state.storageIsEncryptedSwitchEnabled;
+  const bioName = biometricLabel(deviceBiometricType);
+  const score = securityScore({
+    biometricsAvailable: state.deviceBiometricCapable,
+    biometricsOn: biometricEnabled,
+    encrypted,
+    screenshotsBlocked: isPrivacyBlurEnabled,
+  });
+  const scoreTitle = String(loc.formatString(loc.settings.security_score, { on: score.on, total: score.total }));
+  const scoreHint = score.full
+    ? loc.settings.security_hint_full
+    : !encrypted
+      ? loc.settings.security_hint_password
+      : loc.settings.security_hint_rest;
 
   return (
-    <SafeAreaScrollView>
-      <View style={styles.paddingTop} />
-      {state.deviceBiometricCapable && (
-        <>
-          <Header leftText={loc.settings.biometrics} />
-          <ListItem
-            title={loc.formatString(loc.settings.encrypt_use, { type: deviceBiometricType! })}
-            switch={{
-              value: biometricEnabled,
-              onValueChange: onUseBiometricSwitch,
-              disabled: state.currentLoadingSwitch !== null,
-            }}
-            isLoading={state.currentLoadingSwitch === 'biometric' && state.isLoading}
-            containerStyle={[styles.row, styleHooks.root]}
-            subtitle={
-              <>
-                <Text style={styles.subtitleText}>{loc.formatString(loc.settings.encrypt_use_expl, { type: deviceBiometricType! })}</Text>
-                {Platform.OS === 'android' && Platform.Version >= 30 && (
-                  <Text style={styles.subtitleText}>{loc.formatString(loc.settings.biometrics_fail, { type: deviceBiometricType! })}</Text>
-                )}
-              </>
-            }
-          />
-        </>
-      )}
-      <BlueSpacing20 />
-      <Header leftText={loc.settings.encrypt_tstorage} />
-      <ListItem
-        testID="EncyptedAndPasswordProtected"
-        title={loc.settings.encrypt_enc_and_pass}
-        switch={{
-          onValueChange: onEncryptStorageSwitch,
-          value: state.storageIsEncryptedSwitchEnabled,
-          disabled: state.currentLoadingSwitch !== null,
-          testID: 'EncyptedAndPasswordProtectedSwitch',
-        }}
-        isLoading={state.currentLoadingSwitch === 'encrypt' && state.isLoading}
-        containerStyle={[styles.row, styleHooks.root]}
-      />
-      {state.storageIsEncryptedSwitchEnabled && (
-        <ListItem
-          onPress={navigateToPlausibleDeniability}
-          title={loc.settings.plausible_deniability}
-          chevron
-          testID="PlausibleDeniabilityButton"
-          containerStyle={[styles.row, styleHooks.root]}
-        />
-      )}
-    </SafeAreaScrollView>
+    <View style={[styles.root, { backgroundColor: p.ground }]}>
+      <SettingsScreenHeader title={loc.settings.encrypt_title} onBack={() => navigation.goBack()} />
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
+        {ready && (
+          <SettingsCard style={styles.scoreCard}>
+            <View style={styles.scoreRow} accessible accessibilityLabel={`${scoreTitle}. ${scoreHint}`}>
+              <View style={[styles.scoreIcon, { backgroundColor: score.full ? p.ok.bg : p.warnBg }]}>
+                <Icon name="verified-user" type="material" size={28} color={score.full ? p.ok.dot : p.accentText} />
+              </View>
+              <View style={styles.scoreTexts}>
+                <Text style={[styles.scoreTitle, { color: p.ink }]}>{scoreTitle}</Text>
+                <Text style={[styles.scoreHint, { color: p.mutedOnCard }]}>{scoreHint}</Text>
+              </View>
+            </View>
+            <View style={styles.bars}>
+              {Array.from({ length: score.total }, (_, i) => (
+                <View key={i} style={[styles.bar, { backgroundColor: i < score.on ? (score.full ? p.ok.dot : p.accent) : p.switchOff }]} />
+              ))}
+            </View>
+          </SettingsCard>
+        )}
+
+        {state.deviceBiometricCapable && (
+          <View>
+            <SettingsSectionLabel>{loc.settings.biometrics}</SettingsSectionLabel>
+            <SettingsCard>
+              <SettingsSwitchRow
+                icon="fingerprint"
+                title={String(loc.formatString(loc.settings.encrypt_use, { type: bioName }))}
+                subtitle={loc.settings.security_bio_expl}
+                value={biometricEnabled}
+                onValueChange={onUseBiometricSwitch}
+                disabled={state.currentLoadingSwitch !== null}
+                loading={state.currentLoadingSwitch === 'biometric' && state.isLoading}
+              />
+            </SettingsCard>
+          </View>
+        )}
+
+        <View>
+          <SettingsSectionLabel>{loc.settings.encrypt_tstorage}</SettingsSectionLabel>
+          <SettingsCard>
+            <SettingsSwitchRow
+              icon="vpn-key"
+              title={loc.settings.encrypt_enc_and_pass}
+              badge={ready && !encrypted ? loc.settings.encrypt_recommended : undefined}
+              subtitle={loc.settings.encrypt_storage_expl}
+              value={encrypted}
+              onValueChange={onEncryptStorageSwitch}
+              disabled={state.currentLoadingSwitch !== null}
+              loading={state.currentLoadingSwitch === 'encrypt' && state.isLoading}
+              testID="EncyptedAndPasswordProtected"
+              switchTestID="EncyptedAndPasswordProtectedSwitch"
+            />
+            {ready && encrypted && canUpgradeEncryption() ? (
+              <SettingsRow
+                icon="enhanced-encryption"
+                title={loc.settings.encryption_upgrade_title}
+                subtitle={loc.settings.encryption_upgrade_row_subtitle}
+                badge={loc.settings.encrypt_recommended}
+                divider
+                onPress={() => navigation.navigate('EncryptionUpgradeSheet')}
+                testID="EncryptionUpgradeRow"
+              />
+            ) : null}
+          </SettingsCard>
+        </View>
+
+        <View>
+          <SettingsSectionLabel>{loc.settings.security_screen}</SettingsSectionLabel>
+          <SettingsCard>
+            <SettingsSwitchRow
+              icon="screenshot"
+              title={loc.settings.block_screenshots}
+              subtitle={loc.settings.block_screenshots_expl}
+              value={isPrivacyBlurEnabled}
+              onValueChange={setIsPrivacyBlurEnabled}
+              testID="BlockScreenshots"
+            />
+          </SettingsCard>
+        </View>
+      </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  paddingTop: { paddingTop: 19 },
-  row: { minHeight: 60 },
-  subtitleText: {
-    fontSize: 14,
-    marginTop: 5,
-  },
+  root: { flex: 1 },
+  content: { paddingHorizontal: 16, paddingTop: 8, rowGap: 18 },
+  scoreCard: { paddingVertical: 16, rowGap: 14 },
+  scoreRow: { flexDirection: 'row', alignItems: 'center', columnGap: 14 },
+  scoreIcon: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
+  scoreTexts: { flex: 1, rowGap: 3 },
+  scoreTitle: { fontSize: 17, fontWeight: '600' },
+  scoreHint: { fontSize: 13, lineHeight: 18 },
+  bars: { flexDirection: 'row', columnGap: 4 },
+  bar: { flex: 1, height: 6, borderRadius: 3 },
 });
 
 export default EncryptStorage;

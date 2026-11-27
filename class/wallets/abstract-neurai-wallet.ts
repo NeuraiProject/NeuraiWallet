@@ -14,9 +14,9 @@
 
 import { InteractionManager } from 'react-native';
 import NeuraiJsWallet from '@neuraiproject/neurai-jswallet';
-import NeuraiKey from '@neuraiproject/neurai-key';
+import NeuraiKey, { type HDKey } from '@neuraiproject/neurai-key';
 import { getHistory } from '@neuraiproject/neurai-history-list';
-import { parseRawSats, parseMoneySats, satsToXna, absSats, minSats, amountFromInput } from '../../blue_modules/neurai/amounts';
+import { parseRawSats, parseMoneySats, satsToXna, amountFromInput } from '../../blue_modules/neurai/amounts';
 import type { AddressDelta } from '../../blue_modules/neurai/NeuraiBackend';
 import {
   computeTxid,
@@ -44,12 +44,15 @@ import {
   WalletKind,
   chainFor,
   createDefaultBackend,
+  isOverridesLoaded,
+  loadOverrides,
   isKindAvailable,
   isTestnetChain,
   kindOfChain,
   type NeuraiBackend,
 } from '../../blue_modules/neurai';
 import type { AddressChangedEvent } from '../../blue_modules/neurai/WssBackend';
+import { walletIdV2 } from './wallet-id';
 import { emitWalletChanged } from '../../blue_modules/neurai/eventBus';
 import { LOCAL_FEE_RATE_RPC, LOCAL_FEE_RATE_XNA_PER_KB } from '../../blue_modules/neurai/feePolicy';
 import { estimateNeuraiFeeSats } from '../../blue_modules/neurai/feeEstimate';
@@ -66,25 +69,28 @@ import {
 import { accountXpub, type ConnectAccountXpub } from '../../blue_modules/neurai/connect/xpub';
 import { getAssetType, type NeuraiHeldAsset } from '../../blue_modules/neurai/assetUtils';
 import { AbstractWallet } from './abstract-wallet';
+import { chainedSendState, normalizeChainedSends, type ChainedSend, type ChainedSendState } from '../../blue_modules/neurai/chainedSends';
 import { Transaction, Utxo } from './types';
+import {
+  PENDING_TX_TTL_MS,
+  historyItemToTransaction,
+  pendingSendEntry,
+  prunePending,
+  unconfirmedWithPending,
+  withPendingFirst,
+  type HistoryItem,
+} from './neurai-history-projection';
 type IDelta = AddressDelta;
-type IHistoryItem = {
-  isSent: boolean;
-  fee: string;
-  assets: { assetName: string; satoshis: bigint; value: string }[];
-  blockHeight: number;
-  transactionId: string;
-};
+type IHistoryItem = HistoryItem;
 
 type NeuraiEngine = Awaited<ReturnType<typeof NeuraiJsWallet.createInstance>>;
+
+/** Receive and change branch nodes of an engine's HD tree, derived once its window first grows. Runtime only. */
+const branchNodes = new WeakMap<NeuraiEngine, [HDKey, HDKey]>();
 
 const decimalToSats = (value: DecimalAmount): bigint => decimalToSatoshis(value);
 const rawToSats = parseRawSats;
 const FEE_TARGET_BLOCKS = 6;
-/** A locally-tracked pending send times out after this long if it never
- * confirms (e.g. dropped or replaced in the mempool) so it stops subtracting
- * from the displayed balance forever. */
-const PENDING_TX_TTL_MS = 24 * 60 * 60 * 1000;
 const HISTORY_DELTA_BATCH_SIZE = 250;
 const HISTORY_ITEM_BATCH_SIZE = 100;
 const TX_CACHE_BATCH_SIZE = 100;
@@ -92,6 +98,47 @@ const TX_CACHE_BATCH_SIZE = 100;
 const CURRENT_TESTNET_GENESIS = CHAIN_PARAMS['xna-test'].expectedGenesisHash ?? '';
 /** Legacy P2PKH dust; other change types use {@link dustThresholdSats}. */
 const SEND_DUST_SATS = 546n;
+
+/** The private balance last read in a privacy pool, which the home shows until the pool is read again. */
+export interface PrivacyPoolSnapshot {
+  /** Pool instance (its commitment): another pool has other notes. */
+  pool: string;
+  /** Satoshis. */
+  balanceAtomic: string;
+  height: number;
+  /** When it was read (ms). */
+  at: number;
+}
+
+/** A reading this old is saved again even if the balance did not change, so "seen" stays close after a restart. */
+const PRIVACY_POOL_RESAVE_MS = 10 * 60 * 1000;
+
+/** One derived address as the addresses screen lists it. */
+export interface NeuraiAddressEntry {
+  address: string;
+  /** Derivation index within its branch. */
+  index: number;
+  /** On the change branch (Legacy and ECDSA; PQ wallets have one chain). */
+  change: boolean;
+}
+
+/** Most receive (and change) addresses the addresses screen derives on request. */
+export const MAX_LISTED_ADDRESSES = 100;
+
+/** Transaction ids per address in `deltas`, each once, in history order. */
+const txidsByAddress = (deltas: IDelta[]): Record<string, string[]> => {
+  const sets = new Map<string, Set<string>>();
+  for (const d of deltas) {
+    let txids = sets.get(d.address);
+    if (!txids) sets.set(d.address, (txids = new Set()));
+    txids.add(d.txid);
+  }
+  const out: Record<string, string[]> = {};
+  sets.forEach((txids, address) => {
+    out[address] = [...txids];
+  });
+  return out;
+};
 
 /** Minimal UTXO shape we need for selection / signing (matches engine `IUTXO`). */
 export interface SpendableUtxo {
@@ -281,6 +328,8 @@ export interface NeuraiBuildTransactionResult {
   /** Signed transaction that spends an output of `signedHex`, broadcast right
    * after it (silent payments from Legacy and PQ wallets). */
   chainedHex?: string;
+  /** With `chainedHex`: the ECDSA bridge address it spends from (H17 record). */
+  chainedBridge?: string;
   /** Unsigned raw transaction hex (pre-signature). */
   unsignedHex: string;
   /** Total fee in XNA full units. */
@@ -310,7 +359,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   network: NeuraiChainType;
   /** Optional BIP39 passphrase ("25th word"). Persisted. */
   passphrase: string;
-  /** Highest derivation index ever seen. Persisted; used to skip RPC scan. */
+  /** Highest derivation index the engine must reach on startup: raised when
+   * the addresses screen asks for more addresses, so they stay derived and
+   * watched in later sessions. Persisted. */
   addressPosition: number;
   /** Use only the first address, to receive and for the change (Legacy and
    * ECDSA; PQ wallets always do). The general setting can turn it on for
@@ -339,12 +390,24 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    * survives an app restart; reconciled away in `fetchTransactions` once the
    * real tx confirms, or after {@link PENDING_TX_TTL_MS}. */
   protected _pendingTxs: Transaction[];
+  /** Two-step silent payments not seen complete yet (H17). Persisted with the wallet. */
+  protected _chainedSends: ChainedSend[];
   /** Last `status` hash the server reported per subscribed address.
    * Persisted to disk so the next app launch can call `subscribe.bulk` and
    * skip the heavy refetch when nothing changed while the app was closed —
    * the server compares the cached value against its current state and only
    * pushes a synthetic address.changed for diffs. */
   protected _addressStatus: Record<string, string>;
+  /** Ids of the confirmed transactions that touched each own address, from
+   * the last history fetch: what tells a used address from a fresh one, and
+   * what the screen of one address lists. `null` until the first fetch that
+   * records them. Persisted. */
+  protected _addressTxids: Record<string, string[]> | null;
+  /** The private balance last read in the privacy pool. Persisted; forgotten with the identity. */
+  _privacyPool: PrivacyPoolSnapshot | null;
+  /** Mempool transactions the server pushed per address since (the history
+   * has only confirmed ones); dropped as they show up confirmed. Runtime only. */
+  private _pushedAddressTxids: Record<string, string[]>;
   /** Derivation indexes of the receive and the change address of a Legacy
    * or ECDSA wallet: the ones after the last that received. Persisted. */
   protected _receiveIndex: number;
@@ -383,7 +446,11 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._txCache = [];
     this._heldAssets = [];
     this._pendingTxs = [];
+    this._chainedSends = [];
     this._addressStatus = {};
+    this._addressTxids = null;
+    this._pushedAddressTxids = {};
+    this._privacyPool = null;
     this.singleAddress = false;
     this._receiveIndex = 0;
     this._changeIndex = 0;
@@ -407,6 +474,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     Object.defineProperty(this, '_unsubscribeBackendPush', { writable: true, enumerable: false, value: null });
     Object.defineProperty(this, '_pushFetchInFlight', { writable: true, enumerable: false, value: false });
     Object.defineProperty(this, '_pushFetchPending', { writable: true, enumerable: false, value: false });
+    Object.defineProperty(this, '_pushedAddressTxids', { writable: true, enumerable: false, value: {} });
   }
 
   /**
@@ -417,12 +485,15 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
    */
   static fromJson(obj: string): AbstractWallet {
     const wallet = super.fromJson(obj) as AbstractNeuraiWallet;
+    wallet._chainedSends = normalizeChainedSends(wallet._chainedSends);
     const persisted = (JSON.parse(obj) as { testnetGenesis?: unknown }).testnetGenesis;
     if (isTestnetChain(wallet.network) && persisted !== CURRENT_TESTNET_GENESIS) wallet.discardTestnetChainState();
     return wallet;
   }
 
   protected discardTestnetChainState(): void {
+    // Their transactions belong to the chain that was reset.
+    this._chainedSends = [];
     this.balance = 0n;
     this.unconfirmed_balance = 0n;
     this.addressPosition = 0;
@@ -438,6 +509,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._heldAssets = [];
     this._pendingTxs = [];
     this._addressStatus = {};
+    this._addressTxids = null;
+    this._pushedAddressTxids = {};
+    this._privacyPool = null;
     this.testnetGenesis = CURRENT_TESTNET_GENESIS;
   }
 
@@ -471,6 +545,9 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._changeIndex = 0;
     this._mainAddress = '';
     this._receiveAddress = '';
+    this._addressTxids = null;
+    this._pushedAddressTxids = {};
+    this._privacyPool = null;
   }
 
   getNetwork(): NeuraiChainType {
@@ -514,6 +591,16 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
 
   getPassphrase(): string {
     return this.passphrase;
+  }
+
+  /**
+   * Mainnet keeps the legacy ID byte for byte, so its per-wallet references
+   * stay valid. Testnet adds the chain: the same words there are another
+   * wallet, and sharing the mainnet ID made one of the two disappear on load.
+   */
+  getID(): string {
+    if (!isTestnetChain(this.network)) return this.getLegacyID();
+    return walletIdV2([this.type, this.network, this.getSecret(), this.getPassphrase() ?? '', this._derivationPath ?? '']);
   }
 
   protected _enforceChainKind(network: NeuraiChainType): void {
@@ -568,8 +655,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       passphrase: this.passphrase || undefined,
       network: this.getEngineNetwork(),
       offlineMode: true,
-      // Past the receive and the change address too.
-      minAmountOfAddresses: Math.max(1, this.addressPosition, this._receiveIndex + 1, this._changeIndex + 1),
+      // Past the receive and the change address too. The addresses screen's
+      // longer window is added below: the library derives each address from
+      // the root, three times slower.
+      minAmountOfAddresses: Math.max(1, this._receiveIndex + 1, this._changeIndex + 1),
       // NIP-040. Without an override jswallet asks the node per build
       // (`resolveAssetMarker`); the app already knows the answer, so it passes
       // it and saves the round trip. Same source as the local builds, so both
@@ -582,6 +671,8 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     // serialized outputs and calculates the exact fee. No node fee quote.
     engine.rpc = (method, params = []) =>
       method === 'estimatesmartfee' ? Promise.resolve({ feerate: LOCAL_FEE_RATE_RPC }) : this.getBackend().rpc(method, params);
+    if (this.canDeriveMoreAddresses() && engine.addressPosition <= this.addressPosition)
+      this._extendEngine(engine, this.addressPosition + 1);
     return engine;
   }
 
@@ -594,8 +685,18 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     this._wireBackendPushHandler();
   }
 
+  /**
+   * The wallet's backend, created on first use and kept. It is never created
+   * before the saved node overrides were read: a backend built then would talk
+   * to the default node for the rest of the session even though the user set
+   * their own (H19). Callers see a transient error and retry on the next refresh.
+   */
   getBackend(): NeuraiBackend {
     if (!this._backend) {
+      if (!isOverridesLoaded()) {
+        loadOverrides().catch(() => {});
+        throw new Error('The network settings are still loading. Try again in a moment.');
+      }
       this._backend = createDefaultBackend(this.getNeuraiNetwork(), this.walletKind);
       this._seedBackendStatuses();
       this._wireBackendPushHandler();
@@ -706,7 +807,10 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       const noDeltaInfo = !delta;
       // The history only has confirmed transactions: a payment still in the
       // mempool moves the receive or change address on here.
-      if (hasNewTxids) this._advanceAddresses([event.address]);
+      if (hasNewTxids) {
+        this._advanceAddresses([event.address]);
+        this._notePushedTxids(event.address, delta?.added_txids ?? []);
+      }
       if (!hasNewTxids && !noDeltaInfo) {
         // Balance was already applied above and nothing else needs fetching.
         emitWalletChanged(this.getID());
@@ -991,6 +1095,124 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     return this._engine ? this._engine.getAddresses() : [];
   }
 
+  /**
+   * The derived addresses with their branch and index, in derivation order:
+   * PQ wallets have one chain; Legacy and ECDSA interleave receive and change.
+   * Empty until {@link loadAddresses} brings the engine up.
+   */
+  getAddressEntries(): NeuraiAddressEntry[] {
+    const addresses = this.getCachedAddresses();
+    if (this.walletKind === 'pq') return addresses.map((address, index) => ({ address, index, change: false }));
+    return addresses.map((address, i) => ({ address, index: Math.floor(i / 2), change: i % 2 === 1 }));
+  }
+
+  /** Whether {@link loadAddresses} can derive past the current window. */
+  canDeriveMoreAddresses(): boolean {
+    return this.walletKind !== 'pq';
+  }
+
+  /**
+   * Brings up the addresses the addresses screen lists. A Legacy or ECDSA
+   * wallet also derives at least `perBranch` receive and change addresses (at
+   * most {@link MAX_LISTED_ADDRESSES}): its engine is rebuilt with the larger
+   * window, which later sessions keep, and the wallet watches the new
+   * addresses too, so a payment to any address it showed is seen.
+   */
+  async loadAddresses(perBranch = 0): Promise<void> {
+    const engine = await this.ensureEngine();
+    if (!this.canDeriveMoreAddresses()) return;
+    const want = Math.min(perBranch, MAX_LISTED_ADDRESSES);
+    if (this._externalAddresses(engine).length >= want) return;
+    this._extendEngine(engine, want);
+    this.addressPosition = Math.max(this.addressPosition, want - 1);
+    this._refetchInBackground();
+  }
+
+  /**
+   * Derives the positions `engine` lacks up to `positions` as its startup
+   * does (the receive then the change address of each), but from the branch
+   * nodes of its tree rather than the root, and only the new ones: a rebuild
+   * re-derives every address from the root, seconds per 20 positions on Hermes.
+   */
+  private _extendEngine(engine: NeuraiEngine, positions: number): void {
+    const keyNetwork = legacyKeyNetworkFor(this.network) ?? ecdsaKeyNetworkFor(this.network);
+    const first = engine.getAddressObjects()[0];
+    // The account the engine derives under, from its own first address: m/44'/1'/0'/0/0 → m/44'/1'/0'.
+    const account = first?.path.split('/').slice(0, -2).join('/');
+    if (!keyNetwork || !account || !this.secret) throw new Error('This wallet cannot derive more addresses');
+    let branches = branchNodes.get(engine);
+    if (!branches) {
+      const accountNode = NeuraiKey.getHDKey(keyNetwork, this.secret, this.passphrase).derive(account);
+      branches = [accountNode.deriveChild(0), accountNode.deriveChild(1)];
+      branchNodes.set(engine, branches);
+    }
+    for (let position = engine.addressPosition; position < positions; position++) {
+      for (const change of [0, 1] as const) {
+        const derived = NeuraiKey.getAddressByPath(keyNetwork, branches[change], `m/${position}`);
+        engine.addressObjects.push({ ...derived, path: `${account}/${change}/${position}`, keyType: first.keyType });
+      }
+      engine.addressPosition = position + 1;
+    }
+  }
+
+  /**
+   * Keeps the private balance the privacy tab just read in `pool`, for the
+   * home to show until the pool is read again. True when it is worth saving:
+   * another balance, or the saved reading is getting old.
+   */
+  notePrivacyPoolBalance(pool: string, balanceAtomic: string, height = 0): boolean {
+    const now = Date.now();
+    const last = this._privacyPool;
+    const worthSaving = !last || last.pool !== pool || last.balanceAtomic !== balanceAtomic || now - last.at > PRIVACY_POOL_RESAVE_MS;
+    this._privacyPool = { pool, balanceAtomic, height, at: now };
+    return worthSaving;
+  }
+
+  /** The private balance last read in `pool` and when, or null if it was never read on this device. */
+  getPrivacyPoolBalance(pool: string): { sats: bigint; at: number } | null {
+    const last = this._privacyPool;
+    if (!last || last.pool !== pool) return null;
+    try {
+      return { sats: parseRawSats(last.balanceAtomic), at: last.at };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Whether the transactions of each address are known: fetched at least once. */
+  addressActivityKnown(): boolean {
+    return this._addressTxids !== null;
+  }
+
+  /** Ids of the transactions that touched `address`: the confirmed ones, then any pushed from the mempool. */
+  getAddressTxids(address: string): string[] {
+    const confirmed = this._addressTxids?.[address] ?? [];
+    const pushed = this._pushedAddressTxids[address];
+    if (!pushed || pushed.length === 0) return confirmed;
+    return [...confirmed, ...pushed.filter(txid => !confirmed.includes(txid))];
+  }
+
+  /** Whether `address` has received or spent anything. */
+  isAddressUsed(address: string): boolean {
+    return this.getAddressTxids(address).length > 0;
+  }
+
+  private _notePushedTxids(address: string, txids: string[]): void {
+    const known = this._pushedAddressTxids[address] ?? [];
+    this._pushedAddressTxids[address] = [...known, ...txids.filter(txid => !known.includes(txid))];
+  }
+
+  /** Records the transactions of each address from a history fetch, and drops the pushed ones it now confirms. */
+  private _recordAddressTxids(deltas: IDelta[]): void {
+    const confirmed = txidsByAddress(deltas);
+    this._addressTxids = confirmed;
+    for (const [address, txids] of Object.entries(this._pushedAddressTxids)) {
+      const left = txids.filter(txid => !confirmed[address]?.includes(txid));
+      if (left.length > 0) this._pushedAddressTxids[address] = left;
+      else delete this._pushedAddressTxids[address];
+    }
+  }
+
   getAllExternalAddresses(): string[] {
     // The engine bootstraps lazily (first Send/Receive), so until then answer
     // from the addresses the previous session subscribed to. Push
@@ -1255,6 +1477,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     }
     this._historyItems = items;
     this._txCache = txCache;
+    this._recordAddressTxids(rawDeltas);
     this._advanceAddresses(rawDeltas.map(d => d.address));
     // Reconcile optimistic pending sends against the fresh history: drop any
     // that have now confirmed (or aged out).
@@ -1310,30 +1533,19 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     emitWalletChanged(this.getID());
   }
 
+  /** Pending sends first, then the history; see `neurai-history-projection.ts`. */
   getTransactions(): Transaction[] {
     this._prunePendingTxs();
-    if (this._pendingTxs.length === 0) return this._txCache;
-    // Hide a pending entry once the backend surfaces the same txid (0-conf or
-    // confirmed) so the list never shows a duplicate row for one transaction.
-    const cached = new Set(this._txCache.map(t => t.txid));
-    const stillPending = this._pendingTxs.filter(t => !cached.has(t.txid));
-    if (stillPending.length === 0) return this._txCache;
-    return [...stillPending, ...this._txCache];
+    return withPendingFirst(this._pendingTxs, this._txCache);
   }
 
+  /**
+   * Pending sends keep subtracting until they confirm: the backend's confirmed
+   * balance does not drop until the transaction is mined.
+   */
   getUnconfirmedBalance(): bigint {
     this._prunePendingTxs();
-    // Pending sends keep subtracting from the balance until they CONFIRM: the
-    // backend's confirmed balance does not drop until the tx is mined, so the
-    // deduction must persist through the mempool / 0-conf window.
-    const pendingDelta = this._pendingTxs.filter(t => !this._isConfirmedInCache(t.txid)).reduce((sum, t) => sum + (t.value ?? 0n), 0n);
-    if (pendingDelta < 0) {
-      // Take the most-negative of the local delta and any server-reported
-      // unconfirmed value so the same spend is never counted twice (the PQ
-      // push path may already reflect it in `unconfirmed_balance`).
-      return minSats(this.unconfirmed_balance, pendingDelta);
-    }
-    return this.unconfirmed_balance;
+    return unconfirmedWithPending(this.unconfirmed_balance, this._pendingTxs, this._txCache);
   }
 
   /**
@@ -1349,38 +1561,58 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
   addPendingTx(txid: string, valueSats: bigint, asset?: { name: string; amount: string }): void {
     if (!txid || this._pendingTxs.some(t => t.txid === txid)) return;
     const nowSec = Math.floor(Date.now() / 1000);
-    this._pendingTxs.unshift({
-      txid,
-      hash: txid,
-      version: 0,
-      size: 0,
-      vsize: 0,
-      weight: 0,
-      locktime: 0,
-      inputs: [],
-      outputs: [],
-      blockhash: '',
-      confirmations: 0,
-      time: nowSec,
-      blocktime: nowSec,
-      timestamp: nowSec,
-      value: valueSats,
-      assetName: asset?.name,
-      // Pending entries are always outgoing sends → negative asset amount.
-      assetAmount: asset ? satsToXna(-absSats(decimalToSats(asset.amount))) : undefined,
-    });
+    const pendingAsset = asset ? { name: asset.name, amountSats: decimalToSats(asset.amount) } : undefined;
+    this._pendingTxs.unshift(pendingSendEntry(txid, valueSats, nowSec, pendingAsset));
     emitWalletChanged(this.getID());
   }
 
-  private _isConfirmedInCache(txid: string): boolean {
-    return this._txCache.some(t => t.txid === txid && t.confirmations > 0);
+  /** Two-step silent payments recorded before sending and not seen complete yet (H17). */
+  getChainedSends(): readonly ChainedSend[] {
+    return this._chainedSends;
+  }
+
+  recordChainedSend(send: ChainedSend): void {
+    if (this._chainedSends.some(s => s.firstTxid === send.firstTxid)) return;
+    this._chainedSends = [...this._chainedSends, send];
+    emitWalletChanged(this.getID());
+  }
+
+  forgetChainedSend(firstTxid: string): void {
+    const kept = this._chainedSends.filter(s => s.firstTxid !== firstTxid);
+    if (kept.length === this._chainedSends.length) return;
+    this._chainedSends = kept;
+    emitWalletChanged(this.getID());
+  }
+
+  /**
+   * What the network has seen of each recorded payment, from its bridge
+   * address (history and mempool): both transactions touch that address, and
+   * it is not one the wallet itself watches.
+   */
+  async chainedSendStates(): Promise<Map<string, ChainedSendState>> {
+    const states = new Map<string, ChainedSendState>();
+    const backend = this.getBackend();
+    for (const send of this._chainedSends) {
+      const [history, mempool] = await Promise.all([backend.getAddressHistory([send.bridge]), backend.getMempool([send.bridge])]);
+      const txids = new Set<string>([...history.map(d => d.txid), ...mempool.map(m => m.txid)]);
+      states.set(send.firstTxid, chainedSendState(send, txids));
+    }
+    return states;
+  }
+
+  /** Forgets the payments the network shows complete. True when something was forgotten. */
+  async reconcileChainedSends(): Promise<boolean> {
+    if (this._chainedSends.length === 0) return false;
+    const states = await this.chainedSendStates();
+    const before = this._chainedSends.length;
+    for (const [firstTxid, state] of states) if (state === 'done') this.forgetChainedSend(firstTxid);
+    return this._chainedSends.length !== before;
   }
 
   /** Drop pending entries that have CONFIRMED in the cache or aged out (TTL). */
   private _prunePendingTxs(): void {
     if (this._pendingTxs.length === 0) return;
-    const cutoffSec = Math.floor((Date.now() - PENDING_TX_TTL_MS) / 1000);
-    this._pendingTxs = this._pendingTxs.filter(t => !this._isConfirmedInCache(t.txid) && t.timestamp >= cutoffSec);
+    this._pendingTxs = prunePending(this._pendingTxs, this._txCache, Math.floor((Date.now() - PENDING_TX_TTL_MS) / 1000));
   }
 
   /** Raw history items as returned by `@neuraiproject/neurai-history-list`. */
@@ -1775,6 +2007,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
       signedHex: first.signedHex,
       unsignedHex: first.unsignedHex,
       chainedHex: second.signedHex,
+      chainedBridge: bridgeAddress,
       feeSats: first.feeSats + secondFeeSats,
       sentAmountSats: amountSats,
       netDebitSats: first.netDebitSats,
@@ -2113,39 +2346,7 @@ export abstract class AbstractNeuraiWallet extends AbstractWallet {
     blockTimes: Record<number, number>,
     tipHeight: number,
   ): Transaction {
-    const xnaAsset = item.assets.find(a => a.assetName === 'XNA');
-    const value = xnaAsset ? rawToSats(xnaAsset.satoshis) : 0n;
-    // Real confirmation depth = tip − block + 1 (a tx in the tip block has 1).
-    // Falls back to 1 when the tip is unknown (getTipHeight failed → 0) or the
-    // cached tip lags behind the tx's block.
-    const confirmations = item.blockHeight > 0 ? Math.max(1, tipHeight - item.blockHeight + 1) : 0;
-    // A transaction that moves a Neurai asset (token) carries a non-XNA entry;
-    // surface its name and signed amount so the list can render it as an asset
-    // movement (e.g. "Sent · 100 FOO") rather than a plain XNA row.
-    const nonXnaAsset = item.assets.find(a => a.assetName !== 'XNA');
-    // Mempool txs (height 0) get the current wall clock so the UI shows
-    // "just now" instead of 1970. Confirmed txs use the block header time.
-    const nowSec = Math.floor(Date.now() / 1000);
-    const time = item.blockHeight > 0 ? (blockTimes[item.blockHeight] ?? nowSec) : nowSec;
-    return {
-      txid: item.transactionId,
-      hash: item.transactionId,
-      version: 0,
-      size: 0,
-      vsize: 0,
-      weight: 0,
-      locktime: 0,
-      inputs: [],
-      outputs: [],
-      blockhash: '',
-      confirmations,
-      time,
-      blocktime: time,
-      timestamp: time,
-      value: item.isSent ? -absSats(value) : absSats(value),
-      assetName: nonXnaAsset?.assetName,
-      assetAmount: nonXnaAsset?.value,
-    };
+    return historyItemToTransaction(item, blockTimes, tipHeight, Math.floor(Date.now() / 1000));
   }
 
   // ---------- AbstractWallet `allow*` overrides ------------------------------------

@@ -55,12 +55,7 @@
     "sats": "ساتۊشی پرداخت بکو.",
     "wasnt_paid_and_expired": "اؽ سۊرت هساو پرداخت نبیه ۉ مونقزی بیه."
   },
-  "plausibledeniability": {
-    "password_should_not_match": "رزم ها و کار مؽره. ی رزم هنی ن و کار بیر."
-  },
   "pleasebackup": {
-    "ask_no": "ن، م نارم.",
-    "ask_yes": "ٱ، مه دارم."
   },
   "receive": {
     "details_setAmount": "گرؽتن وا مقدار",
@@ -69,7 +64,6 @@
   },
   "send": {
     "broadcastError": "ختا",
-    "broadcastSuccess": "مۏوفق بی",
     "confirm_header": "تایید",
     "confirm_sendNow": "هه ایسه کلٛ بکو",
     "create_amount": "مقدار",
@@ -127,15 +121,12 @@
     "tools": "اوزاریا"
   },
   "transactions": {
-    "copy_link": "لٛف گری لینگ",
     "details_copy": "لٛف گری",
     "date": "ویرگار",
-    "details_received": "گرته بیه",
     "details_title": "تراکونش",
     "list_title": "تراکونشیا",
     "list_title_received": "گرته بیه",
-    "transaction": "تراکونش",
-    "open_url_error": "نا مووفق د واز کردن لینگ وا گشت گر پؽش فرز. گشت گر پؽش فرز خوته آلشت کوݩ ۉ د نۊ تفره بکوݩ."
+    "transaction": "تراکونش"
   },
   "wallets": {
     "add_entropy": "آنتروپی",
@@ -160,7 +151,6 @@
     "import_do_import": "و مؽن اووردن",
     "import_passphrase": "پس فریز (Passphrase)",
     "import_passphrase_title": "پس فریز (Passphrase)",
-    "import_imported": "و مؽن اوما",
     "import_scan_qr": "اسکن یا و مؽن اووردن فایل",
     "import_success": "کیف پیلٛ شما وا مووفقیت و مؽن اوما.",
     "import_title": "و مؽن اووردن",

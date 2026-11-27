@@ -75,16 +75,7 @@
     "date_time": "ویرگار وو زمووݩ",
     "wasnt_paid_and_expired": "ای سۊرت هساو پرداخت نوابیڌه ۉ مونقزی وابیڌه."
   },
-  "plausibledeniability": {
-    "create_fake_storage": "وورکل جاگه رزم ناڌه وابیڌه سی زفت کردن",
-    "create_password_explanation": "رزمی ک سی جاگه زفت کردنی جعلی هڌ، نوا وا رزم جاگه زفت کردنی ٱلسی ی جۊر بۊ.",
-    "help2": "جاگه زفت کردنی نۊ قلوه و کار ایا وو ایسا ترین یتی ز دارایی خوتۉݩ ن اۊچنا واڌارنین تا ب تؽ بیا ک هونی زس استفاڌه اکۊنین.",
-    "password_should_not_match": "رزم هونی ب کار اروه. ی رزم دیری ن ب کار بگر.",
-    "title": "انکار مووجه"
-  },
   "pleasebackup": {
-    "ask_no": "ن، مو نڌاروم.",
-    "ask_yes": "هری، مو داروم.",
     "ok": "خا، هو ن هؽل کردوم.",
     "ok_lnd": "خا، هو ن زفت کردوم.",
     "title": "کیف پیل ایسا وورکل وابی."
@@ -109,7 +100,6 @@
     "broadcastError": "ختا",
     "broadcastNone": "هگزادسیمال تراکونش ن بزن",
     "broadcastPending": "مندیر سی زفت",
-    "broadcastSuccess": "سر ٱنجوم گرهڌ",
     "confirm_header": "تاییڌ",
     "confirm_sendNow": "هیم سکو بفشن",
     "create_amount": "مقدار",
@@ -147,7 +137,6 @@
     "details_next": "نیایی",
     "details_no_signed_tx": "فایل پسند بیڌه، تراکونشی منس نؽڌ ک ترسته بویم ب من یاریمس.",
     "details_note_placeholder": "ویرداشت و خوت",
-    "counterparty_label_placeholder": "آلشت نوم هومدنگ",
     "details_scan": "اسکن",
     "details_scan_hint": "سی اسکن یا و من ٱووردن مقسد، دو کرت بزن ریس",
     "details_scan_error": "ختا اسکن",
@@ -253,7 +242,6 @@
     "notifications": "وارسۊویا",
     "open_link_in_explorer": "گۊشیڌن لینگ من گشت گر",
     "password": "رزم",
-    "plausible_deniability": "انکار موجه",
     "privacy": "سی خومی",
     "privacy_read_clipboard": "خوندن ویرگه",
     "privacy_system_settings": "سامووا دسگا",
@@ -268,8 +256,6 @@
   },
   "transactions": {
     "cancel_title": "ای تراکونشن لقو کوݩ (RBF)",
-    "confirmations_lowercase": "{confirmations} تاییڌ",
-    "copy_link": "لف گیری لینگ",
     "expand_note": "نشۉݩ داڌن کامل ویرداشت",
     "cpfp_create": "وورکل",
     "cpfp_no_bump": "ای تراکونش نتره کارمزدس بیشتر بۊ.",
@@ -280,14 +266,12 @@
     "details_copy_block_explorer_link": "لف گیری لینگ گشت گر بلاک",
     "details_copy_note": "لف گیری ویرداشت",
     "date": "ویرگار",
-    "details_received": "گرؽڌه وابیڌه",
     "details_title": "تراکونش",
     "offchain": "آفچین",
     "onchain": "آنچین",
     "pending": "مندیر سی زفت",
     "list_title_received": "گرؽڌه وابیڌه",
-    "transaction": "تراکونش",
-    "open_url_error": "نا مووفق منه گۊشیڌن لینگ وا گشت گر پؽش فرز. گشت گر پؽش فرز خوته آلشت کوݩ ۉ ز نۊ تفره کو."
+    "transaction": "تراکونش"
   },
   "wallets": {
     "add_create": "وورکل",
@@ -316,7 +300,6 @@
     "import_passphrase_title": "پس فریز (Passphrase)",
     "import_passphrase_message": "ٱر پس فریز (Passphrase) ن و کار گرؽڌینه، هونه بزنین",
     "import_error": "و من ٱووردن نا مووفق بی. ز زبال بیڌن داده داڌه وابیڌه موتمعن بۊین.",
-    "import_imported": "و من ٱووڌ",
     "import_scan_qr": "اسکن یا و من ٱووردن فایل",
     "import_success": "کیف پیل ایسا وا مووفقیت و من ٱووڌ.",
     "import_search_accounts": "پیتینیڌن هساوا",

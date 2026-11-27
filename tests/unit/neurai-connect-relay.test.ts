@@ -69,7 +69,8 @@ jest.mock('react-native-secure-key-store', () => ({
   default: {
     set: jest.fn(async () => {}),
     get: jest.fn(async () => {
-      throw new Error('empty');
+      // A missing key, as react-native-secure-key-store reports it.
+      throw Object.assign(new Error('empty'), { code: '404' });
     }),
     remove: jest.fn(async () => {}),
   },
@@ -125,6 +126,13 @@ describe('changeRelay', () => {
     await changeRelay(OTHER_RELAY);
     expect(getRelayUrl()).toBe(OTHER_RELAY);
     expect(getRelayUrlOverride()).toBe(OTHER_RELAY);
+  });
+
+  it('takes the default typed in again as the default, not as a custom relay', async () => {
+    await changeRelay(OTHER_RELAY);
+    await changeRelay(`${DEFAULT_RELAY_URL}/`);
+    expect(getRelayUrl()).toBe(DEFAULT_RELAY_URL);
+    expect(getRelayUrlOverride()).toBeUndefined();
   });
 
   it('restores the default relay', async () => {
@@ -239,6 +247,13 @@ describe('a code for another relay', () => {
 
     await expect(pairWithUri(uriFor(OTHER_RELAY))).rejects.toThrow(/still has connections/);
     expect(getRelayUrl()).toBe(DEFAULT_RELAY_URL);
+  });
+
+  it('goes back to the default, not to a custom copy of it, when a code brings the default relay', async () => {
+    await changeRelay(OTHER_RELAY);
+    await pairWithUri(uriFor(DEFAULT_RELAY_URL));
+    expect(getRelayUrl()).toBe(DEFAULT_RELAY_URL);
+    expect(getRelayUrlOverride()).toBeUndefined();
   });
 
   it('moves the wallet to the relay in the code when nothing is in the way', async () => {

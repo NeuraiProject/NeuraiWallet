@@ -1,10 +1,18 @@
+/**
+ * The menu of a token chat, sliding in from the left: the general channel and
+ * the private conversations (with what was said last and how much is unread),
+ * the token holders a private conversation can be started with, and the
+ * chat's options — its info, the DePIN server and leaving the channel.
+ */
 import React, { useMemo } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { PrivateConversation, RecipientInfo } from '../../hooks/useDePINChat';
 import loc from '../../loc';
 import Icon from '../Icon';
-import { shortAddr } from './utils';
+import { SettingsCard, SettingsRow, SettingsSectionLabel, useSettingsPalette } from '../settings/SettingsUI';
+import { addressTag, RoundIconButton, SenderAvatar, UnreadBadge } from './DepinUI';
 
 interface DepinChatContactsDrawerProps {
   activeTab: string;
@@ -16,9 +24,58 @@ interface DepinChatContactsDrawerProps {
   identityAddress: string;
   privateTabs: PrivateConversation[];
   selectConversation: (address: string) => void;
-  stylesHook: any;
+  selectedAsset: string;
   visible: boolean;
+  onOpenInfo: () => void;
+  onOpenServer: () => void;
+  /** Back to the token list. */
+  onLeave: () => void;
 }
+
+const DRAWER_WIDTH = 320;
+
+const ConversationRow: React.FC<{
+  avatar: React.ReactNode;
+  title: string;
+  subtitle?: string;
+  unread?: number;
+  selected?: boolean;
+  divider?: boolean;
+  onPress: () => void;
+  testID?: string;
+}> = ({ avatar, title, subtitle, unread = 0, selected, divider, onPress, testID }) => {
+  const p = useSettingsPalette();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: !!selected }}
+      accessibilityLabel={[title, subtitle, unread > 0 ? (loc.formatString(loc.depin.unread_count, { count: unread }) as string) : '']
+        .filter(Boolean)
+        .join(', ')}
+      testID={testID}
+      style={({ pressed }) => [
+        styles.row,
+        divider && { borderTopWidth: StyleSheet.hairlineWidth * 2, borderTopColor: p.divider },
+        selected && { backgroundColor: p.selectedBg },
+        pressed && styles.pressed,
+      ]}
+    >
+      {avatar}
+      <View style={styles.texts}>
+        <Text style={[styles.rowTitle, { color: p.ink }, unread > 0 && styles.rowTitleUnread]} numberOfLines={1}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={[styles.subtitle, { color: p.mutedOnCard }]} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+      {unread > 0 ? <UnreadBadge count={unread} /> : selected ? <Icon name="check" type="material" size={20} color={p.accentText} /> : null}
+    </Pressable>
+  );
+};
 
 const DepinChatContactsDrawer = ({
   activeTab,
@@ -29,104 +86,153 @@ const DepinChatContactsDrawer = ({
   identityAddress,
   privateTabs,
   selectConversation,
-  stylesHook,
+  selectedAsset,
   visible,
+  onOpenInfo,
+  onOpenServer,
+  onLeave,
 }: DepinChatContactsDrawerProps) => {
+  const p = useSettingsPalette();
+  const insets = useSafeAreaInsets();
   const drawerTranslateX = useMemo(() => drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [-DRAWER_WIDTH, 0] }), [drawerAnim]);
 
   if (!visible) return null;
 
-  return (
-    <View style={styles.drawerOverlay}>
-      <Animated.View style={[styles.drawerBackdrop, { opacity: drawerAnim }]}>
-        <Pressable style={styles.flex} onPress={closeDrawer} accessibilityLabel={loc.depin.info_close} />
-      </Animated.View>
-      <Animated.View style={[styles.drawer, stylesHook.card, { transform: [{ translateX: drawerTranslateX }] }]}>
-        <View style={styles.drawerHeader}>
-          <Text style={[styles.title, stylesHook.text]}>{loc.depin.contacts_title}</Text>
-          <Pressable onPress={closeDrawer} style={styles.gear} testID="DepinContactsClose">
-            <Icon name="close" type="material" size={22} color={stylesHook.subtext.color} />
-          </Pressable>
-        </View>
-        <ScrollView>
-          <Pressable
-            onPress={() => selectConversation('group')}
-            style={[styles.drawerItem, activeTab === 'group' && stylesHook.chipActive]}
-            testID="DepinDrawerGroup"
-          >
-            <View style={[styles.drawerAvatar, stylesHook.chip]}>
-              <Icon name="groups" type="material" size={20} color={stylesHook.text.color} />
-            </View>
-            <View style={styles.drawerItemInfo}>
-              <Text style={[styles.drawerItemName, stylesHook.text]}>{loc.depin.tab_group}</Text>
-              <Text style={[styles.drawerItemSub, stylesHook.subtext]}>{loc.depin.contacts_everyone}</Text>
-            </View>
-            {groupUnread > 0 && <View style={styles.unreadDot} />}
-          </Pressable>
+  // Options close the menu first, so what they open is not left under it.
+  const then = (action: () => void) => () => {
+    closeDrawer();
+    action();
+  };
+  const nameOf = (address: string) => (address === identityAddress ? loc.depin.contacts_me : addressTag(address));
+  const lastLine = (conversation: PrivateConversation) => {
+    const last = conversation.messages[conversation.messages.length - 1];
+    if (!last) return loc.depin.private_chat;
+    return last.sender === identityAddress ? `${loc.depin.you}: ${last.message}` : last.message;
+  };
 
-          {privateTabs.map(conversation => (
-            <Pressable
-              key={conversation.address}
-              onPress={() => selectConversation(conversation.address)}
-              style={[styles.drawerItem, activeTab === conversation.address && stylesHook.chipActive]}
-            >
-              <View style={[styles.drawerAvatar, stylesHook.chip]}>
-                <Text style={[styles.msgAvatarText, stylesHook.chipText]}>{conversation.address.slice(-4)}</Text>
-              </View>
-              <View style={styles.drawerItemInfo}>
-                <Text style={[styles.drawerItemName, stylesHook.text]}>{conversation.displayName}</Text>
-                <Text style={[styles.drawerItemSub, stylesHook.subtext]}>{shortAddr(conversation.address)}</Text>
-              </View>
-              {conversation.unreadCount > 0 && <View style={styles.unreadDot} />}
-            </Pressable>
-          ))}
+  return (
+    <View style={styles.overlay}>
+      <Animated.View style={[styles.backdrop, { opacity: drawerAnim }]}>
+        <Pressable style={styles.flex} onPress={closeDrawer} accessibilityRole="button" accessibilityLabel={loc._.close} />
+      </Animated.View>
+      <Animated.View
+        style={[styles.drawer, { backgroundColor: p.ground, transform: [{ translateX: drawerTranslateX }] }]}
+        accessibilityViewIsModal
+      >
+        <View style={styles.header}>
+          <View style={styles.headerTexts}>
+            <Text style={[styles.kicker, { color: p.muted }]}>{loc.depin.tab_chat}</Text>
+            <Text style={[styles.title, { color: p.ink }]} accessibilityRole="header" numberOfLines={1}>
+              {selectedAsset}
+            </Text>
+          </View>
+          <RoundIconButton icon="close" label={loc._.close} onPress={closeDrawer} testID="DepinContactsClose" />
+        </View>
+        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 16 }]} showsVerticalScrollIndicator={false}>
+          <View>
+            <SettingsSectionLabel>{loc.depin.chats_label}</SettingsSectionLabel>
+            <SettingsCard style={styles.card}>
+              <ConversationRow
+                avatar={
+                  <View style={[styles.groupAvatar, { backgroundColor: p.accentSoft }]}>
+                    <Icon name="tag" type="material" size={22} color={p.accentText} />
+                  </View>
+                }
+                title={loc.depin.channel_general}
+                subtitle={loc.formatString(loc.depin.group_subtitle, { token: selectedAsset }) as string}
+                unread={groupUnread}
+                selected={activeTab === 'group'}
+                onPress={() => selectConversation('group')}
+                testID="DepinDrawerGroup"
+              />
+              {privateTabs.map(conversation => (
+                <ConversationRow
+                  key={conversation.address}
+                  avatar={<SenderAvatar address={conversation.address} size={40} me={conversation.address === identityAddress} />}
+                  title={nameOf(conversation.address)}
+                  subtitle={lastLine(conversation)}
+                  unread={conversation.unreadCount}
+                  selected={activeTab === conversation.address}
+                  divider
+                  onPress={() => selectConversation(conversation.address)}
+                  testID={`DepinDrawerPrivate-${conversation.address}`}
+                />
+              ))}
+            </SettingsCard>
+          </View>
 
           {holderContacts.length > 0 && (
-            <>
-              <Text style={[styles.drawerSection, stylesHook.subtext]}>{loc.depin.contacts_title}</Text>
-              {holderContacts.map(contact => (
-                <Pressable key={contact.address} onPress={() => selectConversation(contact.address)} style={styles.drawerItem}>
-                  <View style={[styles.drawerAvatar, stylesHook.chip]}>
-                    {contact.address === identityAddress ? (
-                      <Icon name="star" type="material" size={18} color="#f59e0b" />
-                    ) : (
-                      <Text style={[styles.msgAvatarText, stylesHook.chipText]}>{contact.address.slice(-4)}</Text>
-                    )}
-                  </View>
-                  <View style={styles.drawerItemInfo}>
-                    <Text style={[styles.drawerItemName, stylesHook.text]}>
-                      {contact.address === identityAddress ? loc.depin.contacts_me : shortAddr(contact.address)}
-                    </Text>
-                  </View>
-                </Pressable>
-              ))}
-            </>
+            <View>
+              <SettingsSectionLabel>{loc.depin.holders_label}</SettingsSectionLabel>
+              <SettingsCard style={styles.card}>
+                {holderContacts.map((contact, index) => (
+                  <ConversationRow
+                    key={contact.address}
+                    avatar={<SenderAvatar address={contact.address} size={40} me={contact.address === identityAddress} />}
+                    title={nameOf(contact.address)}
+                    subtitle={contact.address === identityAddress ? loc.depin.notes_subtitle : loc.depin.start_private}
+                    divider={index > 0}
+                    onPress={() => selectConversation(contact.address)}
+                    testID={`DepinDrawerHolder-${contact.address}`}
+                  />
+                ))}
+              </SettingsCard>
+            </View>
           )}
+
+          <View>
+            <SettingsSectionLabel>{loc.depin.options_label}</SettingsSectionLabel>
+            <SettingsCard>
+              <SettingsRow icon="info-outline" title={loc.depin.info_title} onPress={then(onOpenInfo)} testID="DepinMenuInfo" />
+              <SettingsRow icon="dns" title={loc.depin.server_title} onPress={then(onOpenServer)} divider testID="DepinMenuServer" />
+              <SettingsRow
+                icon="logout"
+                title={loc.formatString(loc.depin.leave_channel, { token: selectedAsset }) as string}
+                subtitle={loc.depin.leave_channel_hint}
+                onPress={then(onLeave)}
+                divider
+                testID="DepinMenuLeave"
+              />
+            </SettingsCard>
+          </View>
         </ScrollView>
       </Animated.View>
     </View>
   );
 };
 
-const DRAWER_WIDTH = 280;
-
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  gear: { padding: 8 },
-  title: { fontSize: 18, fontWeight: '700' },
-  msgAvatarText: { fontSize: 10, fontWeight: '700' },
-  drawerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10 },
-  drawerBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.45)' },
-  drawer: { width: DRAWER_WIDTH, height: '100%', borderRightWidth: 1, borderTopRightRadius: 14, borderBottomRightRadius: 14 },
-  drawerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10 },
-  drawerItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, columnGap: 12 },
-  drawerAvatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  drawerItemInfo: { flex: 1 },
-  // Same green marker as the contacts button, so the two read as one signal.
-  unreadDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#22c55e' },
-  drawerItemName: { fontSize: 14, fontWeight: '600' },
-  drawerItemSub: { fontSize: 12, marginTop: 1 },
-  drawerSection: { fontSize: 12, fontWeight: '700', paddingHorizontal: 14, paddingTop: 14, paddingBottom: 4, textTransform: 'uppercase' },
+  pressed: { opacity: 0.6 },
+  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10 },
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.45)' },
+  drawer: {
+    width: DRAWER_WIDTH,
+    maxWidth: '88%',
+    height: '100%',
+    borderTopRightRadius: 24,
+    borderBottomRightRadius: 24,
+    overflow: 'hidden',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 8,
+  },
+  headerTexts: { flex: 1, rowGap: 1 },
+  kicker: { fontSize: 12, fontWeight: '600', letterSpacing: 0.6, textTransform: 'uppercase' },
+  title: { fontSize: 22, fontWeight: '700', letterSpacing: -0.3 },
+  content: { paddingHorizontal: 12, paddingTop: 8, rowGap: 20 },
+  card: { paddingHorizontal: 0, overflow: 'hidden' },
+  row: { flexDirection: 'row', alignItems: 'center', columnGap: 12, minHeight: 64, paddingVertical: 10, paddingHorizontal: 14 },
+  groupAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  texts: { flex: 1, rowGap: 2 },
+  rowTitle: { fontSize: 15, fontWeight: '600' },
+  rowTitleUnread: { fontWeight: '800' },
+  subtitle: { fontSize: 13, lineHeight: 18 },
 });
 
 export default DepinChatContactsDrawer;
